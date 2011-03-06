@@ -67,6 +67,7 @@ config NEXT3_FS_POSIX_ACL
 	bool "Next3 POSIX Access Control Lists"
 	depends on NEXT3_FS_XATTR
 	depends on FS_POSIX_ACL
+	default y
 	help
 	  Posix Access Control Lists (ACLs) support permissions for users and
 	  groups beyond the owner/group/world scheme.
@@ -79,6 +80,7 @@ config NEXT3_FS_POSIX_ACL
 config NEXT3_FS_SECURITY
 	bool "Next3 Security Labels"
 	depends on NEXT3_FS_XATTR
+	default y
 	help
 	  Security labels support alternative access control models
 	  implemented by security modules like SELinux.  This option

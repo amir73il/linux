@@ -110,9 +110,8 @@ ext4_snapshot_complete_cow(handle_t *handle, struct inode *snapshot,
 		struct buffer_head *sbh, struct buffer_head *bh, int sync)
 {
 	int err = 0;
-#ifdef CONFIG_EXT4_FS_SNAPSHOT_RACE_READ
-	SNAPSHOT_DEBUG_ONCE;
 
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_RACE_READ
 	/* wait for completion of tracked reads before completing COW */
 	while (bh && buffer_tracked_readers_count(bh) > 0) {
 		snapshot_debug_once(2, "waiting for tracked reads: "
@@ -129,8 +128,8 @@ ext4_snapshot_complete_cow(handle_t *handle, struct inode *snapshot,
 		msleep(1);
 		/* XXX: Should we fail after N retries? */
 	}
-#endif
 
+#endif
 	unlock_buffer(sbh);
 	err = ext4_jbd2_file_inode(handle, snapshot);
 	if (err)
@@ -295,9 +294,6 @@ ext4_snapshot_read_cow_bitmap(handle_t *handle, struct inode *snapshot,
 	ext4_fsblk_t bitmap_blk;
 	ext4_fsblk_t cow_bitmap_blk;
 	int err = 0;
-#ifdef CONFIG_EXT4_FS_SNAPSHOT_RACE_BITMAP
-	SNAPSHOT_DEBUG_ONCE;
-#endif
 
 	desc = ext4_get_group_desc(sb, block_group, NULL);
 	if (!desc)
@@ -468,13 +464,8 @@ ext4_snapshot_test_cow_bitmap(handle_t *handle, struct inode *snapshot,
 
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_EXCLUDE_BITMAP
 	if (inuse && excluded) {
-		int i, err;
-		
-		/* don't COW excluded inode blocks */
-		if (!EXT4_HAS_COMPAT_FEATURE(excluded->i_sb,
-					     EXT4_FEATURE_COMPAT_EXCLUDE_INODE))
-			/* no exclude inode/bitmap */
-			return 0;
+		int i;
+
 		/*
 		 * We should never get here because excluded file blocks should
 		 * be excluded from COW bitmap.  The blocks will not be COWed
@@ -490,12 +481,13 @@ ext4_snapshot_test_cow_bitmap(handle_t *handle, struct inode *snapshot,
 			excluded->i_ino, bit, bit+inuse-1, block_group);
 		for (i = 0; i < inuse; i++)
 			ext4_clear_bit(bit+i, cow_bh->b_data);
+		inuse = 0;
 		err = ext4_jbd2_file_inode(handle, snapshot);
 		mark_buffer_dirty(cow_bh);
-		return err;
 	}
 
 #endif
+	brelse(cow_bh);
 	return ret;
 }
 #endif

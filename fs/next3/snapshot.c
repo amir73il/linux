@@ -261,8 +261,7 @@ next3_snapshot_complete_cow(handle_t *handle,
 {
 	int err = 0;
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_RACE_READ
-	SNAPSHOT_DEBUG_ONCE;
-
+	
 	/* wait for completion of tracked reads before completing COW */
 	while (bh && buffer_tracked_readers_count(bh) > 0) {
 		snapshot_debug_once(2, "waiting for tracked reads: "
@@ -483,9 +482,6 @@ next3_snapshot_read_cow_bitmap(handle_t *handle, struct inode *snapshot,
 	next3_fsblk_t bitmap_blk;
 	next3_fsblk_t cow_bitmap_blk;
 	int err = 0;
-#ifdef CONFIG_NEXT3_FS_SNAPSHOT_RACE_BITMAP
-	SNAPSHOT_DEBUG_ONCE;
-#endif
 
 	desc = next3_get_group_desc(sb, block_group, NULL);
 	if (!desc)
@@ -633,7 +629,7 @@ next3_snapshot_test_cow_bitmap(handle_t *handle, struct inode *snapshot,
 	unsigned long block_group = SNAPSHOT_BLOCK_GROUP(block);
 	next3_grpblk_t bit = SNAPSHOT_BLOCK_GROUP_OFFSET(block);
 	next3_fsblk_t snapshot_blocks = SNAPSHOT_BLOCKS(snapshot);
-	int inuse;
+	int inuse, err = 0;
 
 	if (block >= snapshot_blocks)
 		/*
@@ -658,13 +654,8 @@ next3_snapshot_test_cow_bitmap(handle_t *handle, struct inode *snapshot,
 
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_EXCLUDE_BITMAP
 	if (inuse && excluded) {
-		int i, err;
+		int i;
 
-		/* don't COW excluded inode blocks */
-		if (!NEXT3_HAS_COMPAT_FEATURE(excluded->i_sb,
-			NEXT3_FEATURE_COMPAT_EXCLUDE_INODE))
-			/* no exclude inode/bitmap */
-			return 0;
 		/*
 		 * We should never get here because excluded file blocks should
 		 * be excluded from COW bitmap.  The blocks will not be COWed
@@ -680,13 +671,14 @@ next3_snapshot_test_cow_bitmap(handle_t *handle, struct inode *snapshot,
 			excluded->i_ino, bit, bit+inuse-1, block_group);
 		for (i = 0; i < inuse; i++)
 			next3_clear_bit(bit+i, cow_bh->b_data);
+		inuse = 0;
 		err = next3_journal_dirty_data(handle, cow_bh);
 		mark_buffer_dirty(cow_bh);
-		return err;
 	}
 
 #endif
-	return inuse;
+	brelse(cow_bh);
+	return err ? err : inuse;
 }
 #endif
 
@@ -1336,3 +1328,4 @@ int next3_snapshot_get_read_access(struct super_block *sb,
 	return err;
 }
 #endif
+

@@ -292,6 +292,9 @@ void next3_error (struct super_block * sb, const char * function,
 	vprintk(fmt, args);
 	printk("\n");
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_JOURNAL_ERROR
+	va_end(args);
+	/* record error message in journal super block */
+	va_start(args, fmt);
 	next3_record_journal_err(sb, __func__, function, fmt, args);
 #endif
 	va_end(args);
@@ -389,7 +392,9 @@ void next3_abort (struct super_block * sb, const char * function,
 	vprintk(fmt, args);
 	printk("\n");
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_JOURNAL_ERROR
+	va_end(args);
 	/* record error message in journal super block */
+	va_start(args, fmt);
 	next3_record_journal_err(sb, __func__, function, fmt, args);
 #endif
 	va_end(args);
@@ -420,7 +425,9 @@ void next3_warning (struct super_block * sb, const char * function,
 	vprintk(fmt, args);
 	printk("\n");
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_JOURNAL_ERROR
+	va_end(args);
 	/* record error message in journal super block */
+	va_start(args, fmt);
 	next3_record_journal_err(sb, __func__, function, fmt, args);
 #endif
 	va_end(args);
@@ -1580,6 +1587,13 @@ static void next3_orphan_cleanup (struct super_block * sb,
 		return;
 	}
 
+	/* Check if feature set allows readwrite operations */
+	if (NEXT3_HAS_RO_COMPAT_FEATURE(sb, ~NEXT3_FEATURE_RO_COMPAT_SUPP)) {
+		next3_msg(sb, KERN_INFO, "Skipping orphan cleanup on readonly-"
+			       "compatible fs");
+		return;
+	}
+
 	if (NEXT3_SB(sb)->s_mount_state & NEXT3_ERROR_FS) {
 		if (es->s_last_orphan)
 			jbd_debug(1, "Errors on filesystem, "
@@ -2213,11 +2227,13 @@ static int next3_fill_super (struct super_block *sb, void *data, int silent)
 				data_mode_string(test_opt(sb,DATA_FLAGS)));
 		goto failed_mount3;
 	}
+#ifdef CONFIG_QUOTA
 	if (sbi->s_jquota_fmt) {
 		printk(KERN_ERR "NEXT3-fs: journaled quota options are not "
 				"supported.\n");
 		goto failed_mount3;
 	}
+#endif
 
 #endif
 	/*

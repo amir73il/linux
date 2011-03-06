@@ -1721,19 +1721,25 @@ static int next3_has_free_blocks(struct next3_sb_info *sbi)
 	free_blocks = percpu_counter_read_positive(&sbi->s_freeblocks_counter);
 	root_blocks = le32_to_cpu(sbi->s_es->s_r_blocks_count);
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_CTL_RESERVE
-	if (handle && sbi->s_active_snapshot) {
+	if (unlikely(!free_blocks))
+		/* sorry, but we're really out of space */
+		return 0;
+	if (handle && unlikely(IS_COWING(handle)))
+		/* any available space may be used by COWing task */
+		return 1;
+	if (sbi->s_active_snapshot) {
+		/* reserve blocks for active snapshot */
 		snapshot_r_blocks =
 			le64_to_cpu(sbi->s_es->s_snapshot_r_blocks_count);
 		/*
-		 * snapshot reserved blocks for COWing to active snapshot
+		 * The last snapshot_r_blocks are reserved for active snapshot
+		 * and may not be allocated even by root.
 		 */
-		if (free_blocks < snapshot_r_blocks + 1 &&
-		    !IS_COWING(handle)) {
+		if (free_blocks < snapshot_r_blocks + 1)
 			return 0;
-		}
 		/*
-		 * mortal users must reserve blocks for both snapshot and
-		 * root user
+		 * Mortal users must reserve blocks for both snapshot and
+		 * root user.
 		 */
 		root_blocks += snapshot_r_blocks;
 	}
@@ -1819,7 +1825,16 @@ next3_fsblk_t next3_new_blocks(handle_t *handle, struct inode *inode,
 	/*
 	 * Check quota for allocation of this block.
 	 */
+#ifdef CONFIG_NEXT3_FS_SNAPSHOT_CTL_RESERVE
+	if (unlikely(IS_COWING(handle))) {
+		/* don't fail when allocating blocks for active snapshot */
+		dquot_alloc_block_nofail(inode, num);
+		err = 0;
+	} else
+		err = dquot_alloc_block(inode, num);
+#else
 	err = dquot_alloc_block(inode, num);
+#endif
 	if (err) {
 		*errp = err;
 		return 0;

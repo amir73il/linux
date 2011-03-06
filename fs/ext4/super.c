@@ -481,6 +481,10 @@ void __ext4_error(struct super_block *sb, const char *function,
 	vprintk(fmt, args);
 	printk("\n");
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_JOURNAL_ERROR
+	va_end(args);
+
+	/* record error message in journal super block */
+	va_start(args, fmt);
 	ext4_record_journal_err(sb, __func__, function, fmt, args);
 #endif
 	va_end(args);
@@ -506,6 +510,13 @@ void ext4_error_inode(struct inode *inode, const char *function,
 	printk("comm %s: ", current->comm);
 	vprintk(fmt, args);
 	printk("\n");
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_JOURNAL_ERROR
+	va_end(args);
+
+	/* record error message in journal super block */
+	va_start(args, fmt);
+	ext4_record_journal_err(inode->i_sb, __func__, function, fmt, args);
+#endif
 	va_end(args);
 
 	ext4_handle_error(inode->i_sb);
@@ -533,6 +544,13 @@ void ext4_error_file(struct file *file, const char *function,
 	       current->comm, path);
 	vprintk(fmt, args);
 	printk("\n");
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_JOURNAL_ERROR
+	va_end(args);
+
+	/* record error message in journal super block */
+	va_start(args, fmt);
+	ext4_record_journal_err(inode->i_sb, __func__, function, fmt, args);
+#endif
 	va_end(args);
 
 	ext4_handle_error(inode->i_sb);
@@ -633,7 +651,10 @@ void __ext4_abort(struct super_block *sb, const char *function,
 	vprintk(fmt, args);
 	printk("\n");
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_JOURNAL_ERROR
+	va_end(args);
+
 	/* record error message in journal super block */
+	va_start(args, fmt);
 	ext4_record_journal_err(sb, __func__, function, fmt, args);
 #endif
 	va_end(args);
@@ -697,6 +718,13 @@ __acquires(bitlock)
 		printk("block %llu:", (unsigned long long) block);
 	vprintk(fmt, args);
 	printk("\n");
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_JOURNAL_ERROR
+	va_end(args);
+
+	/* record error message in journal super block */
+	va_start(args, fmt);
+	ext4_record_journal_err(sb, __func__, function, fmt, args);
+#endif
 	va_end(args);
 
 	if (test_opt(sb, ERRORS_CONT)) {
@@ -4670,7 +4698,7 @@ static int ext4_statfs(struct dentry *dentry, struct kstatfs *buf)
 	if (buf->f_bfree < ext4_r_blocks_count(es))
 		buf->f_bavail = 0;
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_CTL_RESERVE
-	if (sbi->s_active_snapshot) {
+	if (ext4_snapshot_active(sbi)) {
 		if (buf->f_bfree < ext4_r_blocks_count(es) +
 				le64_to_cpu(es->s_snapshot_r_blocks_count))
 			buf->f_bavail = 0;

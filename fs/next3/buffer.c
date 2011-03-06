@@ -86,6 +86,40 @@ static void buffer_io_error(struct buffer_head *bh)
  * {get|put}_bh_tracked_reader() are atomic.
  */
 
+#ifdef CONFIG_NEXT3_FS_DEBUG
+/*
+ * trace maximum value of b_count on all fs buffers to see if we are
+ * overflowing to upper word (tracked readers count)
+ */
+void __next3_trace_bh_count(const char *fn, struct buffer_head *bh)
+{
+	static sector_t blocknr = 0;
+	static int maxcount = 0;
+	static int maxbit = 1;
+	static int maxorder = 0;
+	int count = atomic_read(&bh->b_count) & 0x0000ffff;
+
+	BUG_ON(count < 0);
+	if (count <= maxcount)
+		return;
+	maxcount = count;
+	blocknr = bh->b_blocknr;
+
+	if (count <= maxbit)
+		return;
+	while (count > maxbit) {
+		maxbit <<= 1;
+		maxorder++;
+	}
+
+	snapshot_debug(maxorder > 7 ? 1 : 2,
+			"%s: buffer refcount maxorder = %d, "
+			"maxcount = 0x%08x, block = [%lu/%lu].\n",
+			fn, maxorder, maxcount,
+			SNAPSHOT_BLOCK_TUPLE(blocknr));
+}
+#endif
+
 /*
  * start buffer tracked read
  * called from inside get_block()
@@ -105,6 +139,7 @@ int start_buffer_tracked_read(struct buffer_head *bh)
 		return -EIO;
 
 	BUG_ON(bdev_bh == bh);
+	next3_trace_bh_count(bdev_bh);
 	set_buffer_tracked_read(bh);
 	get_bh_tracked_reader(bdev_bh);
 	put_bh(bdev_bh);
@@ -127,6 +162,7 @@ void cancel_buffer_tracked_read(struct buffer_head *bh)
 	/* try to grab the buffer cache entry */
 	bdev_bh = __find_get_block(bh->b_bdev, bh->b_blocknr, bh->b_size);
 	BUG_ON(!bdev_bh || bdev_bh == bh);
+	next3_trace_bh_count(bdev_bh);
 	clear_buffer_tracked_read(bh);
 	clear_buffer_mapped(bh);
 	put_bh_tracked_reader(bdev_bh);
@@ -152,6 +188,7 @@ static int submit_buffer_tracked_read(struct buffer_head *bh)
 	 */
 	bdev_bh = __find_get_block(bh->b_bdev, bh->b_blocknr, bh->b_size);
 	BUG_ON(!bdev_bh || bdev_bh == bh);
+	next3_trace_bh_count(bdev_bh);
 	/* override page buffers list with reference to buffer cache entry */
 	bh->b_this_page = bdev_bh;
 	submit_bh(READ, bh);

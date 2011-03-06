@@ -920,7 +920,7 @@ int next3_snapshot_merge_blocks(handle_t *handle,
 			       count, kd, depth, moved);
 		/* update src and dst inodes blocks usage */
 		dquot_free_block(src, moved);
-		dquot_alloc_block(dst, moved);
+		dquot_alloc_block_nofail(dst, moved);
 		err = next3_journal_dirty_metadata(handle, pD->bh);
 		if (err)
 			goto out;
@@ -1071,10 +1071,7 @@ static int next3_alloc_branch(handle_t *handle, struct inode *inode,
 				return err;
 		}
 		/* charge snapshot file owner for moved blocks */
-		if (dquot_alloc_block(inode, *blks)) {
-			err = -EDQUOT;
-			goto failed;
-		}
+		dquot_alloc_block_nofail(inode, *blks);
 		num = *blks;
 		new_blocks[indirect_blks] = current_block;
 	} else
@@ -1362,7 +1359,16 @@ int next3_get_blocks_handle(handle_t *handle, struct inode *inode,
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_RACE_COW
 	struct buffer_head *sbh = NULL;
 #endif
+#endif
 
+
+	J_ASSERT(handle != NULL || create == 0);
+	depth = next3_block_to_path(inode,iblock,offsets,&blocks_to_boundary);
+
+	if (depth == 0)
+		goto out;
+
+#ifdef CONFIG_NEXT3_FS_SNAPSHOT_FILE_READ
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_LIST_READ
 retry:
 	blocks_to_boundary = 0;
@@ -1402,15 +1408,7 @@ retry:
 		}
 	}
 #endif
-	err = -EIO;
 #endif
-
-
-	J_ASSERT(handle != NULL || create == 0);
-	depth = next3_block_to_path(inode,iblock,offsets,&blocks_to_boundary);
-
-	if (depth == 0)
-		goto out;
 
 	partial = next3_get_branch(inode, depth, offsets, chain, &err);
 
@@ -2066,25 +2064,25 @@ static int set_partial_write(handle_t *handle, struct buffer_head *bh)
 	return 0;
 }
 
-static void set_page_move_data(struct page *page, unsigned from, unsigned to)
+/*
+ * make sure that get_block() is called even for mapped buffers, unless all
+ * buffers were written since last snapshot take, in which case 0 is returned.
+ */
+static int set_buffers_move_data(struct buffer_head *page_bufs,
+		unsigned from, unsigned to)
 {
-	struct buffer_head *page_bufs = page_buffers(page);
+	if (!walk_page_buffers(NULL, page_bufs, from, to,
+				NULL, buffer_first_write))
+		return 0;
 
-	BUG_ON(!page_has_buffers(page));
-	/*
-	 * make sure that get_block() is called even for mapped buffers,
-	 * but not if all buffers were written since last snapshot take.
-	 */
-	if (walk_page_buffers(NULL, page_bufs, from, to,
-				NULL, buffer_first_write)) {
-		/* signal get_block() to move-on-write */
+	/* signal get_block() to move-on-write */
+	walk_page_buffers(NULL, page_bufs, from, to,
+			NULL, set_move_data);
+	if (from > 0 || to < PAGE_CACHE_SIZE)
+		/* signal get_block() to update page before move-on-write */
 		walk_page_buffers(NULL, page_bufs, from, to,
-				NULL, set_move_data);
-		if (from > 0 || to < PAGE_CACHE_SIZE)
-			/* signal get_block() to update page before move-on-write */
-			walk_page_buffers(NULL, page_bufs, from, to,
-					NULL, set_partial_write);
-	}
+				NULL, set_partial_write);
+	return 1;
 }
 
 static int clear_move_data(handle_t *handle, struct buffer_head *bh)
@@ -2094,14 +2092,13 @@ static int clear_move_data(handle_t *handle, struct buffer_head *bh)
 	return 0;
 }
 
-static void clear_page_move_data(struct page *page)
+static void clear_buffers_move_data(struct buffer_head *page_bufs)
 {
 	/*
 	 * partial_write/move_data flags are used to pass the move data block
 	 * request to next3_get_block() and should be cleared at all other times.
 	 */
-	BUG_ON(!page_has_buffers(page));
-	walk_page_buffers(NULL, page_buffers(page), 0, PAGE_CACHE_SIZE,
+	walk_page_buffers(NULL, page_bufs, 0, PAGE_CACHE_SIZE,
 			NULL, clear_move_data);
 }
 
@@ -2110,7 +2107,13 @@ static int next3_write_begin(struct file *file, struct address_space *mapping,
 				loff_t pos, unsigned len, unsigned flags,
 				struct page **pagep, void **fsdata)
 {
+#ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DATA
+	struct buffer_head *page_bufs;
+#endif
 	struct inode *inode = mapping->host;
+#ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DATA
+	struct buffer_head *page_bufs;
+#endif
 	int ret;
 	handle_t *handle;
 	int retries = 0;
@@ -2145,17 +2148,18 @@ retry:
 	 */
 	if (!page_has_buffers(page))
 		create_empty_buffers(page, inode->i_sb->s_blocksize, 0);
+	page_bufs = page_buffers(page);
 	/*
 	 * Check if blocks need to be moved-on-write. if they do, unmap buffers
 	 * and call block_write_begin() to remap them.
 	 */
 	if (next3_snapshot_should_move_data(inode))
-		set_page_move_data(page, from, to);
+		set_buffers_move_data(page_bufs, from, to);
 #endif
 	ret = block_write_begin(file, mapping, pos, len, flags, pagep, fsdata,
 							next3_get_block);
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DATA
-	clear_page_move_data(page);
+	clear_buffers_move_data(page_bufs);
 #endif
 	if (ret)
 		goto write_begin_failed;
@@ -2504,15 +2508,16 @@ static int next3_ordered_writepage(struct page *page,
 				(1 << BH_Dirty)|(1 << BH_Uptodate));
 		page_bufs = page_buffers(page);
 	} else {
-#ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DATA
-		/*
-		 * Check if blocks need to be moved-on-write. if they do, unmap buffers
-		 * and fall through to get_block() path.
-		 */
-		if (next3_snapshot_should_move_data(inode))
-			set_page_move_data(page, 0, PAGE_CACHE_SIZE);
-#endif
 		page_bufs = page_buffers(page);
+#ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DATA
+	}
+	/*
+	 * Check if blocks need to be moved-on-write. if they do, unmap buffers
+	 * and fall back to get_block() path.
+	 */
+	if (!next3_snapshot_should_move_data(inode) ||
+		!set_buffers_move_data(page_bufs, 0, PAGE_CACHE_SIZE)) {
+#endif
 		if (!walk_page_buffers(NULL, page_bufs, 0, PAGE_CACHE_SIZE,
 				       NULL, buffer_unmapped)) {
 			/* Provide NULL get_block() to catch bugs if buffers
@@ -2524,6 +2529,9 @@ static int next3_ordered_writepage(struct page *page,
 
 	if (IS_ERR(handle)) {
 		ret = PTR_ERR(handle);
+#ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DATA
+		clear_buffers_move_data(page_bufs);
+#endif
 		goto out_fail;
 	}
 
@@ -2532,7 +2540,7 @@ static int next3_ordered_writepage(struct page *page,
 
 	ret = block_write_full_page(page, next3_get_block, wbc);
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DATA
-	clear_page_move_data(page);
+	clear_buffers_move_data(page_bufs);
 #endif
 
 	/*
@@ -2815,6 +2823,7 @@ static ssize_t next3_direct_IO(int rw, struct kiocb *iocb,
 	int orphan = 0;
 	size_t count = iov_length(iov, nr_segs);
 	int retries = 0;
+
 	if (rw == WRITE) {
 		loff_t final_size = offset + count;
 
@@ -3953,7 +3962,13 @@ static int __next3_get_inode_loc(struct inode *inode,
 		 * is the only valid inode in the block, we need not read the
 		 * block.
 		 */
+#ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_JBD
+		/*  Inode block must be read-in for COW. */
+		if (in_mem && !NEXT3_HAS_RO_COMPAT_FEATURE(inode->i_sb,
+					NEXT3_FEATURE_RO_COMPAT_HAS_SNAPSHOT)) {
+#else
 		if (in_mem) {
+#endif
 			struct buffer_head *bitmap_bh;
 			struct next3_group_desc *desc;
 			int inodes_per_buffer;

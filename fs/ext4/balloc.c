@@ -552,24 +552,30 @@ static int ext4_has_free_blocks(struct ext4_sb_info *sbi, s64 nblocks)
 	root_blocks = ext4_r_blocks_count(sbi->s_es);
 
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_CTL_RESERVE
-	if (handle && sbi->s_active_snapshot) {
+	if (ext4_snapshot_active(sbi)) {
+		if (unlikely(free_blocks < (nblocks + dirty_blocks)))
+			/* sorry, but we're really out of space */
+			return 0;
+		if (handle && unlikely(IS_COWING(handle)))
+			/* any available space may be used by COWing task */
+			return 1;
+		/* reserve blocks for active snapshot */
 		snapshot_r_blocks =
 			le64_to_cpu(sbi->s_es->s_snapshot_r_blocks_count);
 		/*
-		 * snapshot reserved blocks for COWing to active snapshot
+		 * The last snapshot_r_blocks are reserved for active snapshot
+		 * and may not be allocated even by root.
 		 */
-		if (free_blocks < snapshot_r_blocks + 1 &&
-		    !IS_COWING(handle)) {
+		if (free_blocks < (nblocks + dirty_blocks + snapshot_r_blocks))
 			return 0;
-		}
 		/*
-		 * mortal users must reserve blocks for both snapshot and
-		 * root user
+		 * Mortal users must reserve blocks for both snapshot and
+		 * root user.
 		 */
 		root_blocks += snapshot_r_blocks;
 	}
-#endif
 
+#endif
 	if (free_blocks - (nblocks + root_blocks + dirty_blocks) <
 						EXT4_FREEBLOCKS_WATERMARK) {
 		free_blocks  = percpu_counter_sum_positive(fbc);

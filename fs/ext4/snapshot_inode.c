@@ -393,7 +393,7 @@ int ext4_snapshot_merge_blocks(handle_t *handle,
 			       count, kd, depth, moved);
 		/* update src and dst inodes blocks usage */
 		dquot_free_block(src, moved);
-		dquot_alloc_block(dst, moved);
+		dquot_alloc_block_nofail(dst, moved);
 		err = ext4_handle_dirty_metadata(handle, NULL, pD->bh);
 		if (err)
 			goto out;

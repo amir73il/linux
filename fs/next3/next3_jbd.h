@@ -218,16 +218,14 @@ typedef struct next3_handle_s		next3_handle_t;	/* Next3 COW handle */
 #ifdef CONFIG_NEXT3_FS_SNAPSHOT_JOURNAL_TRACE
 /*
  * macros for next3 to update transaction COW statistics.
- * when next3 is compiled as a module with CONFIG_JBD_DEBUG, if the symbol
- * journal_handle_size doesn't exist or doesn't match the sizeof(handle_t),
- * then the kernel was compiled wthout CONFIG_JBD_DEBUG or without the next3
+ * when next3 is compiled as a module with CONFIG_JBD_DEBUG,
+ * if sizeof(next3_handle_t) doesn't match the sizeof(handle_t),
+ * then the kernel was compiled without CONFIG_JBD_DEBUG or without the next3
  * patch and the h_cow_* fields are not allocated in handle objects.
  */
 #ifdef CONFIG_JBD_DEBUG
-extern const u8 journal_handle_size;
-
 #define trace_cow_enabled()	\
-	(journal_handle_size == sizeof(handle_t))
+	(sizeof(next3_handle_t) == sizeof(handle_t))
 
 #define trace_cow_add(handle, name, num)			\
 	do {							\

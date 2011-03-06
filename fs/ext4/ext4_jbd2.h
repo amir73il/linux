@@ -203,7 +203,7 @@ struct ext4_handle_s {
 #endif
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_JOURNAL_TRACE
 
-#ifdef CONFIG_JBD_DEBUG
+#ifdef CONFIG_JBD2_DEBUG
 	/* Statistics counters: */
 	unsigned int h_cow_moved; /* blocks moved to snapshot */
 	unsigned int h_cow_copied; /* blocks copied to snapshot */
@@ -228,16 +228,14 @@ typedef struct ext4_handle_s		ext4_handle_t;	/* Ext4 COW handle */
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_JOURNAL_TRACE
 /*
  * macros for ext4 to update transaction COW statistics.
- * when ext4 is compiled as a module with CONFIG_JBD_DEBUG, if the symbol
- * journal_handle_size doesn't exist or doesn't match the sizeof(handle_t),
- * then the kernel was compiled wthout CONFIG_JBD_DEBUG or without the ext4
- * patch and the h_cow_* fields are not allocated in handle objects.
+ * when ext4 is compiled as a module with CONFIG_JBD2_DEBUG,
+ * if sizeof(ext4_handle_t) doesn't match the sizeof(handle_t),
+ * then the kernel was compiled without CONFIG_JBD2_DEBUG or without the
+ * trace_cow patch and the h_cow_* fields are not allocated in handle objects.
  */
-#ifdef CONFIG_JBD_DEBUG
-extern const u8 journal_handle_size;
-
+#ifdef CONFIG_JBD2_DEBUG
 #define trace_cow_enabled()	\
-	(journal_handle_size == sizeof(handle_t))
+	(sizeof(ext4_handle_t) == sizeof(handle_t))
 
 #define trace_cow_add(handle, name, num)			\
 	do {							\
