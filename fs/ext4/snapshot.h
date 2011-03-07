@@ -241,9 +241,9 @@ static inline int ext4_snapshot_get_create_access(handle_t *handle,
  * @inode:	owner of @block
  * @block:	address of @block
  * @pcount      pointer to no. of blocks about to move or approve
- * @move:	if false, only test if @block needs to be moved
+ * @move:	if false, only test if blocks need to be moved
  *
- * Called from ext4_get_block() before overwriting a data block, when the
+ * Called from ext4_ind_map_blocks() before overwriting a data block, when the
  * buffer_move_on_write() flag is set.  Specifically, only data blocks of
  * regular files are moved. Directory blocks are COWed on get_write_access().
  * Snapshots and excluded files blocks are never moved-on-write.
@@ -251,7 +251,7 @@ static inline int ext4_snapshot_get_create_access(handle_t *handle,
  *
  * Return values:
  * = 1 - @block was moved or may not be overwritten
- * = 0 - @block may be overwritten
+ * = 0 - blocks may be overwritten
  * < 0 - error
  */
 static inline int ext4_snapshot_get_move_access(handle_t *handle,
@@ -271,7 +271,7 @@ static inline int ext4_snapshot_get_move_access(handle_t *handle,
  * @block:	address of start @block
  * @pcount:	pointer to no. of blocks about to move or approve
  *
- * Called from ext4_free_blocks_sb_inode() before deleting blocks with
+ * Called from ext4_free_blocks() before deleting blocks with
  * truncate_mutex held
  *
  * Return values:

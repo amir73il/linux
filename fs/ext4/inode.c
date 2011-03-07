@@ -1169,22 +1169,11 @@ static int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
 			 * If mapped block hasn't change, we can use the
 			 * cached result from the first call.
 			 */
-			err = map->m_len;
+			maxblocks = map->m_len;
+			err = 1;
 		}
-		/*
-		 * We have do deal with mixed cases of mapped/unmapped/MOW
-		 * blocks in the same range and that would make the code
-		 * very complicated, so in lookup, we won't return more than
-		 * a single mapped block.
-		 * TODO: Aditya is going to change the API of get_move_access()
-		 * to return that multiple blocks should not be moved for
-		 * ext4_free_blocks(). we can also use it here.
-		 */
-		if (!err)
-			{
-				map->m_pblk = first_block;
-				map->m_len = maxblocks;
-			}
+		if (!err && blocks_to_boundary >= maxblocks)
+			blocks_to_boundary = maxblocks - 1;
 	}
 	if (err)
 		/* do not map found block */
