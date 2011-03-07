@@ -1122,6 +1122,9 @@ static int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
 	int depth;
 	int count = 0;
 	ext4_fsblk_t first_block = 0;
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_HOOKS_DATA
+	int maxblocks;
+#endif
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_RACE_COW
 	struct buffer_head *sbh = NULL;
 #endif
@@ -1137,6 +1140,7 @@ static int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
 
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_HOOKS_DATA
 	err = 0;
+	maxblocks = map->m_len;
 	if (!partial && (flags & EXT4_GET_BLOCKS_MOVE_ON_WRITE)) {
 		BUG_ON(!ext4_snapshot_should_move_data(inode));
 		first_block = le32_to_cpu(chain[depth - 1].key);
@@ -1146,7 +1150,8 @@ static int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
 			 * test if first_block should be moved to snapshot?
 			 */
 			err = ext4_snapshot_get_move_access(handle, inode,
-					first_block, 0);
+							    first_block, 
+							    &maxblocks, 0);
 			if (err > 0) {
 				/*
 				 * Return EXT4_MAP_MOW via map->m_flags
@@ -1155,7 +1160,7 @@ static int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
 				 */
 				map->m_flags |= EXT4_MAP_MOW;
 				map->m_pblk = first_block;
-				map->m_len = err;
+				map->m_len = maxblocks;
 			}
 		} else if (map->m_flags & EXT4_MAP_MOW &&
 				map->m_pblk == first_block) {
@@ -1176,7 +1181,10 @@ static int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
 		 * ext4_free_blocks(). we can also use it here.
 		 */
 		if (!err)
-			blocks_to_boundary = 0;
+			{
+				map->m_pblk = first_block;
+				map->m_len = maxblocks;
+			}
 	}
 	if (err)
 		/* do not map found block */
@@ -1264,10 +1272,11 @@ static int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_HOOKS_DATA
 	if (map->m_flags & EXT4_MAP_MOW) {
 		int ret;
-
+		maxblocks = 1;
 		/* move old block to snapshot */
 		ret = ext4_snapshot_get_move_access(handle, inode,
-				le32_to_cpu(*(partial->p)), 1);
+						    le32_to_cpu(*(partial->p)),
+						    &maxblocks, 1);
 		if (ret < 1) {
 			/* failed to move to snapshot - free new block */
 			ext4_free_blocks(handle, inode, partial->bh,

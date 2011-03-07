@@ -240,6 +240,7 @@ static inline int ext4_snapshot_get_create_access(handle_t *handle,
  * @handle:	JBD handle
  * @inode:	owner of @block
  * @block:	address of @block
+ * @pcount      pointer to no. of blocks about to move or approve
  * @move:	if false, only test if @block needs to be moved
  *
  * Called from ext4_get_block() before overwriting a data block, when the
@@ -254,10 +255,11 @@ static inline int ext4_snapshot_get_create_access(handle_t *handle,
  * < 0 - error
  */
 static inline int ext4_snapshot_get_move_access(handle_t *handle,
-		struct inode *inode, ext4_fsblk_t block, int move)
+						struct inode *inode, 
+						ext4_fsblk_t block, 
+						int *pcount, int move)
 {
-	int count = 1;
-	return ext4_snapshot_move(handle, inode, block, &count, move);
+	return ext4_snapshot_move(handle, inode, block, pcount, move);
 }
 
 #endif
