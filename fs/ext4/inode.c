@@ -172,7 +172,7 @@ int ext4_truncate_restart_trans(handle_t *handle, struct inode *inode,
 	 */
 	BUG_ON(EXT4_JOURNAL(inode) == NULL);
 	jbd_debug(2, "restarting handle %p\n", handle);
-#ifdef CONFIG_NEXT3_FS_SNAPSHOT_CLEANUP
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_CLEANUP
 	/*
 	 * Snapshot shrink/merge/clean do not take i_data_sem, so we cannot
 	 * release it here. Luckily, snapshot files are not writable,
@@ -1598,7 +1598,7 @@ int ext4_map_blocks(handle_t *handle, struct inode *inode,
 		 */
 		if (flags & EXT4_GET_BLOCKS_DELAY_CREATE)
 			flags |= EXT4_GET_BLOCKS_CREATE;
-#ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DIO
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_HOOKS_DIO
 		/*
 		 * If mow is needed on the requested block and 
 		 * request comes from async-direct-io-write path,
@@ -3998,7 +3998,7 @@ static int ext4_releasepage(struct page *page, gfp_t wait)
 		return try_to_free_buffers(page);
 }
 
-#ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DIO
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_HOOKS_DIO
 /*
  * ext4_get_block_dio used when preparing for a DIO write
  * to indirect mapped files with snapshots.
@@ -4078,7 +4078,7 @@ retry:
 		ret = blockdev_direct_IO(rw, iocb, inode,
 				 inode->i_sb->s_bdev, iov,
 				 offset, nr_segs,
-#ifdef CONFIG_NEXT3_FS_SNAPSHOT_HOOKS_DIO
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_HOOKS_DIO
 				 (rw == WRITE) ? ext4_get_block_dio :
 #endif
 				 ext4_get_block, NULL);

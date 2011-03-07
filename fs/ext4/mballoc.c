@@ -420,29 +420,26 @@ static inline int mb_find_next_bit(void *addr, int max, int start)
 	return ret;
 }
 
-#ifdef CONFIG_EXT4_FS_SNAPSHOT_HOOKS_DELETE
-int mb_test_bit_range(int bit, void *addr,int *pcount)
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_BLOCK_COW 
+/*
+ * Find the largest range of set or clear bits.
+ * Return 1 for set bits and 0 for clear bits.
+ * Set *pcount to number of bits in range.
+ */
+int ext4_mb_test_bit_range(int bit, void *addr, int *pcount)
 {
-	int inuse, ret;
-	if (mb_test_bit(bit, addr)) {
-		inuse = mb_find_next_zero_bit(addr, 
-					      *pcount, bit) - bit;
-		*pcount = inuse;
-		ret = 1;
-	}
-	else {
-		for (inuse = 1; inuse < *pcount && bit+inuse <
-			     SNAPSHOT_BLOCKS_PER_GROUP; inuse++) {
-			if(mb_test_bit(bit+inuse, addr))
-				break;
-		}
-		*pcount = inuse;
-		ret = 0;
-	}
-	return ret;
-}
-#endif
+	int i, ret;
 
+	ret = mb_test_bit(bit, addr);
+	if (ret)
+		i = mb_find_next_zero_bit(addr, bit + *pcount, bit); 
+	else
+		i = mb_find_next_bit(addr, bit + *pcount, bit); 
+	*pcount = i - bit;
+	return ret ? 1 : 0;
+}
+
+#endif
 static void *mb_find_buddy(struct ext4_buddy *e4b, int order, int *max)
 {
 	char *bb;
@@ -2758,10 +2755,17 @@ static void __init ext4_create_debugfs_entry(void)
 						  S_IRUGO | S_IWUSR,
 						  debugfs_dir,
 						  &mb_enable_debug);
+#ifdef CONFIG_EXT4_FS_DEBUG
+	if (debugfs_dir)
+		ext4_snapshot_create_debugfs_entry(debugfs_dir);
+#endif
 }
 
 static void ext4_remove_debugfs_entry(void)
 {
+#ifdef CONFIG_EXT4_FS_DEBUG
+	ext4_snapshot_remove_debugfs_entry();
+#endif
 	debugfs_remove(debugfs_debug);
 	debugfs_remove(debugfs_dir);
 }
@@ -4412,7 +4416,7 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
 			return 0;
 		}
 		reserv_blks = ar->len;
-#ifdef CONFIG_NEXT3_FS_SNAPSHOT_CTL_RESERVE
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_CTL_RESERVE
 		if (unlikely(ar->flags & EXT4_MB_HINT_COWING)) {
 			/* don't fail when allocating blocks for COW */
 			dquot_alloc_block_nofail(ar->inode, ar->len);
@@ -4423,7 +4427,7 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
 			ar->flags |= EXT4_MB_HINT_NOPREALLOC;
 			ar->len--;
 		}
-#ifdef CONFIG_NEXT3_FS_SNAPSHOT_CTL_RESERVE
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_CTL_RESERVE
 nofail:
 #endif
 		inquota = ar->len;

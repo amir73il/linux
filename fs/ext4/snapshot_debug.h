@@ -70,18 +70,8 @@ extern u8 cow_cache_offset;
 		}							\
 	} while (0)
 
-void ext4_snapshot_create_debugfs_entry(void);
-void ext4_snapshot_remove_debugfs_entry(void);
-
-static inline void init_ext4_snapshot_debug(void)
-{
-	ext4_snapshot_create_debugfs_entry();
-}
-
-static inline void exit_ext4_snapshot_debug(void)
-{
-	ext4_snapshot_remove_debugfs_entry();
-}
+extern void ext4_snapshot_create_debugfs_entry(struct dentry *debugfs_dir);
+extern void ext4_snapshot_remove_debugfs_entry(void);
 
 #else
 #define snapshot_test_delay(i)
@@ -89,8 +79,8 @@ static inline void exit_ext4_snapshot_debug(void)
 #define snapshot_debug(n, f, a...)
 #define snapshot_debug_l(n, l, f, a...)
 #define snapshot_debug_once(n, f, a...)
-#define init_ext4_snapshot_debug()
-#define exit_ext4_snapshot_debug()
+#define ext4_snapshot_create_debugfs_entry(d)
+#define ext4_snapshot_remove_debugfs_entry()
 #endif
 
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_CTL_DUMP

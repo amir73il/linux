@@ -47,6 +47,7 @@
 #define CONFIG_EXT4_DEFAULTS_TO_ORDERED
 #define CONFIG_EXT4_FS_XATTR
 #define CONFIG_EXT4_FS_SECURITY
+#define CONFIG_EXT4_DEBUG
 #define CONFIG_EXT4_FS_DEBUG
 #define CONFIG_EXT4_FS_SNAPSHOT
 #define CONFIG_EXT4_FS_SNAPSHOT_HOOKS_JBD
@@ -1946,6 +1947,9 @@ extern void __ext4_free_blocks(const char *where, unsigned int line,
 extern int ext4_mb_add_groupinfo(struct super_block *sb,
 		ext4_group_t i, struct ext4_group_desc *desc);
 extern int ext4_trim_fs(struct super_block *, struct fstrim_range *);
+#ifdef CONFIG_EXT4_FS_SNAPSHOT_BLOCK_COW 
+extern int ext4_mb_test_bit_range(int bit, void *addr,int *pcount);
+#endif
 
 /* inode.c */
 struct buffer_head *ext4_getblk(handle_t *, struct inode *,
@@ -2015,12 +2019,6 @@ extern void ext4_free_branches_cow(handle_t *handle, struct inode *inode,
 				(first), (last), (depth), NULL)
 #endif
 
-#ifdef CONFIG_EXT4_FS_SNAPSHOT_RACE_READ
-/* buffer.c */
-extern void __ext4_trace_bh_count(const char *fn, struct buffer_head *bh);
-
-#define ext4_trace_bh_count(bh) __ext4_trace_bh_count(__func__, (bh))
-#endif
 /* ioctl.c */
 extern long ext4_ioctl(struct file *, unsigned int, unsigned long);
 extern long ext4_compat_ioctl(struct file *, unsigned int, unsigned long);

@@ -21,7 +21,7 @@
 #include "snapshot_debug.h"
 
 #ifdef CONFIG_EXT4_FS_SNAPSHOT
-#define EXT4_SNAPSHOT_VERSION "ext4 snapshot v1.0.13-2 (3-Mar-2010)"
+#define EXT4_SNAPSHOT_VERSION "ext4 snapshot v1.0.13-2 (6-Mar-2010)"
 
 /*
  * use signed 64bit for snapshot image addresses
@@ -163,11 +163,11 @@ extern int ext4_snapshot_test_and_move(const char *where,
  * test if blocks should be moved to snapshot
  * and if they should, try to move them to the active snapshot
  */
-#define ext4_snapshot_move(handle, inode, block, num, move)	\
+#define ext4_snapshot_move(handle, inode, block, pcount, move)	\
 	ext4_snapshot_test_and_move(__func__, handle, inode,	\
-			block, num, move)
+			block, pcount, move)
 #else
-#define ext4_snapshot_move(handle, inode, block, num, move) (num)
+#define ext4_snapshot_move(handle, inode, block, pcount, move) (0)
 #endif
 
 /*
@@ -242,12 +242,11 @@ static inline int ext4_snapshot_get_create_access(handle_t *handle,
  * @block:	address of @block
  * @move:	if false, only test if @block needs to be moved
  *
- * Called from ext4_get_blocks_handle() before overwriting a data block,
- * when buffer_move() is true.  Specifically, only data blocks of regular files,
- * whose data is not being journaled are moved on full page write.
- * Journaled data blocks are COWed on get_write_access().
+ * Called from ext4_get_block() before overwriting a data block, when the
+ * buffer_move_on_write() flag is set.  Specifically, only data blocks of
+ * regular files are moved. Directory blocks are COWed on get_write_access().
  * Snapshots and excluded files blocks are never moved-on-write.
- * If @move is true, then truncate_mutex is held.
+ * If @move is true, then down_write(&i_data_sem) is held.
  *
  * Return values:
  * = 1 - @block was moved or may not be overwritten
@@ -279,9 +278,9 @@ static inline int ext4_snapshot_get_move_access(handle_t *handle,
  * < 0 - error
  */
 static inline int ext4_snapshot_get_delete_access(handle_t *handle,
-		struct inode *inode, ext4_fsblk_t block, int *count)
+		struct inode *inode, ext4_fsblk_t block, int *pcount)
 {
-	return ext4_snapshot_move(handle, inode, block, count, 1);
+	return ext4_snapshot_move(handle, inode, block, pcount, 1);
 }
 #endif
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_EXCLUDE_BITMAP
@@ -343,7 +342,6 @@ extern void ext4_snapshot_destroy(struct super_block *sb);
 
 static inline int init_ext4_snapshot(void)
 {
-	init_ext4_snapshot_debug();
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_JOURNAL_CACHE
 	init_ext4_snapshot_cow_cache();
 #endif
@@ -352,7 +350,6 @@ static inline int init_ext4_snapshot(void)
 
 static inline void exit_ext4_snapshot(void)
 {
-	exit_ext4_snapshot_debug();
 }
 
 #ifdef CONFIG_EXT4_FS_SNAPSHOT_CLEANUP_SHRINK
@@ -574,49 +571,49 @@ extern int start_buffer_tracked_read(struct buffer_head *bh);
 extern void cancel_buffer_tracked_read(struct buffer_head *bh);
 extern int ext4_read_full_page(struct page *page, get_block_t *get_block);
 
-#ifdef CONFIG_NEXT3_FS_DEBUG
-extern void __next3_trace_bh_count(const char *fn, struct buffer_head *bh);
+#ifdef CONFIG_EXT4_FS_DEBUG
+extern void __ext4_trace_bh_count(const char *fn, struct buffer_head *bh);
 
-#define next3_trace_bh_count(bh) __next3_trace_bh_count(__func__, bh)
-#define sb_bread(sb, blk) next3_sb_bread(__func__, sb, blk)
-#define sb_getblk(sb, blk) next3_sb_getblk(__func__, sb, blk)
-#define sb_find_get_block(sb, blk) next3_sb_find_get_block(__func__, sb, blk)
+#define ext4_trace_bh_count(bh) __ext4_trace_bh_count(__func__, bh)
+#define sb_bread(sb, blk) ext4_sb_bread(__func__, sb, blk)
+#define sb_getblk(sb, blk) ext4_sb_getblk(__func__, sb, blk)
+#define sb_find_get_block(sb, blk) ext4_sb_find_get_block(__func__, sb, blk)
 
 static inline struct buffer_head *
-next3_sb_bread(const char *fn, struct super_block *sb, sector_t block)
+ext4_sb_bread(const char *fn, struct super_block *sb, sector_t block)
 {
 	struct buffer_head *bh;
 	
 	bh = __bread(sb->s_bdev, block, sb->s_blocksize);
 	if (bh)
-		__next3_trace_bh_count(fn, bh);
+		__ext4_trace_bh_count(fn, bh);
 	return bh;
 }
 
 static inline struct buffer_head *
-next3_sb_getblk(const char *fn, struct super_block *sb, sector_t block)
+ext4_sb_getblk(const char *fn, struct super_block *sb, sector_t block)
 {
 	struct buffer_head *bh;
 	
 	bh = __getblk(sb->s_bdev, block, sb->s_blocksize);
 	if (bh)
-		__next3_trace_bh_count(fn, bh);
+		__ext4_trace_bh_count(fn, bh);
 	return bh;
 }
 
 static inline struct buffer_head *
-next3_sb_find_get_block(const char *fn, struct super_block *sb, sector_t block)
+ext4_sb_find_get_block(const char *fn, struct super_block *sb, sector_t block)
 {
 	struct buffer_head *bh;
 
 	bh = __find_get_block(sb->s_bdev, block, sb->s_blocksize);
 	if (bh)
-		__next3_trace_bh_count(fn, bh);
+		__ext4_trace_bh_count(fn, bh);
 	return bh;
 }
 
 #else
-#define next3_trace_bh_count(bh)
+#define ext4_trace_bh_count(bh)
 #endif
 
 #endif

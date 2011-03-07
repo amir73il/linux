@@ -75,9 +75,18 @@ config EXT4_FS_SECURITY
 	  If you are not using a security module that requires using
 	  extended attributes for file security labels, say N.
 
+config EXT4_DEBUG
+	bool "EXT4 debugging support"
+	depends on EXT4_FS
+	help
+	  Enables run-time debugging support for the ext4 filesystem.
+
+	  If you select Y here, then you will be able to turn on debugging
+	  with a command such as "echo 1 > /sys/kernel/debug/ext4/mballoc-debug"
+
 config EXT4_FS_DEBUG
 	bool "snapshot debugging support"
-	depends on EXT4_FS && DEBUG_FS
+	depends on EXT4_DEBUG
 	default y
 	help
 	  Control snapshot debug level via debugfs entry /ext4/snapshot-debug.
@@ -89,15 +98,6 @@ config EXT4_FS_SNAPSHOT
 	default y
 	help
 	  If you say N here, then Ext4 will be identical to Ext3.
-
-config EXT4_DEBUG
-	bool "EXT4 debugging support"
-	depends on EXT4_FS
-	help
-	  Enables run-time debugging support for the ext4 filesystem.
-
-	  If you select Y here, then you will be able to turn on debugging
-	  with a command such as "echo 1 > /sys/kernel/debug/ext4/mballoc-debug"
 
 config EXT4_FS_SNAPSHOT_HOOKS_JBD
 	bool "snapshot hooks - inside JBD hooks"
