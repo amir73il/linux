@@ -630,10 +630,16 @@ static int ovl_remove_and_whiteout(struct dentry *dentry, bool is_dir)
 	struct dentry *upperdir = ovl_dentry_upper(dentry->d_parent);
 	struct inode *udir = upperdir->d_inode;
 	struct dentry *whiteout;
-	struct dentry *upper;
+	struct dentry *upper = NULL;
 	struct dentry *opaquedir = NULL;
 	int err;
 	int flags = 0;
+	/*
+	 * remove and whiteout a negative entry means whiteout over nothing
+	 * it is not changing the directory content and is needed prior to
+	 * creating a new entry in a snapshot mount
+	 */
+	int is_negative = d_is_negative(dentry);
 
 	if (WARN_ON(!workdir))
 		return -EROFS;
@@ -667,7 +673,7 @@ static int ovl_remove_and_whiteout(struct dentry *dentry, bool is_dir)
 	if (IS_ERR(whiteout))
 		goto out_dput_upper;
 
-	if (d_is_dir(upper))
+	if (!is_negative && d_is_dir(upper))
 		flags = RENAME_EXCHANGE;
 
 	err = ovl_do_rename(wdir, whiteout, udir, upper, flags);
@@ -676,7 +682,8 @@ static int ovl_remove_and_whiteout(struct dentry *dentry, bool is_dir)
 	if (flags)
 		ovl_cleanup(wdir, upper);
 
-	ovl_dentry_version_inc(dentry->d_parent);
+	if (!is_negative)
+		ovl_dentry_version_inc(dentry->d_parent);
 out_d_drop:
 	d_drop(dentry);
 	dput(whiteout);
@@ -745,7 +752,7 @@ out:
 	return err;
 }
 
-static int ovl_do_remove(struct dentry *dentry, bool is_dir)
+int ovl_do_remove(struct dentry *dentry, bool is_dir)
 {
 	enum ovl_path_type type;
 	int err;
@@ -762,12 +769,17 @@ static int ovl_do_remove(struct dentry *dentry, bool is_dir)
 	type = ovl_path_type(dentry);
 
 	old_cred = ovl_override_creds(dentry->d_sb);
-	if (!ovl_lower_positive(dentry))
+	/*
+	 * remove of a negative entry means whiteout over nothing
+	 * it is not changing the directory content and is needed
+	 * prior to creating a new entry in a snapshot mount
+	 */
+	if (!d_is_negative(dentry) && !ovl_lower_positive(dentry))
 		err = ovl_remove_upper(dentry, is_dir);
 	else
 		err = ovl_remove_and_whiteout(dentry, is_dir);
 	revert_creds(old_cred);
-	if (!err) {
+	if (!err && dentry->d_inode) {
 		if (is_dir)
 			clear_nlink(dentry->d_inode);
 		else

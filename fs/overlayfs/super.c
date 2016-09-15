@@ -89,26 +89,52 @@ static inline void register_as_snapshot(void) { }
 static inline void unregister_as_snapshot(void) { }
 #endif
 
+/*
+ * snapshot mount calls the underlying overlayfs d_real() with
+ * O_RDWR open_flags.
+ * Unlike vfs_open(), snapshot mount can pass non regular dentry
+ * with non zero open_flags as well as negative dentry with open_flags.
+ * The purpose of the call with non regular dentry is a request for copy
+ * up of dir/symlink in preparation of upcoming delete or modify in lower.
+ * The purpose of the call with negative dentry is a request for explicit
+ * whiteout, in preparation for upcoming create in lower.
+ */
 static struct dentry *ovl_d_real(struct dentry *dentry,
 				 const struct inode *inode,
 				 unsigned int open_flags)
 {
 	struct dentry *real;
 
-	if (!d_is_reg(dentry)) {
-		if (!inode || inode == d_inode(dentry))
+	/* Negative dentry with non zero open_flags means explicit whiteout */
+	if (d_is_negative(dentry)) {
+		int err;
+
+		if (!open_flags)
 			return dentry;
-		goto bug;
+
+		/* Remove with negative dentry means explicit whiteout */
+		err = ovl_do_remove(dentry, 0);
+		if (err)
+			return ERR_PTR(err);
+
+		return dentry;
 	}
 
-	if (d_is_negative(dentry))
-		return dentry;
-
+	/* Non regular file with non zero open_flags means explicit copy up */
 	if (open_flags) {
 		int err = ovl_open_maybe_copy_up(dentry, open_flags);
 
 		if (err)
 			return ERR_PTR(err);
+
+		if (!d_is_reg(dentry))
+			return dentry;
+	}
+
+	if (!d_is_reg(dentry)) {
+		if (!inode || inode == d_inode(dentry))
+			return dentry;
+		goto bug;
 	}
 
 	real = ovl_dentry_upper(dentry);

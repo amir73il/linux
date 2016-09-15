@@ -244,6 +244,7 @@ int ovl_create_real(struct inode *dir, struct dentry *newdentry,
 		    struct dentry *hardlink, bool debug);
 void ovl_cleanup(struct inode *dir, struct dentry *dentry);
 int ovl_set_redirect(struct dentry *dentry, struct dentry *upper, bool samedir);
+int ovl_do_remove(struct dentry *dentry, bool is_dir);
 
 /* copy_up.c */
 int ovl_copy_up(struct dentry *dentry);

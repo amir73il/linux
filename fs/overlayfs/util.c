@@ -70,6 +70,9 @@ enum ovl_path_type ovl_path_type(struct dentry *dentry)
 	struct ovl_entry *oe = dentry->d_fsdata;
 	enum ovl_path_type type = 0;
 
+	if (d_is_negative(dentry))
+		return 0;
+
 	if (oe->__upperdentry) {
 		type = __OVL_PATH_UPPER;
 
