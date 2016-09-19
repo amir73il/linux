@@ -87,6 +87,12 @@ static inline void unregister_as_snapshot(void)
 #define IS_SNAPSHOT_SB(sb) (0)
 static inline void register_as_snapshot(void) { }
 static inline void unregister_as_snapshot(void) { }
+static struct dentry *ovl_snapshot_d_real(struct dentry *dentry,
+					  const struct inode *inode,
+					  unsigned int open_flags)
+{
+	return NULL;
+}
 #endif
 
 /*
@@ -200,6 +206,11 @@ static int ovl_dentry_weak_revalidate(struct dentry *dentry, unsigned int flags)
 static const struct dentry_operations ovl_dentry_operations = {
 	.d_release = ovl_dentry_release,
 	.d_real = ovl_d_real,
+};
+
+static const struct dentry_operations ovl_snapshot_dentry_operations = {
+	.d_release = ovl_dentry_release,
+	.d_real = ovl_snapshot_d_real,
 };
 
 static const struct dentry_operations ovl_reval_dentry_operations = {
@@ -1050,7 +1061,9 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	if (!ufs->upper_mnt)
 		sb->s_flags |= MS_RDONLY;
 
-	if (remote)
+	if (ufs->snapshot_mnt)
+		sb->s_d_op = &ovl_snapshot_dentry_operations;
+	else if (remote)
 		sb->s_d_op = &ovl_reval_dentry_operations;
 	else
 		sb->s_d_op = &ovl_dentry_operations;
