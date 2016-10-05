@@ -41,9 +41,15 @@ static inline int fsnotify_parent(const struct path *path,
 }
 
 /*
- * Simple wrapper to consolidate calls fsnotify_parent()/fsnotify() when
- * an event is on a path.
+ * Simple wrappers to consolidate calls fsnotify_parent()/fsnotify() when
+ * an event is on a path/dentry.
  */
+static inline void fsnotify_dentry(struct dentry *dentry, __u32 mask)
+{
+	fsnotify_parent(NULL, dentry, mask);
+	fsnotify(d_inode(dentry), mask, dentry, FSNOTIFY_EVENT_DENTRY, NULL, 0);
+}
+
 static inline int fsnotify_path(struct inode *inode, const struct path *path,
 				__u32 mask)
 {
@@ -301,8 +307,7 @@ static inline void fsnotify_xattr(struct dentry *dentry)
 	if (S_ISDIR(inode->i_mode))
 		mask |= FS_ISDIR;
 
-	fsnotify_parent(NULL, dentry, mask);
-	fsnotify(inode, mask, inode, FSNOTIFY_EVENT_INODE, NULL, 0);
+	fsnotify_dentry(dentry, mask);
 }
 
 /*
@@ -336,8 +341,7 @@ static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
 		if (S_ISDIR(inode->i_mode))
 			mask |= FS_ISDIR;
 
-		fsnotify_parent(NULL, dentry, mask);
-		fsnotify(inode, mask, inode, FSNOTIFY_EVENT_INODE, NULL, 0);
+		fsnotify_dentry(dentry, mask);
 	}
 }
 

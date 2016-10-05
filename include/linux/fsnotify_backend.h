@@ -212,10 +212,11 @@ struct fsnotify_group {
 	};
 };
 
-/* when calling fsnotify tell it if the data is a path or inode */
+/* when calling fsnotify tell it if the data is a path or inode or dentry */
 #define FSNOTIFY_EVENT_NONE	0
 #define FSNOTIFY_EVENT_PATH	1
 #define FSNOTIFY_EVENT_INODE	2
+#define FSNOTIFY_EVENT_DENTRY	3
 
 enum fsnotify_obj_type {
 	FSNOTIFY_OBJ_TYPE_INODE,

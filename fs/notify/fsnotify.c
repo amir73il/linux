@@ -172,8 +172,8 @@ int __fsnotify_parent(const struct path *path, struct dentry *dentry, __u32 mask
 			ret = fsnotify(p_inode, mask, path, FSNOTIFY_EVENT_PATH,
 				       &name.name, 0);
 		else
-			ret = fsnotify(p_inode, mask, dentry->d_inode, FSNOTIFY_EVENT_INODE,
-				       &name.name, 0);
+			ret = fsnotify(p_inode, mask, dentry,
+				       FSNOTIFY_EVENT_DENTRY, &name.name, 0);
 		release_dentry_name_snapshot(&name);
 	}
 

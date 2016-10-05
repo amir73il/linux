@@ -271,6 +271,8 @@ static struct inode *fanotify_fid_inode(struct inode *to_tell, u32 event_mask,
 		return to_tell;
 	else if (data_type == FSNOTIFY_EVENT_INODE)
 		return (struct inode *)data;
+	else if (data_type == FSNOTIFY_EVENT_DENTRY)
+		return d_inode(data);
 	else if (data_type == FSNOTIFY_EVENT_PATH)
 		return d_inode(((struct path *)data)->dentry);
 	return NULL;
