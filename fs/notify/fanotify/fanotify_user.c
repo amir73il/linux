@@ -53,11 +53,17 @@ struct kmem_cache *fanotify_perm_event_cachep __read_mostly;
 
 static int fanotify_event_info_len(struct fanotify_event *event)
 {
+	int info_len;
+
 	if (!fanotify_event_has_fid(event))
 		return 0;
 
+	info_len = event->fh_len;
+	if (fanotify_event_has_filename(event))
+		info_len += event->name_len + 1;
+
 	return roundup(sizeof(struct fanotify_event_info_fid) +
-		       sizeof(struct file_handle) + event->fh_len,
+		       sizeof(struct file_handle) + info_len,
 		       FANOTIFY_EVENT_ALIGN);
 }
 
@@ -246,9 +252,19 @@ static int copy_fid_to_user(struct fanotify_event *event, char __user *buf)
 	if (copy_to_user(buf, fh, fh_len))
 		return -EFAULT;
 
-	/* Pad with 0's */
 	buf += fh_len;
 	len -= fh_len;
+	if (fanotify_event_has_filename(event)) {
+		/* Copy the filename */
+		if (copy_to_user(buf, FANOTIFY_FE(&event->fse)->name,
+				 event->name_len))
+			return -EFAULT;
+
+		buf += event->name_len;
+		len -= event->name_len;
+	}
+
+	/* Pad with 0's */
 	WARN_ON_ONCE(len < 0 || len >= FANOTIFY_EVENT_ALIGN);
 	if (len > 0 && clear_user(buf, len))
 		return -EFAULT;
@@ -791,6 +807,9 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	    (flags & FANOTIFY_CLASS_BITS) != FAN_CLASS_NOTIF)
 		return -EINVAL;
 
+	if ((flags & FAN_REPORT_FILENAME) && !(flags & FAN_REPORT_FID))
+		return -EINVAL;
+
 	user = get_current_user();
 	if (atomic_read(&user->fanotify_listeners) > FANOTIFY_DEFAULT_MAX_LISTENERS) {
 		free_uid(user);
@@ -816,7 +835,7 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	group->memcg = get_mem_cgroup_from_mm(current->mm);
 
 	oevent = fanotify_alloc_event(group, NULL, FS_Q_OVERFLOW, NULL,
-				      FSNOTIFY_EVENT_NONE, NULL);
+				      FSNOTIFY_EVENT_NONE, NULL, NULL);
 	if (unlikely(!oevent)) {
 		fd = -ENOMEM;
 		goto out_destroy_group;
@@ -1097,7 +1116,7 @@ COMPAT_SYSCALL_DEFINE6(fanotify_mark,
  */
 static int __init fanotify_user_setup(void)
 {
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 8);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 9);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 9);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,

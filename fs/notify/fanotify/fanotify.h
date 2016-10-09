@@ -69,7 +69,7 @@ struct fanotify_event {
 	 */
 	u8 fh_type;
 	u8 fh_len;
-	u16 pad;
+	u16 name_len;
 	union {
 		/*
 		 * We hold ref to this path so it may be dereferenced at any
@@ -108,6 +108,31 @@ static inline void *fanotify_event_fh(struct fanotify_event *event)
 	return fanotify_fid_fh(&event->fid, event->fh_len);
 }
 
+static inline bool fanotify_event_has_filename(struct fanotify_event *event)
+{
+	return event->name_len;
+}
+
+/*
+ * Structure for fanotify filename events with variable length data.
+ * It gets allocated in fanotify_handle_event() and freed when the
+ * information is retrieved by userspace
+ */
+struct fanotify_filename_event {
+	struct fanotify_event fae;
+	/*
+	 * For filename events (create,delete,rename), fid refers to the
+	 * directory and name holds the entry name
+	 */
+	char name[];
+};
+
+static inline struct fanotify_filename_event *
+FANOTIFY_FE(struct fsnotify_event *fse)
+{
+	return container_of(fse, struct fanotify_filename_event, fae.fse);
+}
+
 /*
  * Structure for permission fanotify events. It gets allocated and freed in
  * fanotify_handle_event() since we wait there for user response. When the
@@ -142,4 +167,5 @@ static inline struct fanotify_event *FANOTIFY_E(struct fsnotify_event *fse)
 struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 					    struct inode *inode, u32 mask,
 					    const void *data, int data_type,
-					    __kernel_fsid_t *fsid);
+					    __kernel_fsid_t *fsid,
+					    const struct qstr *file_name);
