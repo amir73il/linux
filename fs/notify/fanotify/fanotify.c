@@ -27,8 +27,16 @@ static bool should_merge(struct fsnotify_event *old_fsn,
 	new = FANOTIFY_E(new_fsn);
 
 	if (old_fsn->inode != new_fsn->inode || old->pid != new->pid ||
-	    old->fh_type != new->fh_type || old->fh_len != new->fh_len)
+	    old->fh_type != new->fh_type || old->fh_len != new->fh_len ||
+	    old->name_len != new->name_len)
 		return false;
+
+	if (fanotify_event_has_filename(old)) {
+		if (old->name_len != new->name_len ||
+		    strcmp(FANOTIFY_FE(old_fsn)->name,
+			   FANOTIFY_FE(new_fsn)->name))
+			return false;
+	}
 
 	if (fanotify_event_has_path(old)) {
 		return old->path.mnt == new->path.mnt &&
@@ -267,7 +275,7 @@ out_err:
 static struct inode *fanotify_fid_inode(struct inode *to_tell, u32 event_mask,
 					const void *data, int data_type)
 {
-	if (event_mask & ALL_FSNOTIFY_DIRENT_EVENTS)
+	if (event_mask & FANOTIFY_DIRENT_EVENTS)
 		return to_tell;
 	else if (data_type == FSNOTIFY_EVENT_INODE)
 		return (struct inode *)data;
@@ -279,7 +287,8 @@ static struct inode *fanotify_fid_inode(struct inode *to_tell, u32 event_mask,
 struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 					    struct inode *inode, u32 mask,
 					    const void *data, int data_type,
-					    __kernel_fsid_t *fsid)
+					    __kernel_fsid_t *fsid,
+					    const struct qstr *file_name)
 {
 	struct fanotify_event *event = NULL;
 	gfp_t gfp = GFP_KERNEL_ACCOUNT;
@@ -307,9 +316,29 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 		pevent->state = FAN_EVENT_INIT;
 		goto init;
 	}
+
+	/*
+	 * For dirent modification events (create,delete,rename), fid refers to
+	 * the directory and name holds the entry name, so allocate a variable
+	 * length fanotify_filename_event struct.
+	 */
+	if (FAN_GROUP_FLAG(group, FAN_REPORT_FILENAME) &&
+	    (mask & FANOTIFY_DIRENT_EVENTS) && file_name) {
+		struct fanotify_filename_event *ffe;
+
+		ffe = kmalloc(sizeof(*ffe) + file_name->len + 1, gfp);
+		if (!ffe)
+			goto out;
+		event = &ffe->fae;
+		event->name_len = file_name->len;
+		strcpy(ffe->name, file_name->name);
+		goto init;
+	}
+
 	event = kmem_cache_alloc(fanotify_event_cachep, gfp);
 	if (!event)
 		goto out;
+	event->name_len = 0;
 init: __maybe_unused
 	fsnotify_init_event(&event->fse, inode);
 	event->mask = mask;
@@ -426,7 +455,7 @@ static int fanotify_handle_event(struct fsnotify_group *group,
 	}
 
 	event = fanotify_alloc_event(group, inode, mask, data, data_type,
-				     &fsid);
+				     &fsid, file_name);
 	ret = -ENOMEM;
 	if (unlikely(!event)) {
 		/*
@@ -481,7 +510,11 @@ static void fanotify_free_event(struct fsnotify_event *fsn_event)
 		kmem_cache_free(fanotify_perm_event_cachep,
 				FANOTIFY_PE(fsn_event));
 		return;
+	} else if (fanotify_event_has_filename(event)) {
+		kfree(FANOTIFY_FE(fsn_event));
+		return;
 	}
+
 	kmem_cache_free(fanotify_event_cachep, event);
 }
 
