@@ -42,8 +42,11 @@ d_real		no		no		yes 		no
 
 --------------------------- inode_operations --------------------------- 
 prototypes:
-	int (*create) (struct inode *,struct dentry *,umode_t, bool);
 	struct dentry * (*lookup) (struct inode *,struct dentry *, unsigned int);
+	int (*permission) (struct inode *, int);
+	int (*readlink) (struct dentry *, char __user *,int);
+	const char *(*get_link) (struct dentry *, struct inode *, void **);
+	int (*create) (struct inode *,struct dentry *,umode_t, bool);
 	int (*link) (struct dentry *,struct inode *,struct dentry *);
 	int (*unlink) (struct inode *,struct dentry *);
 	int (*symlink) (struct inode *,struct dentry *,const char *);
@@ -52,11 +55,6 @@ prototypes:
 	int (*mknod) (struct inode *,struct dentry *,umode_t,dev_t);
 	int (*rename) (struct inode *, struct dentry *,
 			struct inode *, struct dentry *, unsigned int);
-	int (*readlink) (struct dentry *, char __user *,int);
-	const char *(*get_link) (struct dentry *, struct inode *, void **);
-	void (*truncate) (struct inode *);
-	int (*permission) (struct inode *, int, unsigned int);
-	int (*get_acl)(struct inode *, int);
 	int (*setattr) (struct dentry *, struct iattr *);
 	int (*getattr) (struct vfsmount *, struct dentry *, struct kstat *);
 	ssize_t (*listxattr) (struct dentry *, char *, size_t);
@@ -66,30 +64,33 @@ prototypes:
 				struct file *, unsigned open_flag,
 				umode_t create_mode, int *opened);
 	int (*tmpfile) (struct inode *, struct dentry *, umode_t);
+	int (*set_acl) (struct inode *, struct posix_acl *, int);
+	struct posix_acl *(*get_acl)(struct inode *, int);
 
 locking rules:
 	all may block
 		i_mutex(inode)
 lookup:		yes
-create:		yes
-link:		yes (both)
-mknod:		yes
-symlink:	yes
-mkdir:		yes
-unlink:		yes (both)
-rmdir:		yes (both)	(see below)
-rename:	yes (all)	(see below)
+permission:	no (may not block if called in rcu-walk mode)
 readlink:	no
 get_link:	no
+create:		yes
+link:		yes (both)
+unlink:		yes (both)
+symlink:	yes
+mkdir:		yes
+rmdir:		yes (both)	(see below)
+mknod:		yes
+rename:		yes (all)	(see below)
 setattr:	yes
-permission:	no (may not block if called in rcu-walk mode)
-get_acl:	no
 getattr:	no
 listxattr:	no
 fiemap:		no
 update_time:	no
 atomic_open:	yes
 tmpfile:	no
+set_acl:	yes
+get_acl:	no
 
 
 	Additionally, ->rmdir(), ->unlink() and ->rename() have ->i_mutex on
