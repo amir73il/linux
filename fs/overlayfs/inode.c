@@ -251,11 +251,14 @@ int ovl_open_maybe_copy_up(struct dentry *dentry, unsigned int file_flags)
 
 	type = ovl_path_real(dentry, &realpath);
 	if (ovl_open_need_copy_up(file_flags, type, realpath.dentry)) {
+		/* Take the overlay inode lock to avoid concurrent copy-up */
+		inode_lock(dentry->d_inode);
 		err = ovl_want_write(dentry);
 		if (!err) {
 			err = ovl_copy_up_open(dentry, file_flags);
 			ovl_drop_write(dentry);
 		}
+		inode_unlock(dentry->d_inode);
 	}
 
 	return err;
