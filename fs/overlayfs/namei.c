@@ -11,6 +11,7 @@
 #include <linux/namei.h>
 #include <linux/xattr.h>
 #include <linux/ratelimit.h>
+#include <linux/exportfs.h>
 #include "overlayfs.h"
 #include "ovl_entry.h"
 
@@ -47,7 +48,16 @@ static int ovl_check_redirect(struct dentry *dentry, struct ovl_lookup_data *d,
 		goto fail;
 	if (res == 0)
 		goto invalid;
-	if (buf[0] == '/') {
+	if (ovl_redirect_is_fh(buf)) {
+		/*
+		 * We cannot mix full path redirect in upper layers
+		 * with file handle redirect in lower layers, because
+		 * d->redirect can only hold a single file handle or
+		 * single path - not a combination of both.
+		 */
+		if (*post)
+			goto invalid;
+	} else if (buf[0] == '/') {
 		for (s = buf; *s++ == '/'; s = next) {
 			next = strchrnul(s, '/');
 			if (s == next)
@@ -65,7 +75,7 @@ static int ovl_check_redirect(struct dentry *dentry, struct ovl_lookup_data *d,
 	kfree(d->redirect);
 	d->redirect = buf;
 	d->name.name = d->redirect;
-	d->name.len = strlen(d->redirect);
+	d->name.len = ovl_redirect_fh_len(d->redirect);
 
 	return 0;
 
@@ -95,7 +105,24 @@ static bool ovl_is_opaquedir(struct dentry *dentry)
 	return false;
 }
 
-static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
+static int ovl_dentry_acceptable(void *context, struct dentry *dentry)
+{
+	return 1;
+}
+
+static
+struct dentry *ovl_redirect_decode_fh(struct path *path,
+				      const struct ovl_redirect_fh *redirect_fh)
+{
+	int bytes = (redirect_fh->len - offsetof(struct ovl_redirect_fh, fid));
+
+	return exportfs_decode_fh(path->mnt,
+				  (struct fid *)redirect_fh->fid,
+				  bytes >> 2, (int)redirect_fh->type,
+				  ovl_dentry_acceptable, NULL);
+}
+
+static int ovl_lookup_single(struct path *path, struct ovl_lookup_data *d,
 			     const char *name, unsigned int namelen,
 			     size_t prelen, const char *post,
 			     struct dentry **ret)
@@ -103,11 +130,25 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 	struct dentry *this;
 	int err;
 
-	this = lookup_one_len_unlocked(name, base, namelen);
+	/*
+	 * can only get here with redirect by file handle when called for
+	 * ovl_lookup_layer(lowerpath, ..), where d.name is a file handle
+	 * that was found in previous layer.
+	 * We can never get here from absolute path walk code in
+	 * ovl_lookup_layer(), because file handle starts with terminating 0,
+	 * so it cannot be embedded inside a path name.
+	 */
+	if (ovl_redirect_is_fh(name))
+		this = ovl_redirect_decode_fh(path, ovl_redirect_fh(name));
+	else
+		this = lookup_one_len_unlocked(name, path->dentry, namelen);
 	if (IS_ERR(this)) {
 		err = PTR_ERR(this);
 		this = NULL;
 		if (err == -ENOENT || err == -ENAMETOOLONG)
+			goto out;
+		/* Redirect by file handle can skip layers */
+		if (ovl_redirect_is_fh(name) && err == -ESTALE)
 			goto out;
 		goto out_err;
 	}
@@ -130,13 +171,20 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 		goto out;
 	}
 	d->is_dir = true;
-	if (!d->last && ovl_is_opaquedir(this)) {
+	if (d->last)
+		goto out;
+	if (ovl_is_opaquedir(this)) {
 		d->stop = d->opaque = true;
 		goto out;
 	}
 	err = ovl_check_redirect(this, d, prelen, post);
 	if (err)
 		goto out_err;
+	/* Redirect by file handle chain must end in opaque dir */
+	if (ovl_redirect_is_fh(name) && d->redirect == name) {
+		err = -ESTALE;
+		goto out_err;
+	}
 out:
 	*ret = this;
 	return 0;
@@ -151,15 +199,16 @@ out_err:
 	return err;
 }
 
-static int ovl_lookup_layer(struct dentry *base, struct ovl_lookup_data *d,
+static int ovl_lookup_layer(struct path *path, struct ovl_lookup_data *d,
 			    struct dentry **ret)
 {
 	const char *s = d->name.name;
+	struct dentry *base = path->dentry;
 	struct dentry *dentry = NULL;
 	int err;
 
-	if (*s != '/')
-		return ovl_lookup_single(base, d, d->name.name, d->name.len,
+	if (ovl_redirect_is_samedir(s) || ovl_redirect_is_fh(s))
+		return ovl_lookup_single(path, d, d->name.name, d->name.len,
 					 0, "", ret);
 
 	while (*s++ == '/' && !IS_ERR_OR_NULL(base) && d_can_lookup(base)) {
@@ -170,12 +219,12 @@ static int ovl_lookup_layer(struct dentry *base, struct ovl_lookup_data *d,
 		    WARN_ON(strcmp(d->name.name + d->name.len - slen, s)))
 			return -EIO;
 
-		err = ovl_lookup_single(base, d, s, next - s,
+		err = ovl_lookup_single(path, d, s, next - s,
 					d->name.len - slen, next, &base);
 		dput(dentry);
 		if (err)
 			return err;
-		dentry = base;
+		dentry = path->dentry = base;
 		s = next;
 	}
 	*ret = dentry;
@@ -234,7 +283,12 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	old_cred = ovl_override_creds(dentry->d_sb);
 	upperdir = ovl_upperdentry_dereference(poe);
 	if (upperdir) {
-		err = ovl_lookup_layer(upperdir, &d, &upperdentry);
+		struct path upperpath = {
+			.dentry = upperdir,
+			.mnt = ofs->upper_mnt,
+		};
+
+		err = ovl_lookup_layer(&upperpath, &d, &upperdentry);
 		if (err)
 			goto out;
 
@@ -245,10 +299,12 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		}
 
 		if (d.redirect) {
-			upperredirect = kstrdup(d.redirect, GFP_KERNEL);
+			/* copy as binary data for redirect by file handle */
+			upperredirect = kmalloc(d.name.len, GFP_KERNEL);
 			if (!upperredirect)
 				goto out_put_upper;
-			if (d.redirect[0] == '/')
+			memcpy(upperredirect, d.name.name, d.name.len);
+			if (!ovl_redirect_is_samedir(d.redirect))
 				poe = dentry->d_sb->s_root->d_fsdata;
 		}
 		upperopaque = d.opaque;
@@ -266,7 +322,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		struct path lowerpath = poe->lowerstack[i];
 
 		d.last = i == poe->numlower - 1;
-		err = ovl_lookup_layer(lowerpath.dentry, &d, &this);
+		err = ovl_lookup_layer(&lowerpath, &d, &this);
 		if (err)
 			goto out_put;
 
@@ -281,7 +337,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			break;
 
 		if (d.redirect &&
-		    d.redirect[0] == '/' &&
+		    !ovl_redirect_is_samedir(d.redirect) &&
 		    poe != dentry->d_sb->s_root->d_fsdata) {
 			poe = dentry->d_sb->s_root->d_fsdata;
 

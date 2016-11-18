@@ -137,6 +137,27 @@ static inline struct inode *ovl_inode_real(struct inode *inode, bool *is_upper)
 	return (struct inode *) (x & ~OVL_ISUPPER_MASK);
 }
 
+/* redirect data format for redirect_dir_fh */
+struct ovl_redirect_fh {
+	unsigned char zero;	/* zero termination for redirect string */
+	unsigned char pad;	/* 0 */
+	unsigned char len;	/* size of this header + size of fid */
+	unsigned char type;	/* fid_type of fid */
+	unsigned char fid[0];	/* file identifier */
+};
+
+/* Empty redirect string implies file handle */
+inline static bool ovl_redirect_is_fh(const char *redirect)
+{
+	return !*redirect;
+}
+
+/* Non file handle and non absolute path = simple name redirect */
+inline static bool ovl_redirect_is_samedir(const char *redirect)
+{
+	return *redirect && *redirect != '/';
+}
+
 /* util.c */
 int ovl_want_write(struct dentry *dentry);
 void ovl_drop_write(struct dentry *dentry);
@@ -162,6 +183,9 @@ bool ovl_redirect_dir(struct super_block *sb);
 void ovl_clear_redirect_dir(struct super_block *sb);
 const char *ovl_dentry_get_redirect(struct dentry *dentry);
 void ovl_dentry_set_redirect(struct dentry *dentry, const char *redirect);
+const struct ovl_redirect_fh *ovl_redirect_fh(const char *redirect);
+int ovl_redirect_fh_type(const char *redirect);
+size_t ovl_redirect_fh_len(const char *redirect);
 void ovl_dentry_update(struct dentry *dentry, struct dentry *upperdentry);
 void ovl_inode_init(struct inode *inode, struct inode *realinode,
 		    bool is_upper);

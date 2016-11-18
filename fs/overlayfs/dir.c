@@ -859,7 +859,7 @@ static int ovl_set_redirect(struct dentry *dentry, bool samedir)
 	int err;
 	const char *redirect = ovl_dentry_get_redirect(dentry);
 
-	if (redirect && (samedir || redirect[0] == '/'))
+	if (redirect && (samedir || !ovl_redirect_is_samedir(redirect)))
 		return 0;
 
 	redirect = ovl_get_redirect(dentry, samedir);

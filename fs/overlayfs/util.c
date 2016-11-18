@@ -212,6 +212,29 @@ void ovl_dentry_set_redirect(struct dentry *dentry, const char *redirect)
 	oe->redirect = redirect;
 }
 
+const struct ovl_redirect_fh *ovl_redirect_fh(const char *redirect)
+{
+	return *redirect ? NULL :
+		(const struct ovl_redirect_fh *)redirect;
+}
+
+/*
+ * Type of directory redirect
+ * =0 path string (relative or absolute)
+ * >0 file handle fid_type
+ */
+int ovl_redirect_fh_type(const char *redirect)
+{
+	return *redirect ? 0 :
+		(int)ovl_redirect_fh(redirect)->type;
+}
+
+size_t ovl_redirect_fh_len(const char *redirect)
+{
+	return *redirect ? strlen(redirect) :
+		(size_t)ovl_redirect_fh(redirect)->len;
+}
+
 void ovl_dentry_update(struct dentry *dentry, struct dentry *upperdentry)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
