@@ -365,7 +365,8 @@ int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 		pr_err("overlayfs: failed to lock workdir+upperdir\n");
 		goto out_unlock;
 	}
-	if (ovl_dentry_upper(dentry)) {
+
+	if (ovl_dentry_is_upper(dentry)) {
 		/* Raced with another copy-up?  Nothing to do, then... */
 		err = 0;
 		goto out_unlock;
@@ -394,9 +395,8 @@ int ovl_copy_up(struct dentry *dentry)
 		struct dentry *parent;
 		struct path lowerpath;
 		struct kstat stat;
-		enum ovl_path_type type = ovl_path_type(dentry);
 
-		if (OVL_TYPE_UPPER(type))
+		if (ovl_dentry_is_upper(dentry))
 			break;
 
 		next = dget(dentry);
@@ -404,8 +404,7 @@ int ovl_copy_up(struct dentry *dentry)
 		for (;;) {
 			parent = dget_parent(next);
 
-			type = ovl_path_type(parent);
-			if (OVL_TYPE_UPPER(type))
+			if (ovl_dentry_is_upper(parent))
 				break;
 
 			dput(next);

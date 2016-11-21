@@ -638,7 +638,7 @@ static int ovl_remove_and_whiteout(struct dentry *dentry, bool is_dir)
 
 	err = -ESTALE;
 	if ((opaquedir && upper != opaquedir) ||
-	    (!opaquedir && ovl_dentry_upper(dentry) &&
+	    (!opaquedir && ovl_dentry_is_upper(dentry) &&
 	     upper != ovl_dentry_upper(dentry))) {
 		goto out_dput_upper;
 	}
@@ -974,7 +974,7 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	new_opaque = ovl_dentry_is_opaque(new);
 
 	err = -ESTALE;
-	if (ovl_dentry_upper(new)) {
+	if (ovl_dentry_is_upper(new)) {
 		if (opaquedir) {
 			if (newdentry != opaquedir)
 				goto out_dput;
