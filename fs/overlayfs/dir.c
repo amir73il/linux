@@ -606,6 +606,10 @@ static int ovl_link(struct dentry *old, struct inode *newdir,
 	if (err)
 		goto out;
 
+	err = ovl_snapshot_want_write(new);
+	if (err)
+		goto out_drop_write_old;
+
 	err = ovl_copy_up(old);
 	if (err)
 		goto out_drop_write;
@@ -618,6 +622,8 @@ static int ovl_link(struct dentry *old, struct inode *newdir,
 		iput(inode);
 
 out_drop_write:
+	ovl_snapshot_drop_write(new);
+out_drop_write_old:
 	ovl_drop_write(old);
 out:
 	return err;
@@ -996,6 +1002,10 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	if (err)
 		goto out;
 
+	err = ovl_snapshot_want_write(new);
+	if (err)
+		goto out_drop_write_old;
+
 	err = ovl_copy_up(old);
 	if (err)
 		goto out_drop_write;
@@ -1133,6 +1143,8 @@ out_unlock:
 out_revert_creds:
 	revert_creds(old_cred);
 out_drop_write:
+	ovl_snapshot_drop_write(new);
+out_drop_write_old:
 	ovl_drop_write(old);
 out:
 	dput(opaquedir);

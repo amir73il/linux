@@ -9,6 +9,7 @@
 #include <linux/fs.h>
 #include <linux/xattr.h>
 #include "overlayfs.h"
+#include "ovl_entry.h"
 
 static int ovl_snapshot_copy_down(struct dentry *dentry)
 {
@@ -76,4 +77,22 @@ bug:
 	     dentry, inode ? inode->i_sb->s_id : "NULL",
 	     inode ? inode->i_ino : 0);
 	return dentry;
+}
+
+int ovl_snapshot_want_write(struct dentry *dentry)
+{
+	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+
+	if (!ofs->snapshot_mnt)
+		return 0;
+
+	return ovl_snapshot_copy_down(dentry);
+}
+
+void ovl_snapshot_drop_write(struct dentry *dentry)
+{
+	/*
+	 * TODO: whiteout after created entry if ofs->snapshot_mnt
+	 * is unmodified overlayfs that does not support explicit whiteout
+	 */
 }
