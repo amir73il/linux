@@ -21,6 +21,7 @@ struct ovl_lookup_data {
 	bool opaque;
 	bool stop;
 	bool last;
+	bool want_negative;
 	char *redirect;
 };
 
@@ -152,8 +153,11 @@ static int ovl_lookup_single(struct path *path, struct ovl_lookup_data *d,
 			goto out;
 		goto out_err;
 	}
-	if (!this->d_inode)
+	if (!this->d_inode) {
+		if (d->want_negative)
+			goto out;
 		goto put_and_out;
+	}
 
 	if (ovl_dentry_weird(this)) {
 		/* Don't support traversing automounts and other weirdness */
@@ -261,6 +265,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	struct ovl_entry *poe = dentry->d_parent->d_fsdata;
 	struct path *stack = NULL;
 	struct dentry *upperdir, *upperdentry = NULL;
+	struct dentry *snapdir, *snapdentry = NULL;
 	unsigned int ctr = 0;
 	struct inode *inode = NULL;
 	bool upperopaque = false;
@@ -275,6 +280,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		.stop = false,
 		.last = !poe->numlower,
 		.redirect = NULL,
+		.want_negative = false,
 	};
 
 	if (dentry->d_name.len > ofs->namelen)
@@ -308,6 +314,23 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 				poe = dentry->d_sb->s_root->d_fsdata;
 		}
 		upperopaque = d.opaque;
+	}
+
+	snapdir = poe->__snapdentry;
+	if (snapdir && !d_is_negative(snapdir)) {
+		struct path snappath = {
+			.dentry = snapdir,
+			.mnt = ofs->snapshot_mnt,
+		};
+
+		d.last = true;
+		d.want_negative = true;
+		err = ovl_lookup_layer(&snappath, &d, &this);
+		if (err)
+			goto out_put_upper;
+
+		snapdentry = this;
+		d.stop = true;
 	}
 
 	if (!d.stop && poe->numlower) {
@@ -380,6 +403,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	oe->opaque = upperopaque;
 	oe->redirect = upperredirect;
 	oe->__upperdentry = upperdentry;
+	oe->__snapdentry = snapdentry;
 	memcpy(oe->lowerstack, stack, sizeof(struct path) * ctr);
 	kfree(stack);
 	kfree(d.redirect);
@@ -396,6 +420,7 @@ out_put:
 	kfree(stack);
 out_put_upper:
 	dput(upperdentry);
+	dput(snapdentry);
 	kfree(upperredirect);
 out:
 	kfree(d.redirect);
