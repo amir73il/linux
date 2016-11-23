@@ -718,7 +718,7 @@ ovl_posix_acl_xattr_set(const struct xattr_handler *handler,
 			return PTR_ERR(acl);
 	}
 	err = -EOPNOTSUPP;
-	if (!IS_POSIXACL(d_inode(workdir)))
+	if (workdir && !IS_POSIXACL(d_inode(workdir)))
 		goto out_acl_release;
 	if (!realinode->i_op->set_acl)
 		goto out_acl_release;
