@@ -136,6 +136,18 @@ static bool ovl_type_merge_or_lower(struct dentry *dentry)
 	return OVL_TYPE_MERGE(type) || !OVL_TYPE_UPPER(type);
 }
 
+static bool ovl_snapshot_type_merge_or_lower(struct dentry *dentry)
+{
+	struct dentry *snap = ovl_dentry_snapshot(dentry);
+	bool ret = ovl_type_merge_or_lower(dentry);
+
+	if (ret || !snap)
+		return ret;
+
+	/* Could be upper for us and merge for underlying snapshot */
+	return ovl_type_merge_or_lower(snap);
+}
+
 static int ovl_set_opaque(struct dentry *upperdentry)
 {
 	return ovl_do_setxattr(upperdentry, OVL_XATTR_OPAQUE, "y", 1, 0);
@@ -1097,7 +1109,7 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	 * that is being moved into a merged directory
 	 */
 	if (is_dir) {
-		if (ovl_type_merge_or_lower(old)) {
+		if (ovl_snapshot_type_merge_or_lower(old)) {
 			err = ovl_set_redirect(old, olddentry, samedir);
 			if (err)
 				goto out_dput;
@@ -1110,7 +1122,7 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 		}
 	}
 	if (!overwrite && new_is_dir) {
-		if (ovl_type_merge_or_lower(new)) {
+		if (ovl_snapshot_type_merge_or_lower(new)) {
 			err = ovl_set_redirect(new, newdentry, samedir);
 			if (err)
 				goto out_dput;

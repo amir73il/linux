@@ -906,6 +906,9 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 				       ufs, &sb->s_stack_depth);
 		if (err)
 			goto out_put_upperpath;
+
+		/* underlying overlayfs does not support exportfs ops */
+		ufs->config.redirect_dir_fh = false;
 	}
 
 	if (ufs->config.workdir) {
