@@ -128,6 +128,13 @@ bool ovl_dentry_is_upper(struct dentry *dentry)
 	return (oe->__upperdentry != NULL);
 }
 
+struct dentry *ovl_dentry_snapshot(struct dentry *dentry)
+{
+	struct ovl_entry *oe = dentry->d_fsdata;
+
+	return oe->__snapdentry;
+}
+
 static struct dentry *__ovl_dentry_lower(struct ovl_entry *oe)
 {
 	return oe->numlower ? oe->lowerstack[0].dentry : NULL;

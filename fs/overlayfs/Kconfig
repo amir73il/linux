@@ -37,3 +37,11 @@ config OVERLAY_FS_REDIRECT_DIR_FH
 	  by absolute path.  That is, mounting an overlay which has both file
 	  handle redirects and absolute path redirects will have unexpected
 	  results.
+
+config OVERLAY_FS_SNAPSHOT
+	bool "Overlayfs snapshot support (Experimental)"
+	depends on OVERLAY_FS
+
+	help
+	  This enables experimental support for overlayfs snapshot.
+	  If unsure, say N
