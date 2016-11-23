@@ -22,3 +22,18 @@ config OVERLAY_FS_REDIRECT_DIR
 	  Note, that redirects are not backward compatible.  That is, mounting
 	  an overlay which has redirects on a kernel that doesn't support this
 	  feature will have unexpected results.
+
+config OVERLAY_FS_REDIRECT_DIR_FH
+	bool "Overlayfs: default to redirect dir by file handle"
+	depends on OVERLAY_FS_REDIRECT_DIR
+	help
+	  If this config option is enabled then overlay filesystems will use
+	  redirects by file handle for merged directories by default. It is
+	  also possible to turn on redirect by file handle globally with the
+	  "redirect_dir=fh" module option or on a filesystem instance basis
+	  with the "redirect_dir=fh" mount option.
+
+	  Note, that redirects by file handle are not compatible with redirect
+	  by absolute path.  That is, mounting an overlay which has both file
+	  handle redirects and absolute path redirects will have unexpected
+	  results.

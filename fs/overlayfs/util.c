@@ -190,6 +190,13 @@ bool ovl_redirect_dir(struct super_block *sb)
 	return ofs->config.redirect_dir;
 }
 
+bool ovl_redirect_dir_fh(struct super_block *sb)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+
+	return ofs->config.redirect_dir_fh;
+}
+
 void ovl_clear_redirect_dir(struct super_block *sb)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;

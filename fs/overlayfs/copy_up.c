@@ -357,9 +357,21 @@ static int ovl_copy_up_locked(struct dentry *workdir, struct dentry *upperdir,
 	if (err)
 		goto out_cleanup;
 
+	if (S_ISDIR(stat->mode) &&
+	    ovl_redirect_dir(dentry->d_sb) &&
+	    ovl_redirect_dir_fh(dentry->d_sb)) {
+		/*
+		 * Store file handle of lower dir in upper dir xattr to
+		 * create a chain of file handles for merged dir stack
+		 */
+		err = ovl_set_redirect(dentry, newdentry, false);
+		if (err)
+			goto out_cleanup;
+	}
+
 	err = ovl_do_rename(wdir, newdentry, udir, upper, 0);
 	if (err)
-		goto out_cleanup;
+		goto redirect_cleanup;
 
 	ovl_dentry_update(dentry, newdentry);
 	ovl_inode_update(d_inode(dentry), d_inode(newdentry));
@@ -377,6 +389,10 @@ out1:
 out:
 	return err;
 
+redirect_cleanup:
+	spin_lock(&dentry->d_lock);
+	ovl_dentry_set_redirect(dentry, NULL);
+	spin_unlock(&dentry->d_lock);
 out_cleanup:
 	ovl_cleanup(wdir, newdentry);
 	goto out2;

@@ -180,6 +180,7 @@ bool ovl_dentry_is_whiteout(struct dentry *dentry);
 bool ovl_dentry_is_upper(struct dentry *dentry);
 void ovl_dentry_set_opaque(struct dentry *dentry, bool opaque);
 bool ovl_redirect_dir(struct super_block *sb);
+bool ovl_redirect_dir_fh(struct super_block *sb);
 void ovl_clear_redirect_dir(struct super_block *sb);
 const char *ovl_dentry_get_redirect(struct dentry *dentry);
 void ovl_dentry_set_redirect(struct dentry *dentry, const char *redirect);
@@ -241,6 +242,7 @@ int ovl_create_real(struct inode *dir, struct dentry *newdentry,
 		    struct kstat *stat, const char *link,
 		    struct dentry *hardlink, bool debug);
 void ovl_cleanup(struct inode *dir, struct dentry *dentry);
+int ovl_set_redirect(struct dentry *dentry, struct dentry *upper, bool samedir);
 
 /* copy_up.c */
 int ovl_copy_up(struct dentry *dentry);

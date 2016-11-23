@@ -17,6 +17,7 @@
 #include <linux/posix_acl_xattr.h>
 #include <linux/atomic.h>
 #include <linux/ratelimit.h>
+#include <linux/exportfs.h>
 #include "overlayfs.h"
 
 static unsigned short ovl_redirect_max = 256;
@@ -794,6 +795,54 @@ static bool ovl_can_move(struct dentry *dentry)
 		!d_is_dir(dentry) || !ovl_type_merge_or_lower(dentry);
 }
 
+static char *ovl_get_redirect_fh(struct dentry *lower)
+{
+	const struct export_operations *nop = lower->d_sb->s_export_op;
+	struct ovl_redirect_fh *redirect_fh;
+	int fh_type, fh_len, dwords;
+	char *buf, *ret;
+	int buflen = min((int)ovl_redirect_max, MAX_HANDLE_SZ);
+
+	/* Do not encode file handle if we cannot decode it later */
+	if (!nop || !nop->fh_to_dentry) {
+		pr_info("overlay: redirect by file handle not supported "
+			"by lower - turning off redirect\n");
+		return ERR_PTR(-EOPNOTSUPP);
+	}
+
+	buf = kmalloc(buflen, GFP_TEMPORARY);
+	if (!buf)
+		return ERR_PTR(-ENOMEM);
+
+	redirect_fh = (struct ovl_redirect_fh *)buf;
+	dwords = (buflen - offsetof(struct ovl_redirect_fh, fid)) >> 2;
+	fh_type = exportfs_encode_fh(lower,
+				     (struct fid *)redirect_fh->fid,
+				     &dwords, 0);
+	fh_len = (dwords << 2) + offsetof(struct ovl_redirect_fh, fid);
+
+	/* On failure to encode fh, fall back to userspace move */
+	ret = ERR_PTR(-EXDEV);
+	if (fh_len > buflen || fh_type <= 0 || fh_type == FILEID_INVALID)
+		goto out;
+
+	redirect_fh->zero = 0;
+	redirect_fh->pad = 0;
+	redirect_fh->type = fh_type;
+	redirect_fh->len = fh_len;
+
+	ret = kmalloc(fh_len, GFP_KERNEL);
+	if (!ret) {
+		ret = ERR_PTR(-ENOMEM);
+		goto out;
+	}
+
+	memcpy(ret, buf, fh_len);
+out:
+	kfree(buf);
+	return ret;
+}
+
 static char *ovl_get_redirect(struct dentry *dentry, bool samedir)
 {
 	char *buf, *ret;
@@ -825,8 +874,13 @@ static char *ovl_get_redirect(struct dentry *dentry, bool samedir)
 			thislen = d->d_name.len;
 		}
 
-		/* If path is too long, fall back to userspace move */
-		if (thislen + (name[0] != '/') > buflen) {
+		/*
+		 * If path is too long, fall back to userspace move.
+		 * We must not mix absolute path redirect and file handle
+		 * redirect on the same overlay mount.
+		 */
+		if (ovl_redirect_is_fh(name) ||
+		    thislen + (name[0] != '/') > buflen) {
 			ret = ERR_PTR(-EXDEV);
 			spin_unlock(&d->d_lock);
 			goto out_put;
@@ -854,7 +908,7 @@ out:
 	return ret ? ret : ERR_PTR(-ENOMEM);
 }
 
-static int ovl_set_redirect(struct dentry *dentry, bool samedir)
+int ovl_set_redirect(struct dentry *dentry, struct dentry *upper, bool samedir)
 {
 	int err;
 	const char *redirect = ovl_dentry_get_redirect(dentry);
@@ -862,25 +916,34 @@ static int ovl_set_redirect(struct dentry *dentry, bool samedir)
 	if (redirect && (samedir || !ovl_redirect_is_samedir(redirect)))
 		return 0;
 
-	redirect = ovl_get_redirect(dentry, samedir);
+	/* Redirect either by current dentry path or by lower file handle */
+	if (ovl_redirect_dir_fh(dentry->d_sb))
+		redirect = ovl_get_redirect_fh(ovl_dentry_lower(dentry));
+	else
+		redirect = ovl_get_redirect(dentry, samedir);
+	err = PTR_ERR(redirect);
 	if (IS_ERR(redirect))
-		return PTR_ERR(redirect);
+		goto out_err;
 
-	err = ovl_do_setxattr(ovl_dentry_upper(dentry), OVL_XATTR_REDIRECT,
-			      redirect, strlen(redirect), 0);
+	err = ovl_do_setxattr(upper, OVL_XATTR_REDIRECT,
+			      redirect, ovl_redirect_fh_len(redirect), 0);
 	if (!err) {
 		spin_lock(&dentry->d_lock);
 		ovl_dentry_set_redirect(dentry, redirect);
 		spin_unlock(&dentry->d_lock);
 	} else {
 		kfree(redirect);
-		if (err == -EOPNOTSUPP)
-			ovl_clear_redirect_dir(dentry->d_sb);
-		else
-			pr_warn_ratelimited("overlay: failed to set redirect (%i)\n", err);
-		/* Fall back to userspace copy-up */
-		err = -EXDEV;
+		goto out_err;
 	}
+	return 0;
+
+out_err:
+	if (err == -EOPNOTSUPP)
+		ovl_clear_redirect_dir(dentry->d_sb);
+	else
+		pr_warn_ratelimited("overlay: failed to set redirect (%i)\n", err);
+	/* Fall back to userspace copy-up */
+	err = -EXDEV;
 	return err;
 }
 
@@ -1013,7 +1076,7 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	 */
 	if (is_dir) {
 		if (ovl_type_merge_or_lower(old)) {
-			err = ovl_set_redirect(old, samedir);
+			err = ovl_set_redirect(old, olddentry, samedir);
 			if (err)
 				goto out_dput;
 		} else if (!old_opaque &&
@@ -1026,7 +1089,7 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	}
 	if (!overwrite && new_is_dir) {
 		if (ovl_type_merge_or_lower(new)) {
-			err = ovl_set_redirect(new, samedir);
+			err = ovl_set_redirect(new, newdentry, samedir);
 			if (err)
 				goto out_dput;
 		} else if (!new_opaque &&
