@@ -409,6 +409,7 @@ int ovl_get_upper(struct ovl_fs *ofs, struct path *upperpath);
 extern struct file_system_type ovl_snapshot_fs_type;
 int ovl_snapshot_fs_register(void);
 void ovl_snapshot_fs_unregister(void);
+struct dentry *ovl_snapshot_dentry(struct dentry *dentry);
 int ovl_snapshot_lookup(struct dentry *parent, struct ovl_lookup_data *d,
 			struct dentry **ret);
 int ovl_snapshot_want_write(struct dentry *dentry);
@@ -428,6 +429,11 @@ static inline void ovl_snapshot_drop_write(struct dentry *dentry) { }
 static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)
 {
 	return false;
+}
+
+static inline struct dentry *ovl_snapshot_dentry(struct dentry *dentry)
+{
+	return NULL;
 }
 
 static inline int ovl_snapshot_lookup(struct dentry *parent,
