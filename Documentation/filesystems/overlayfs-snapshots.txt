@@ -1,0 +1,204 @@
+Written by: Amir Goldstein
+
+See Documentation/filesystems/overlayfs.txt for required background.
+
+Overlayfs Snapshots
+===================
+
+This document describes the overlayfs snapshots feature.
+
+Snapshot overlay
+----------------
+
+A "snapshot overlay" may be thought of as a reverse overlay.
+It looks exactly like a regular overlay mount with one lower layer
+and one upper layer, combined into a unified view, e.g.:
+
+  mount -t overlay snap /snap -o lowerdir=/lower,\
+                                 upperdir=/upper/,workdir=/work
+
+Although the mount looks the same and has similar characteristics to
+a regular overlay mount, it is used in a non conventional way for a
+different use case.
+
+With a regular overlay mount, the lower layer is expected to remain
+unchanged, while upper layer is modified to contain all changes
+performed on the union overlay mount.
+
+With a snapshot overlay mount, lower layer is allowed to change,
+while upper layer is modified to "cover up" on these changes by
+creating copies of the original objects, before they are modified
+in the lower layer.
+
+The result is that the content of the snapshot overlay remains
+constant and therefore, can be used as a snapshot in time of the
+lower layer at the time that the snapshot overlay was mounted.
+
+When an object is deleted from lower layer, the st_dev and st_ino
+fields of that object in the snapshot overlay may change, but its
+content shall remain constant.
+
+
+Snapshot mount
+--------------
+
+The secret sauce that is responsible for "covering up" before lower layer
+changes is the "snapshot mount". A "snapshot mount", although similar by
+name, is not the same as a "snapshot overlay". In fact, it is not an
+overlay at all.
+
+The snapshot mount acts as a shim over the lower layer to intercept
+filesystem operations before modifying the lower layer objects and precede
+those operations with "copy up" to upper layer.
+
+A snapshot mount takes the mount option "snapshot=", with a path value that
+should point to a snapshot overlay mount point.  The device mount argument
+should point to the "lowerdir" of the snapshot overlay, e.g.:
+
+  mount -t overlay snap /snap -o lowerdir=/lower,...
+  mount -t snapshot -o snapshot=/snap /lower /lower
+
+In this example, the snapshot mount is mounted at /lower, on top of the
+underlying filesystem, so any future access to files under the /lower
+directory will not go unnoticed.
+
+Notice that the file system type used for the snapshot mount is "snapshot"
+and not "overlay". This distinction is merely a way to identify the role
+of the mount. Under the hood, the snapshot mount filesystem operations
+are somewhat different then the standard overlay filesystem operations,
+because they serve a different purpose.
+
+
+Underlying filesystem
+---------------------
+
+The snapshot underlying filesystem must be supported as an overlay upper
+layer, so it must be writable and must be a local filesystem.
+
+On top of these standard overlayfs requirements, the underlying filesystem
+must also support NFS export operations, so that the snapshot overlay could
+use the "redirect_dir=origin" feature (see "Renaming directories" section).
+
+
+Unlink and rmdir
+----------------
+
+One of the core functions of a snapshot mount is that write access to *any*
+object in the filesystem is preceded by copy up to upper. This is similar,
+but not the the same as regular overlay. with regular overlay, unlink() and
+rmdir() do not copy up the removed object, but only its parents.
+
+With snapshot mount, unlink() and rmdir() in lower first copies up the
+object to upper and then the object is removed from lower. The result is that
+the object is only in upper, which is the desired outcome.
+
+The case of recursive directory remove is not any different, except, the
+removed directories are already in upper before the rmdir(), because they had
+to be copied up to contain copied up files on earlier unlink() calls.
+
+
+Readdir
+-------
+
+Readdir from a snapshot overlay is very similar to readdir from a regular
+overlay of single upper and single lower with one exception - with snapshot
+overlay, the lower directory may have been deleted.
+
+With regular overlay, an upper directory with no lower directory beneath it
+usually means this is a new "pure" upper directory. Readdir from overlay of
+a "pure" upper directory is a native readdir of the upper directory.
+
+With snapshot overlay, upper directory with no lower directory means that
+upper was copied from lower and then lower was deleted. In this case there
+may be residue whiteouts in the upper directory, so readdir from overlay
+must hide them like it does when reading a merged upper+lower directory.
+On copy to snapshot, the file handle of the lower directory is stored in an
+extended attribute "trusted.overlay.origin" on the upper directory.
+Existance of this extended attribute is used as evidence that this is not
+a "pure" upper directory.
+
+Readdir from the snapshot mount is a native readdir of the lower directory.
+
+
+Implicit opaque directory
+-------------------------
+
+With regular overlay, when a new directory is created in upper on top of
+a whited out object, that directory is marked as "opaque" to prevent merging
+it with lower directories of the same name.
+
+With snapshot overlay, a similar result is achieved implicitly with the
+"redirect_dir=origin" feature. When a lower directory was deleted and a new
+object of the same name was created in its place, the file handle stored in
+the upper directory, that used to lookup the lower directory becomes stale.
+
+When the snapshot overlay lookup reaches a stale origin directory file handle,
+it marks the upper directory "opaque" to get the expected result of not
+exposing the new objects in lower directory to the snapshot overlay.
+
+
+Renaming directories
+--------------------
+
+When the "redirect_dir=origin" feature is enabled in snapshot overlay, the
+origin file handle is used to verify the merged lower directory on snapshot
+overlay lookup.  When verification fails, the origin file handle is decoded
+to find the current path of the lower directory.  If a new path of lower
+directory is found, its value is stored the "trusted.overlay.redirect"
+extended attribute on the upper directory.  This lookup method makes the
+snapshot overlay view of the merged directory resiliant to lower directory
+renames.
+
+
+Explicit whiteouts
+------------------
+
+In order to support create and mkdir in lower layer without the risk of those
+objects being exposed in the snapshot overlay, whiteouts are created in the
+snapshot overlay upper layer before objects are created in the lower layer.
+
+
+Multiple snapshots
+------------------
+
+An overlayfs mount may be stacked on top of another (lower) overlayfs
+mount, but only a single level of nesting is allowed.  Together with
+the underlying filesystem at level 0, this amounts to filesystem stack
+depth of 2, the maximum allowed by VFS (FILESYSTEM_MAX_STACK_DEPTH).
+
+To get a view of anything but the latest snapshot overlay, a single
+overlayfs mount is stacked on top of the latest snapshot overlay and
+the historic upper layers are used as lower layers in reverse order,
+oldest upper layer on top. For example, to get a view at time 2 from
+the latest snapshot overlay at time 4:
+
+  mount -t overlay snap2 -olowerdir=/upper/2:/upper/3:/snap/4 /snap/2
+
+As the example shows, "upperdir=" and "workdir=" are omitted, so the
+stacked overlay mount is read-only.
+
+Similarly, we could mount more nested snapshot overlays to get a view
+of the lower layer at any other snapshot time, e.g.:
+
+  mount -t overlay snap3 -olowerdir=/upper/3:/snap/4 /snap/3
+
+NOTE, that all these mounts will become stale once /snap/4 is no
+longer the latest snapshot and they will have to be remounted with
+the new latest snapshot as the lowest layer in order to revalidate
+their content, e.g.:
+
+  mount -t overlay snap3 -olowerdir=/upper/3:/upper/4:/snap/5 /snap/3
+
+
+Testsuite
+---------
+
+There is a fork of the testsuite developed by David Howells, with support
+for testing overlayfs snapshots at:
+
+  https://github.com/amir73il/unionmount-testsuite.git
+
+Run as root:
+
+  # cd unionmount-testsuite
+  # ./run --sn[=N] --verify
