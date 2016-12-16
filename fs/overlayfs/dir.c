@@ -764,13 +764,18 @@ static int ovl_rmdir(struct inode *dir, struct dentry *dentry)
 	return ovl_do_remove(dentry, true);
 }
 
+static bool ovl_type_merge_or_lower(struct dentry *dentry)
+{
+	enum ovl_path_type type = ovl_path_type(dentry);
+
+	return OVL_TYPE_MERGE(type) || !OVL_TYPE_UPPER(type);
+}
+
 static int ovl_rename(struct inode *olddir, struct dentry *old,
 		      struct inode *newdir, struct dentry *new,
 		      unsigned int flags)
 {
 	int err;
-	enum ovl_path_type old_type;
-	enum ovl_path_type new_type;
 	struct dentry *old_upperdir;
 	struct dentry *new_upperdir;
 	struct dentry *olddentry;
@@ -781,7 +786,7 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	bool cleanup_whiteout = false;
 	bool overwrite = !(flags & RENAME_EXCHANGE);
 	bool is_dir = d_is_dir(old);
-	bool new_is_dir = false;
+	bool new_is_dir = d_is_dir(new);
 	struct dentry *opaquedir = NULL;
 	const struct cred *old_cred = NULL;
 
@@ -792,22 +797,11 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	flags &= ~RENAME_NOREPLACE;
 
 	/* Don't copy up directory trees */
-	old_type = ovl_path_type(old);
 	err = -EXDEV;
-	if (OVL_TYPE_MERGE_OR_LOWER(old_type) && is_dir)
+	if (is_dir && ovl_type_merge_or_lower(old))
 		goto out;
-
-	if (new->d_inode) {
-		if (d_is_dir(new))
-			new_is_dir = true;
-
-		new_type = ovl_path_type(new);
-		err = -EXDEV;
-		if (!overwrite && OVL_TYPE_MERGE_OR_LOWER(new_type) && new_is_dir)
-			goto out;
-	} else {
-		new_type = __OVL_PATH_UPPER;
-	}
+	if (!overwrite && new_is_dir && ovl_type_merge_or_lower(new))
+		goto out;
 
 	err = ovl_want_write(old);
 	if (err)
@@ -831,7 +825,7 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 
 	old_cred = ovl_override_creds(old->d_sb);
 
-	if (overwrite && OVL_TYPE_MERGE_OR_LOWER(new_type) && new_is_dir) {
+	if (overwrite && new_is_dir && ovl_type_merge_or_lower(new)) {
 		opaquedir = ovl_check_empty_and_clear(new);
 		err = PTR_ERR(opaquedir);
 		if (IS_ERR(opaquedir)) {
