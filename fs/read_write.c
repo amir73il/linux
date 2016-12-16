@@ -1543,9 +1543,7 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	if (len == 0)
 		return 0;
 
-	ret = mnt_want_write_file(file_out);
-	if (ret)
-		return ret;
+	sb_start_write(inode_out->i_sb);
 
 	ret = -EOPNOTSUPP;
 	if (file_out->f_op->copy_file_range)
@@ -1564,7 +1562,7 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	inc_syscr(current);
 	inc_syscw(current);
 
-	mnt_drop_write_file(file_out);
+	sb_end_write(inode_out->i_sb);
 
 	return ret;
 }
@@ -1799,9 +1797,7 @@ int vfs_clone_file_range(struct file *file_in, loff_t pos_in,
 	if (pos_in + len > i_size_read(inode_in))
 		return -EINVAL;
 
-	ret = mnt_want_write_file(file_out);
-	if (ret)
-		return ret;
+	sb_start_write(inode_out->i_sb);
 
 	ret = file_in->f_op->clone_file_range(file_in, pos_in,
 			file_out, pos_out, len);
@@ -1810,7 +1806,7 @@ int vfs_clone_file_range(struct file *file_in, loff_t pos_in,
 		fsnotify_modify(file_out);
 	}
 
-	mnt_drop_write_file(file_out);
+	sb_end_write(inode_out->i_sb);
 	return ret;
 }
 EXPORT_SYMBOL(vfs_clone_file_range);
