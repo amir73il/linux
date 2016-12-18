@@ -143,20 +143,36 @@ int __fsnotify_parent(const struct path *path, struct dentry *dentry, __u32 mask
 {
 	struct dentry *parent;
 	struct inode *p_inode;
+	__u32 test_mask = 0;
 	int ret = 0;
 
 	if (!dentry)
 		dentry = path->dentry;
 
-	if (!(dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED))
+	/*
+	 * FS_EVENT_ON_CHILD on sb watch implies reporting events as if all
+	 * directories are watched.
+	 */
+	if (!IS_ROOT(dentry) && fsnotify_sb_watches_children(dentry->d_sb)) {
+		test_mask = dentry->d_sb->s_fsnotify_mask & mask &
+			    ALL_FSNOTIFY_EVENTS;
+	}
+
+	if (!test_mask && !(dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED))
 		return 0;
 
 	parent = dget_parent(dentry);
-	p_inode = parent->d_inode;
+	p_inode = d_inode(parent);
 
-	if (unlikely(!fsnotify_inode_watches_children(p_inode))) {
+	if ((dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED) &&
+	    unlikely(!fsnotify_inode_watches_children(p_inode))) {
 		__fsnotify_update_child_dentry_flags(p_inode);
-	} else if (p_inode->i_fsnotify_mask & mask & ALL_FSNOTIFY_EVENTS) {
+	} else {
+		test_mask |= p_inode->i_fsnotify_mask & mask &
+			     ALL_FSNOTIFY_EVENTS;
+	}
+
+	if (test_mask) {
 		struct name_snapshot name;
 
 		/* we are notifying a parent so come up with the new mask which
@@ -168,8 +184,8 @@ int __fsnotify_parent(const struct path *path, struct dentry *dentry, __u32 mask
 			ret = fsnotify(p_inode, mask, path, FSNOTIFY_EVENT_PATH,
 				       &name.name, 0);
 		else
-			ret = fsnotify(p_inode, mask, dentry->d_inode, FSNOTIFY_EVENT_INODE,
-				       &name.name, 0);
+			ret = fsnotify(p_inode, mask, dentry->d_inode,
+				       FSNOTIFY_EVENT_INODE, &name.name, 0);
 		release_dentry_name_snapshot(&name);
 	}
 
@@ -321,13 +337,11 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 	int ret = 0;
 	__u32 test_mask = (mask & ALL_FSNOTIFY_EVENTS);
 
-	if (data_is == FSNOTIFY_EVENT_PATH) {
+	/* An event "on child" is not intended for a mount mark */
+	if (data_is == FSNOTIFY_EVENT_PATH && !(mask & FS_EVENT_ON_CHILD)) {
 		mnt = real_mount(((const struct path *)data)->mnt);
 		mnt_or_sb_mask |= mnt->mnt_fsnotify_mask;
 	}
-	/* An event "on child" is not intended for a mount/sb mark */
-	if (mask & FS_EVENT_ON_CHILD)
-		mnt_or_sb_mask = 0;
 
 	/*
 	 * Optimization: srcu_read_lock() has a memory barrier which can

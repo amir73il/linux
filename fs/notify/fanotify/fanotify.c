@@ -184,8 +184,7 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 		 * events on a child, don't send it!
 		 */
 		if (event_mask & FS_EVENT_ON_CHILD &&
-		    (type != FSNOTIFY_OBJ_TYPE_INODE ||
-		     !(mark->mask & FS_EVENT_ON_CHILD)))
+		    !(mark->mask & FS_EVENT_ON_CHILD))
 			continue;
 
 		marks_mask |= mark->mask;
@@ -195,7 +194,7 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	test_mask = event_mask & marks_mask & ~marks_ignored_mask;
 
 	/*
-	 * dirent modification events (create/delete/move) do not carry the
+	 * dirent modification events (create/delete/move) do may not carry the
 	 * child entry name/inode information. Instead, we report FAN_ONDIR
 	 * for mkdir/rmdir so user can differentiate them from creat/unlink.
 	 *
@@ -204,11 +203,20 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	 * to user in FAN_REPORT_FID mode for all event types.
 	 */
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_FID)) {
-		/* Do not report FAN_ONDIR without any event */
-		if (!(test_mask & ~FAN_ONDIR))
+		/* Do not report event flags without any event */
+		if (!(test_mask & ~FANOTIFY_EVENT_FLAGS))
 			return 0;
+
+		/*
+		 * Report FAN_EVENT_ON_CHILD only if reporting filename.
+		 * For sb watch, this is how user can differentiate between
+		 * the event reported with child fid and the event reported
+		 * with parent fid and filename.
+		 */
+		if (!FAN_GROUP_FLAG(group, FAN_REPORT_FILENAME))
+			user_mask &= ~FAN_EVENT_ON_CHILD;
 	} else {
-		user_mask &= ~FAN_ONDIR;
+		user_mask &= ~FANOTIFY_EVENT_FLAGS;
 	}
 
 	if (event_mask & FS_ISDIR &&
@@ -318,12 +326,13 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 	}
 
 	/*
-	 * For dirent modification events (create,delete,rename), fid refers to
-	 * the directory and name holds the entry name, so allocate a variable
-	 * length fanotify_filename_event struct.
+	 * When reporting the filename either for dirent modification events
+	 * (create,delete,move) or for events that happen on children when
+	 * user requested FAN_EVENT_ON_CHILD, allocate a variable length
+	 * fanotify_filename_event struct for storing the name.
 	 */
-	if (FAN_GROUP_FLAG(group, FAN_REPORT_FILENAME) &&
-	    (mask & FANOTIFY_DIRENT_EVENTS) && file_name) {
+	if (FAN_GROUP_FLAG(group, FAN_REPORT_FILENAME) && file_name &&
+	    (mask & (FANOTIFY_DIRENT_EVENTS | FS_EVENT_ON_CHILD))) {
 		struct fanotify_filename_event *ffe;
 
 		ffe = kmalloc(sizeof(*ffe) + file_name->len + 1, gfp);
@@ -332,6 +341,11 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 		event = &ffe->fae;
 		event->name_len = file_name->len;
 		strcpy(ffe->name, file_name->name);
+		/*
+		 * When reporting filename to watching parent (inotify style),
+		 * fid refers to parent directory.
+		 */
+		id = inode;
 		goto init;
 	}
 
