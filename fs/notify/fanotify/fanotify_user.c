@@ -257,11 +257,11 @@ static int copy_fid_to_user(struct fanotify_event *event, char __user *buf)
 	if (fanotify_event_has_filename(event)) {
 		/* Copy the filename */
 		if (copy_to_user(buf, FANOTIFY_FE(&event->fse)->name,
-				 event->name_len))
+				 event->name_len + 1))
 			return -EFAULT;
 
-		buf += event->name_len;
-		len -= event->name_len;
+		buf += event->name_len + 1;
+		len -= event->name_len + 1;
 	}
 
 	/* Pad with 0's */
@@ -1021,6 +1021,16 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	    (!FAN_GROUP_FLAG(group, FAN_REPORT_FID) ||
 	     mark_type == FAN_MARK_MOUNT))
 		goto fput_and_out;
+
+	/*
+	 * FAN_EVENT_ON_CHILD is relevant only for inode mark and when group
+	 * wants filename reported on sb mark events.
+	 */
+	if ((mask & FAN_EVENT_ON_CHILD) &&
+	    (mark_type == FAN_MARK_MOUNT ||
+	     (mark_type == FAN_MARK_FILESYSTEM &&
+	      !FAN_GROUP_FLAG(group, FAN_REPORT_FILENAME))))
+	    mask &= ~FAN_EVENT_ON_CHILD;
 
 	if (flags & FAN_MARK_FLUSH) {
 		ret = 0;

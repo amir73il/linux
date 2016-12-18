@@ -360,14 +360,24 @@ extern void fsnotify_sb_delete(struct super_block *sb);
 extern void fsnotify_nameremove(struct dentry *dentry, int isdir);
 extern u32 fsnotify_get_cookie(void);
 
+static inline int fsnotify_watches_children(__u32 mask)
+{
+	/* FS_EVENT_ON_CHILD is set if the inode/sb may care */
+	if (!(mask & FS_EVENT_ON_CHILD))
+		return 0;
+	/* this inode/sb might care about child events, does it care about the
+	 * specific set of events that can happen on a child? */
+	return mask & FS_EVENTS_POSS_ON_CHILD;
+}
+
 static inline int fsnotify_inode_watches_children(struct inode *inode)
 {
-	/* FS_EVENT_ON_CHILD is set if the inode may care */
-	if (!(inode->i_fsnotify_mask & FS_EVENT_ON_CHILD))
-		return 0;
-	/* this inode might care about child events, does it care about the
-	 * specific set of events that can happen on a child? */
-	return inode->i_fsnotify_mask & FS_EVENTS_POSS_ON_CHILD;
+	return fsnotify_watches_children(inode->i_fsnotify_mask);
+}
+
+static inline int fsnotify_sb_watches_children(struct super_block *sb)
+{
+	return fsnotify_watches_children(sb->s_fsnotify_mask);
 }
 
 /*
