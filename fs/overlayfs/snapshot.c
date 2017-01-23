@@ -344,6 +344,16 @@ static void ovl_snapshot_barrier(struct super_block *sb)
 
 static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data);
 
+static int ovl_snapshot_freeze(struct super_block *sb)
+{
+	return freeze_super(ovl_upper_mnt(OVL_FS(sb))->mnt_sb);
+}
+
+static int ovl_snapshot_unfreeze(struct super_block *sb)
+{
+	return thaw_super(ovl_upper_mnt(OVL_FS(sb))->mnt_sb);
+}
+
 static const struct super_operations ovl_snapshot_super_operations = {
 	.alloc_inode	= ovl_alloc_inode,
 	.free_inode	= ovl_free_inode,
@@ -354,6 +364,8 @@ static const struct super_operations ovl_snapshot_super_operations = {
 	.statfs		= ovl_statfs,
 	.show_options	= ovl_snapshot_show_options,
 	.remount_fs	= ovl_snapshot_remount,
+	.freeze_fs	= ovl_snapshot_freeze,
+	.unfreeze_fs	= ovl_snapshot_unfreeze,
 };
 
 static int ovl_snapshot_encode_fh(struct inode *inode, u32 *fid, int *max_len,
