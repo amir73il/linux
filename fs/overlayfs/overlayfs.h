@@ -197,6 +197,23 @@ void ovl_workdir_cleanup(struct inode *dir, struct vfsmount *mnt,
 
 /* inode.c */
 int ovl_setattr(struct dentry *dentry, struct iattr *attr);
+
+#define STATX_TYPE		0
+#define STATX_MODE		0
+#define STATX_NLINK		0
+#define STATX_UID		0
+#define STATX_GID		0
+#define STATX_ATIME		0
+#define STATX_MTIME		0
+#define STATX_CTIME		0
+#define STATX_INO		0
+#define STATX_SIZE		0
+#define STATX_BLOCKS		0
+#define STATX_BASIC_STATS	0
+#define AT_STATX_SYNC_AS_STAT	0
+#define vfs_getattr(path, stat, request_mask, query_flags) \
+	vfs_getattr(path, stat)
+
 int ovl_permission(struct inode *inode, int mask);
 int ovl_xattr_set(struct dentry *dentry, const char *name, const void *value,
 		  size_t size, int flags);
