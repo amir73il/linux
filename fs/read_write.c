@@ -1543,7 +1543,7 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	if (len == 0)
 		return 0;
 
-	sb_start_write(inode_out->i_sb);
+	file_start_write(file_out);
 
 	ret = -EOPNOTSUPP;
 	if (file_out->f_op->copy_file_range)
@@ -1562,7 +1562,7 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	inc_syscr(current);
 	inc_syscw(current);
 
-	sb_end_write(inode_out->i_sb);
+	file_end_write(file_out);
 
 	return ret;
 }
