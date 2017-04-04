@@ -351,6 +351,9 @@ static int ovl_snapshot_freeze(struct super_block *sb)
 
 static int ovl_snapshot_unfreeze(struct super_block *sb)
 {
+	/* Make requested snapshot effective before thawing fs */
+	ovl_snapshot_barrier(sb);
+
 	return thaw_super(OVL_FS(sb)->upper_mnt->mnt_sb);
 }
 
