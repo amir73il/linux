@@ -555,4 +555,18 @@ int ovl_snapshot_want_write(struct dentry *dentry)
 
 void ovl_snapshot_drop_write(struct dentry *dentry)
 {
+	struct dentry *snap = ovl_snapshot_dentry(dentry);
+	struct inode *inode = d_inode(dentry);
+
+	/*
+	 * We may have just dropped this dentry, because it was deleted or
+	 * renamed over - then snapshot still thinks it has a lower dentry.
+	 * Unhash the snapshot dentry as well in this case.
+	 */
+	if (snap && (d_unhashed(dentry))) {
+		pr_debug("ovl_snapshot_d_drop(%pd4, %lu): is_dir=%d, negative=%d, unhashed=%d\n",
+			dentry, inode ? inode->i_ino : 0, d_is_dir(dentry),
+			d_is_negative(dentry), d_unhashed(dentry));
+		d_drop(snap);
+	}
 }
