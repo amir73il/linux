@@ -217,6 +217,9 @@ static int ovl_snapshot_unfreeze(struct super_block *sb)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;
 
+	/* Make requested snapshot effective before thawing fs */
+	ovl_snapshot_barrier(sb);
+
 	return thaw_super(ofs->upper_mnt->mnt_sb);
 }
 
