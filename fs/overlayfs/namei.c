@@ -957,13 +957,33 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		upperopaque = d.opaque;
 	}
 
-	if (is_snapshot_fs) {
+	while (is_snapshot_fs) {
 		d.is_snapshot = true;
 		err = ovl_snapshot_lookup(parent, &d, &snapdentry);
 		if (err)
 			goto out_put_upper;
 
+		err = ovl_snapshot_verify(ofs, snapdentry, upperdentry,
+					  upperredirect);
+		if (err) {
+			if (!upperredirect)
+				goto out_put_upper;
+			/*
+			 * Upper redirect becomes stale after snapshot take.
+			 * If got a stale snapshot dentry with redirect,
+			 * lookup again without redirect
+			 */
+			dput(snapdentry);
+			kfree(upperredirect);
+			upperredirect = NULL;
+			parent = dentry->d_parent;
+			poe = parent->d_fsdata;
+			d.name = dentry->d_name;
+			continue;
+		}
+
 		d.stop = true;
+		break;
 	}
 
 	if (!d.stop && poe->numlower) {

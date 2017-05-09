@@ -404,6 +404,74 @@ struct dentry *ovl_snapshot_dentry(struct dentry *dentry)
 }
 
 /*
+ * Verify that found overlay snapshot dentry in sane -
+ * If the snapshot overlay dentry is a merge/lower dir, then its lower dentry
+ * should be pointing back to the snapshot mount upper dentry.
+ * If the snapshot overlay dentry is non-opaque negative (i.e. not a whiteout),
+ * then the snapshot mount should be also negative (i.e. no upper).
+ * Otherwise, this may be a stray redirect that is pointing the snapshot mount
+ * at the wrong path in overlay snapshot.
+ *
+ * Return 0 for sane, < 0 for inconsitency
+ */
+int ovl_snapshot_verify(struct ovl_fs *ofs, struct dentry *snapdentry,
+			struct dentry *upperdentry, char *redirect)
+{
+	enum ovl_path_type snaptype;
+	int err = 0;
+
+	if (!snapdentry)
+		goto no_redirect;
+
+	/* Redirect should not be pointing at negative */
+	if (!snapdentry->d_inode) {
+		if (!ovl_dentry_is_opaque(snapdentry)) {
+			if (!upperdentry)
+				return 0;
+			/* Either a stale redirect or inconsitency */
+			err = -ENOENT;
+		}
+		goto no_redirect;
+	}
+
+	/* Redirect should not be pointing at non-dir */
+	if (!upperdentry || !d_is_dir(upperdentry) || !d_is_dir(snapdentry))
+		goto no_redirect;
+
+	/* Redirect should not be pointing at non-merge upper */
+	snaptype = ovl_path_type(snapdentry);
+	if (OVL_TYPE_UPPER(snaptype) && !OVL_TYPE_MERGE(snaptype))
+		goto no_redirect;
+
+	/* Lower/merge dir should point back at the redirecting upper */
+	if (ovl_dentry_lower(snapdentry) != upperdentry)
+		goto no_redirect;
+
+	return 0;
+
+no_redirect:
+	/* Clear stale redirect if exists and return ESTALE to retry lookup */
+	if (redirect && upperdentry) {
+		err = mnt_want_write(ofs->upper_mnt);
+		if (!err) {
+			err = ovl_do_removexattr(upperdentry,
+						 OVL_XATTR_REDIRECT);
+			mnt_drop_write(ofs->upper_mnt);
+		}
+		if (!err)
+			err = -ESTALE;
+	} else if (err && snapdentry) {
+		/* We cannot recover from this lookup error */
+		pr_warn_ratelimited("%s(%pd2): is_dir=%d, negative=%d, snap_is_dir=%d, snap_negative=%d, err=%i\n",
+				    __func__, snapdentry,
+				    upperdentry && d_is_dir(upperdentry),
+				    !upperdentry, d_is_dir(snapdentry),
+				    d_is_negative(snapdentry), err);
+	}
+	return err;
+}
+
+/*
  * Lookup the overlay snapshot dentry in the same path as the looked up
  * snapshot mount dentry. We need to hold a reference to a negative snapshot
  * dentry for explicit whiteout before create in snapshot mount and we need
