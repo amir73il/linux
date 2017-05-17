@@ -49,6 +49,9 @@ enum ovl_path_type {
 #error Endianness not defined
 #endif
 
+#define uuid_equal(u1, u2) uuid_equal((const uuid_t *)u1, (const uuid_t *)u2)
+#define uuid_is_null(uuid) uuid_is_null((uuid_t *)uuid)
+
 /* On-disk and in-memeory format for redirect by file handle */
 struct ovl_fh {
 	u8 version;	/* 0 */
@@ -56,7 +59,7 @@ struct ovl_fh {
 	u8 len;		/* size of this header + size of fid */
 	u8 flags;	/* OVL_FH_FLAG_* */
 	u8 type;	/* fid_type of fid */
-	uuid_be uuid;	/* uuid of filesystem */
+	uuid_t uuid;	/* uuid of filesystem */
 	u8 fid[0];	/* file identifier */
 } __packed;
 
