@@ -432,6 +432,11 @@ static int ovl_parse_redirect_mode(struct ovl_config *config, const char *mode)
 		 * redirect following.
 		 */
 		config->redirect_follow = true;
+	} else if (strcmp(mode, "origin") == 0) {
+		/* Follow origin fh if 'redirect' and 'origin' disagree */
+		config->redirect_dir = true;
+		config->redirect_follow = true;
+		config->redirect_origin = true;
 	} else if (strcmp(mode, "follow") == 0) {
 		config->redirect_follow = true;
 	} else if (strcmp(mode, "off") == 0) {
