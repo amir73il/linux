@@ -237,6 +237,10 @@ Mount options:
 - "redirect_dir=nofollow":
     Redirects are not created and not followed (equivalent to "redirect_dir=off"
     if "redirect_always_follow" feature is not enabled).
+- "redirect_dir=origin":
+    Redirects are created, but followed only if lower directory matched the
+    file handle stored in "trusted.overlay.origin" extended attribute on the
+    upper directory.
 
 When the NFS export feature is enabled, every copied up directory is
 indexed by the file handle of the lower inode and a file handle of the
@@ -490,7 +494,6 @@ that the found lower directory file handle and lower filesystem UUID
 match the origin file handle that was stored at copy_up time.  If a
 found lower directory does not match the stored origin, that directory
 will not be merged with the upper directory.
-
 
 
 NFS export
