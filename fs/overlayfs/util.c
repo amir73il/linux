@@ -80,12 +80,13 @@ bool ovl_index_all(struct super_block *sb)
 	return ofs->config.nfs_export && ofs->config.index;
 }
 
-/* Verify lower origin on lookup. For now only enabled for NFS export */
+/* Verify lower origin on lookup */
 bool ovl_verify_lower(struct super_block *sb)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;
 
-	return ofs->config.nfs_export && ofs->config.index;
+	return ofs->config.redirect_origin ||
+		(ofs->config.nfs_export && ofs->config.index);
 }
 
 /* Use compact file handles for lower nested overlayfs */

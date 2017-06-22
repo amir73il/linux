@@ -395,7 +395,7 @@ static int ovl_check_origin(struct ovl_fs *ofs, struct dentry *upperdentry,
 	if (IS_ERR_OR_NULL(fh))
 		return PTR_ERR(fh);
 
-	err = ovl_check_origin_fh(ofs, fh, false, upperdentry, stackp);
+	err = ovl_check_origin_fh(ofs, fh, d->is_dir, upperdentry, stackp);
 	kfree(fh);
 
 	if (err) {
@@ -1016,6 +1016,21 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		stack = origin_path;
 		ctr = 1;
 		origin_path = NULL;
+	}
+
+	/*
+	 * With "redirect_dir=origin", if upper has origin xattr, but lower was
+	 * not found by name or did not match the stored origin fh, try to
+	 * follow the decoded origin fh in upper to the first lower dir.
+	 */
+	if (!d.stop && upperdentry && !ctr && ofs->config.redirect_origin) {
+		err = ovl_check_origin(ofs, upperdentry, &stack, &ctr);
+		if (err)
+			goto out_put;
+		/*
+		 * TODO: Continue lower layers lookup from decoded origin for
+		 *       more than a single lower layer.
+		 */
 	}
 
 	/*

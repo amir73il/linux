@@ -491,6 +491,12 @@ match the origin file handle that was stored at copy_up time.  If a
 found lower directory does not match the stored origin, that directory
 will not be merged with the upper directory.
 
+With mount option "redirect_dir=origin", if the mismatched stored origin
+file handle can be decoded to an existing lower directory, the decoded
+origin directory will be merged with the upper directory instead of the
+mismatched lower directory.  Therefore, the "redirect_dir=origin" mount
+option make an overlay filesystem more resilient to lower directory
+rename and delete.
 
 
 NFS export
