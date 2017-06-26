@@ -72,3 +72,11 @@ config OVERLAY_FS_NFS_EXPORT
 	  Note, that the NFS export feature is not backward compatible.
 	  That is, mounting an overlay which has a full index on a kernel
 	  that doesn't support this feature will have unexpected results.
+
+config OVERLAY_FS_SNAPSHOT
+	bool "Overlayfs snapshot support (Experimental)"
+	depends on OVERLAY_FS
+
+	help
+	  This enables experimental support for overlayfs snapshot.
+	  If unsure, say N
