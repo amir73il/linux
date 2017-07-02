@@ -420,7 +420,8 @@ int ovl_snapshot_verify(struct ovl_fs *ofs, struct dentry *snapdentry,
 	enum ovl_path_type snaptype;
 	int err = 0;
 
-	if (!snapdentry)
+	/* Redirect should not be pointing at disconnected snapshot path */
+	if (!snapdentry || IS_ROOT(snapdentry))
 		goto no_redirect;
 
 	/* Redirect should not be pointing at negative */
@@ -482,12 +483,33 @@ no_redirect:
 int ovl_snapshot_lookup(struct dentry *parent, struct ovl_lookup_data *d,
 			struct dentry **ret)
 {
+	struct ovl_fs *ofs = parent->d_sb->s_fs_info;
+	struct vfsmount *snapmnt = ofs->snapshot_mnt;
 	struct dentry *snapdir = ovl_snapshot_dentry(parent);
+	struct dentry *snapdentry = NULL;
+	int err = 0;
 
-	if (!snapdir || !d_can_lookup(snapdir))
-		return 0;
+	/* No snapmnt means no active snapshot overlay */
+	if (!snapmnt || !snapdir)
+		goto out;
 
-	return ovl_lookup_layer(snapdir, d, ret);
+	/*
+	 * When parent's snapshot dentry is negative or non-dir or when its
+	 * lower dir is not the snapshot mount parent's upper, point the
+	 * snapdentry to the snapshot overlay root. This is needed to
+	 * indicate this special case and to access snapshot overlay sb.
+	 */
+	if (!d_can_lookup(snapdir) ||
+	    ovl_dentry_lower(snapdir) != ovl_dentry_upper(parent)) {
+		snapdentry = dget(snapmnt->mnt_root);
+		goto out;
+	}
+
+	err = ovl_lookup_layer(snapdir, d, &snapdentry);
+
+out:
+	*ret = snapdentry;
+	return err;
 }
 
 /*
