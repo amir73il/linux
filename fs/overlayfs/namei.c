@@ -24,6 +24,7 @@ struct ovl_lookup_data {
 	bool stop;
 	bool last;
 	char *redirect;
+	bool is_snapshot;
 };
 
 static int ovl_check_redirect(struct dentry *dentry, struct ovl_lookup_data *d,
@@ -239,14 +240,28 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 			goto out;
 		goto out_err;
 	}
-	if (!this->d_inode)
+	if (!this->d_inode) {
+		/* We need the snapshot overlay negative dentry */
+		if (d->is_snapshot)
+			goto out;
 		goto put_and_out;
+	}
 
 	if (ovl_dentry_weird(this)) {
 		/* Don't support traversing automounts and other weirdness */
 		err = -EREMOTE;
 		goto out_err;
 	}
+
+	/*
+	 * When looking up in the overlay snapshot mount, all we need to know
+	 * about the snapdentry is if it is positive and if it is upper, so
+	 * we know if we need to CoW. If the snapentry is positive, we don't
+	 * care if it is dir/non-dir and whether it is opaque/redirect.
+	 */
+	if (d->is_snapshot)
+		goto out;
+
 	if (ovl_is_whiteout(this)) {
 		d->stop = d->opaque = true;
 		goto put_and_out;
@@ -279,8 +294,8 @@ out_err:
 	return err;
 }
 
-static int ovl_lookup_layer(struct dentry *base, struct ovl_lookup_data *d,
-			    struct dentry **ret)
+int ovl_lookup_layer(struct dentry *base, struct ovl_lookup_data *d,
+		     struct dentry **ret)
 {
 	/* Counting down from the end, since the prefix can change */
 	size_t rem = d->name.len - 1;
@@ -308,13 +323,21 @@ static int ovl_lookup_layer(struct dentry *base, struct ovl_lookup_data *d,
 			return err;
 		dentry = base;
 		if (end)
-			break;
+			goto out;
 
 		rem -= thislen + 1;
 
 		if (WARN_ON(rem >= d->name.len))
 			return -EIO;
 	}
+
+	if (d->is_snapshot) {
+		/* An ancestor of snapshot entry was negative or non-dir */
+		dput(dentry);
+		dentry = NULL;
+	}
+
+out:
 	*ret = dentry;
 	return 0;
 }
@@ -862,10 +885,12 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	struct ovl_entry *oe;
 	const struct cred *old_cred;
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
-	struct ovl_entry *poe = dentry->d_parent->d_fsdata;
+	struct dentry *parent = dentry->d_parent;
+	struct ovl_entry *poe = parent->d_fsdata;
 	struct ovl_entry *roe = dentry->d_sb->s_root->d_fsdata;
 	struct ovl_path *stack = NULL;
 	struct dentry *upperdir, *upperdentry = NULL;
+	struct dentry *snapdentry = NULL;
 	struct dentry *origin = NULL;
 	struct dentry *index = NULL;
 	unsigned int ctr = 0;
@@ -875,6 +900,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	struct dentry *this;
 	unsigned int i;
 	int err;
+	bool is_snapshot_fs = ovl_is_snapshot_fs_type(dentry->d_sb);
 	struct ovl_lookup_data d = {
 		.name = dentry->d_name,
 		.is_dir = false,
@@ -882,6 +908,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		.stop = false,
 		.last = !poe->numlower && !ofs->config.redirect_origin,
 		.redirect = NULL,
+		.is_snapshot = false,
 	};
 
 	if (dentry->d_name.len > ofs->namelen)
@@ -899,7 +926,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			err = -EREMOTE;
 			goto out;
 		}
-		if (upperdentry && !d.is_dir) {
+		if (upperdentry && !d.is_dir && !is_snapshot_fs) {
 			BUG_ON(!d.stop || d.redirect);
 			/*
 			 * Lookup copy up origin by decoding origin file handle.
@@ -922,10 +949,21 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			upperredirect = kstrdup(d.redirect, GFP_KERNEL);
 			if (!upperredirect)
 				goto out_put_upper;
-			if (d.redirect[0] == '/')
+			if (d.redirect[0] == '/') {
+				parent = dentry->d_sb->s_root;
 				poe = roe;
+			}
 		}
 		upperopaque = d.opaque;
+	}
+
+	if (is_snapshot_fs) {
+		d.is_snapshot = true;
+		err = ovl_snapshot_lookup(parent, &d, &snapdentry);
+		if (err)
+			goto out_put_upper;
+
+		d.stop = true;
 	}
 
 	if (!d.stop && poe->numlower) {
@@ -1066,6 +1104,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	if (!oe)
 		goto out_put;
 
+	oe->__snapdentry = snapdentry;
 	memcpy(oe->lowerstack, stack, sizeof(struct ovl_path) * ctr);
 	dentry->d_fsdata = oe;
 
@@ -1107,6 +1146,7 @@ out_put:
 	kfree(stack);
 out_put_upper:
 	dput(upperdentry);
+	dput(snapdentry);
 	kfree(upperredirect);
 out:
 	kfree(d.redirect);

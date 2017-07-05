@@ -376,3 +376,37 @@ void ovl_snapshot_fs_unregister(void)
 	if (registered)
 		unregister_filesystem(&ovl_snapshot_fs_type);
 }
+
+/*
+ * Helpers for overlayfs snapshot that may be called from code that is
+ * shared between snapshot mount and overlayfs mount.
+ */
+
+struct dentry *ovl_snapshot_dentry(struct dentry *dentry)
+{
+	struct ovl_entry *oe = dentry->d_fsdata;
+
+	if (!ovl_is_snapshot_fs_type(dentry->d_sb))
+		return NULL;
+
+	return oe->__snapdentry;
+}
+
+/*
+ * Lookup the overlay snapshot dentry in the same path as the looked up
+ * snapshot mount dentry. We need to hold a reference to a negative snapshot
+ * dentry for explicit whiteout before create in snapshot mount and we need
+ * to hold a reference to positive non-dir snapshot dentry even if snapshot
+ * mount dentry is a directory, so we know that we don't need to copy up the
+ * snapshot mount directory children.
+ */
+int ovl_snapshot_lookup(struct dentry *parent, struct ovl_lookup_data *d,
+			struct dentry **ret)
+{
+	struct dentry *snapdir = ovl_snapshot_dentry(parent);
+
+	if (!snapdir || !d_can_lookup(snapdir))
+		return 0;
+
+	return ovl_lookup_layer(snapdir, d, ret);
+}
