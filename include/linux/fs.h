@@ -1299,6 +1299,33 @@ extern int send_sigurg(struct fown_struct *fown);
 #define SB_NOUSER	(1<<31)
 
 /*
+ * sb->s_flags.  Note that these mirror the equivalent MS_* flags where
+ * represented in both.
+ */
+#define SB_RDONLY	 1	/* Mount read-only */
+#define SB_NOSUID	 2	/* Ignore suid and sgid bits */
+#define SB_NODEV	 4	/* Disallow access to device special files */
+#define SB_NOEXEC	 8	/* Disallow program execution */
+#define SB_SYNCHRONOUS	16	/* Writes are synced at once */
+#define SB_MANDLOCK	64	/* Allow mandatory locks on an FS */
+#define SB_DIRSYNC	128	/* Directory modifications are synchronous */
+#define SB_NOATIME	1024	/* Do not update access times. */
+#define SB_NODIRATIME	2048	/* Do not update directory access times */
+#define SB_SILENT	32768
+#define SB_POSIXACL	(1<<16)	/* VFS does not apply the umask */
+#define SB_KERNMOUNT	(1<<22) /* this is a kern_mount call */
+#define SB_I_VERSION	(1<<23) /* Update inode I_version field */
+#define SB_LAZYTIME	(1<<25) /* Update the on-disk [acm]times lazily */
+
+/* These sb flags are internal to the kernel */
+#define SB_SUBMOUNT     (1<<26)
+#define SB_NOREMOTELOCK	(1<<27)
+#define SB_NOSEC	(1<<28)
+#define SB_BORN		(1<<29)
+#define SB_ACTIVE	(1<<30)
+#define SB_NOUSER	(1<<31)
+
+/*
  *	Umount options
  */
 
