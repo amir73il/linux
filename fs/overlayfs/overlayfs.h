@@ -203,6 +203,7 @@ enum ovl_path_type ovl_path_real(struct dentry *dentry, struct path *path);
 struct dentry *ovl_dentry_upper(struct dentry *dentry);
 struct dentry *ovl_dentry_lower(struct dentry *dentry);
 struct dentry *ovl_dentry_real(struct dentry *dentry);
+struct dentry *ovl_i_dentry_upper(struct inode *inode);
 struct inode *ovl_inode_upper(struct inode *inode);
 struct inode *ovl_inode_lower(struct inode *inode);
 struct inode *ovl_inode_real(struct inode *inode);
@@ -291,9 +292,9 @@ int ovl_getattr(struct vfsmount *mnt, struct dentry *dentry,
 	vfs_getattr(path, stat)
 
 int ovl_permission(struct inode *inode, int mask);
-int ovl_xattr_set(struct dentry *dentry, const char *name, const void *value,
-		  size_t size, int flags);
-int ovl_xattr_get(struct dentry *dentry, const char *name,
+int ovl_xattr_set(struct dentry *dentry, struct inode *inode, const char *name,
+		  const void *value, size_t size, int flags);
+int ovl_xattr_get(struct dentry *dentry, struct inode *inode, const char *name,
 		  void *value, size_t size);
 ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size);
 struct posix_acl *ovl_get_acl(struct inode *inode, int type);
