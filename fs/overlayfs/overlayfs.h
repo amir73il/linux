@@ -375,7 +375,7 @@ char *ovl_get_redirect(struct dentry *dentry, bool samedir, bool nofollow,
 
 /* copy_up.c */
 int ovl_copy_up(struct dentry *dentry);
-int ovl_copy_up_flags(struct dentry *dentry, int flags);
+int ovl_copy_up_flags(struct dentry *dentry, int flags, bool rocopyup);
 int ovl_copy_xattr(struct dentry *old, struct dentry *new);
 int ovl_set_attr(struct dentry *upper, struct kstat *stat);
 struct ovl_fh *ovl_encode_fh(struct dentry *real, bool is_upper);

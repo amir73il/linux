@@ -786,11 +786,11 @@ static int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 	return err;
 }
 
-int ovl_copy_up_flags(struct dentry *dentry, int flags)
+int ovl_copy_up_flags(struct dentry *dentry, int flags, bool rocopyup)
 {
 	int err = 0;
 	const struct cred *old_cred = ovl_override_creds(dentry->d_sb);
-	bool disconnected = (dentry->d_flags & DCACHE_DISCONNECTED);
+	bool disconnected = rocopyup || (dentry->d_flags & DCACHE_DISCONNECTED);
 
 	/*
 	 * With NFS export, copy up can get called for a disconnected non-dir.
@@ -845,5 +845,5 @@ int ovl_copy_up_flags(struct dentry *dentry, int flags)
 
 int ovl_copy_up(struct dentry *dentry)
 {
-	return ovl_copy_up_flags(dentry, 0);
+	return ovl_copy_up_flags(dentry, 0, false);
 }
