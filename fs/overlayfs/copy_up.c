@@ -195,6 +195,16 @@ out_fput:
 	return error;
 }
 
+static int ovl_set_size(struct dentry *upperdentry, struct kstat *stat)
+{
+	struct iattr attr = {
+		.ia_valid = ATTR_SIZE,
+		.ia_size = stat->size,
+	};
+
+	return notify_change(upperdentry, &attr, NULL);
+}
+
 static int ovl_set_timestamps(struct dentry *upperdentry, struct kstat *stat)
 {
 	struct iattr attr = {
@@ -550,6 +560,7 @@ temp_err:
 static int ovl_copy_up_inode(struct ovl_copy_up_ctx *c, struct dentry *temp)
 {
 	int err;
+	bool sparse = false;
 
 	if (S_ISREG(c->stat.mode)) {
 		struct path upperpath;
@@ -558,9 +569,14 @@ static int ovl_copy_up_inode(struct ovl_copy_up_ctx *c, struct dentry *temp)
 		BUG_ON(upperpath.dentry != NULL);
 		upperpath.dentry = temp;
 
-		err = ovl_copy_up_data(&c->lowerpath, &upperpath, c->stat.size);
-		if (err)
-			return err;
+		if (c->stat.size && c->stat.blocks) {
+			err = ovl_copy_up_data(&c->lowerpath, &upperpath,
+					       c->stat.size);
+			if (err)
+				return err;
+		} else if (c->stat.size) {
+			sparse = true;
+		}
 	}
 
 	err = ovl_copy_xattr(c->lowerpath.dentry, temp);
@@ -568,7 +584,10 @@ static int ovl_copy_up_inode(struct ovl_copy_up_ctx *c, struct dentry *temp)
 		return err;
 
 	inode_lock(temp->d_inode);
-	err = ovl_set_attr(temp, &c->stat);
+	if (sparse)
+		err = ovl_set_size(temp, &c->stat);
+	if (!err)
+		err = ovl_set_attr(temp, &c->stat);
 	inode_unlock(temp->d_inode);
 	if (err)
 		return err;
@@ -688,6 +707,14 @@ static int ovl_do_copy_up(struct ovl_copy_up_ctx *c)
 
 	/* Should we copyup with O_TMPFILE or with workdir? */
 	if (S_ISREG(c->stat.mode) && ofs->tmpfile) {
+		/*
+		 * With consistent fd feature, if clone-up is not supported,
+		 * we copy up only the inode metadata. Lower and upper inode
+		 * pages are expected to be copied on write lazily.
+		 */
+		if (ovl_consistent_fd(c->dentry->d_sb) && !ofs->cloneup)
+			c->stat.blocks = 0;
+
 		c->tmpfile = true;
 		err = ovl_copy_up_locked(c);
 	} else {

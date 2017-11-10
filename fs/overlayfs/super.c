@@ -1130,14 +1130,14 @@ static int ovl_get_indexdir(struct ovl_fs *ofs, struct ovl_entry *oe,
 		pr_warn("overlayfs: try deleting index dir or mounting with '-o index=off' to disable inodes index.\n");
 
 	/*
-	 * Copy on read for consistent fd depends on underlying fs clone
-	 * support and on index dir, which depends on !ovl_force_readonly.
+	 * Copy on read for consistent fd depends on index dir, which depends
+	 * on !ovl_force_readonly.
 	 * On ro mount, fd is always consistent, but if overlay can be
 	 * later remounted rw, we need to copy on read anyway, so that
 	 * ro fd that was opened during ro mount will be consistent with
 	 * rw fd that is opened after remount rw.
 	 */
-	if (!ofs->cloneup || !ofs->indexdir)
+	if (!ofs->indexdir)
 		ofs->config.consistent_fd = false;
 
 out:
