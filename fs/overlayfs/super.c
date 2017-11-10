@@ -89,7 +89,11 @@ static struct dentry *ovl_d_real(struct dentry *dentry,
 				 unsigned int open_flags, unsigned int flags)
 {
 	struct dentry *real;
+	bool rocopyup = !inode && ovl_consistent_fd(dentry->d_sb);
 	int err;
+
+	if (WARN_ON(open_flags && inode))
+		return dentry;
 
 	if (flags & D_REAL_UPPER)
 		return ovl_dentry_upper(dentry);
@@ -100,8 +104,8 @@ static struct dentry *ovl_d_real(struct dentry *dentry,
 		goto bug;
 	}
 
-	if (open_flags) {
-		err = ovl_open_maybe_copy_up(dentry, open_flags);
+	if (open_flags || rocopyup) {
+		err = ovl_open_maybe_copy_up(dentry, open_flags, rocopyup);
 		if (err)
 			return ERR_PTR(err);
 	}
@@ -350,6 +354,8 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 	if (ofs->config.nfs_export != ovl_nfs_export_def)
 		seq_printf(m, ",nfs_export=%s", ofs->config.nfs_export ?
 						"on" : "off");
+	if (ofs->config.consistent_fd)
+		seq_puts(m, ",consistent_fd");
 	return 0;
 }
 
@@ -384,6 +390,7 @@ enum {
 	OPT_INDEX_OFF,
 	OPT_NFS_EXPORT_ON,
 	OPT_NFS_EXPORT_OFF,
+	OPT_CONSISTENT_FD,
 	OPT_ERR,
 };
 
@@ -397,6 +404,7 @@ static const match_table_t ovl_tokens = {
 	{OPT_INDEX_OFF,			"index=off"},
 	{OPT_NFS_EXPORT_ON,		"nfs_export=on"},
 	{OPT_NFS_EXPORT_OFF,		"nfs_export=off"},
+	{OPT_CONSISTENT_FD,		"consistent_fd"},
 	{OPT_ERR,			NULL}
 };
 
@@ -514,6 +522,10 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 
 		case OPT_NFS_EXPORT_OFF:
 			config->nfs_export = false;
+			break;
+
+		case OPT_CONSISTENT_FD:
+			config->consistent_fd = true;
 			break;
 
 		default:
@@ -1116,6 +1128,17 @@ static int ovl_get_indexdir(struct ovl_fs *ofs, struct ovl_entry *oe,
 	}
 	if (err || !ofs->indexdir)
 		pr_warn("overlayfs: try deleting index dir or mounting with '-o index=off' to disable inodes index.\n");
+
+	/*
+	 * Copy on read for consistent fd depends on underlying fs clone
+	 * support and on index dir, which depends on !ovl_force_readonly.
+	 * On ro mount, fd is always consistent, but if overlay can be
+	 * later remounted rw, we need to copy on read anyway, so that
+	 * ro fd that was opened during ro mount will be consistent with
+	 * rw fd that is opened after remount rw.
+	 */
+	if (!ofs->cloneup || !ofs->indexdir)
+		ofs->config.consistent_fd = false;
 
 out:
 	mnt_drop_write(mnt);

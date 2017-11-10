@@ -19,6 +19,7 @@ struct ovl_config {
 	const char *redirect_mode;
 	bool index;
 	bool nfs_export;
+	bool consistent_fd;
 };
 
 struct ovl_layer {
@@ -52,6 +53,7 @@ struct ovl_fs {
 	bool tmpfile;
 	bool noxattr;
 	bool cloneup;
+	bool rocopyup;	/* copy up on open for read */
 	/* sb common to all layers */
 	struct super_block *same_sb;
 	/* Did we take the inuse lock? */

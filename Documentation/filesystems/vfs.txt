@@ -1084,22 +1084,21 @@ struct dentry_operations {
 	dentry being transited from.
 
   d_real: overlay/union type filesystems implement this method to return one of
-	the underlying dentries hidden by the overlay.  It is used in three
+	the underlying dentries hidden by the overlay.  It is used in two
 	different modes:
 
 	Called from open it may need to copy-up the file depending on the
-	supplied open flags.  This mode is selected with a non-zero flags
-	argument.  In this mode the d_real method can return an error.
+	supplied open flags.  It returns the upper real dentry if file was
+	copied up or the topmost real underlying dentry otherwise.
+	This mode is selected with a NULL inode argument.
+	In this mode the d_real method can return an error.
 
 	Called from file_dentry() it returns the real dentry matching the inode
 	argument.  The real dentry may be from a lower layer already copied up,
 	but still referenced from the file.  This mode is selected with a
 	non-NULL inode argument.  This will always succeed.
 
-	With NULL inode and zero flags the topmost real underlying dentry is
-	returned.  This will always succeed.
-
-	This method is never called with both non-NULL inode and non-zero flags.
+	This method is never called with non-NULL inode and non-zero open flags.
 
 Each dentry has a pointer to its parent dentry, as well as a hash list
 of child dentries. Child dentries are basically like files in a
