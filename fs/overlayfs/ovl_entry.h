@@ -51,6 +51,7 @@ struct ovl_fs {
 	const struct cred *creator_cred;
 	bool tmpfile;
 	bool noxattr;
+	bool cloneup;
 	/* sb common to all layers */
 	struct super_block *same_sb;
 	/* Did we take the inuse lock? */
