@@ -470,6 +470,75 @@ bug:
 	return -EROFS;
 }
 
+/* Explicitly whiteout a negative snapshot mount dentry before create */
+static int ovl_snapshot_whiteout(struct dentry *snap)
+{
+	struct dentry *parent;
+	struct dentry *upperdir;
+	struct inode *sdir, *udir;
+	struct dentry *whiteout;
+	const struct cred *old_cred;
+	int err;
+
+	/* No need to whiteout a positive or whiteout snapshot dentry */
+	if (!d_is_negative(snap) || ovl_dentry_is_opaque(snap))
+		return 0;
+
+	parent = dget_parent(snap);
+	sdir = parent->d_inode;
+
+	inode_lock_nested(sdir, I_MUTEX_PARENT);
+
+	err = ovl_want_write(snap);
+	if (err)
+		return err;
+
+	err = ovl_copy_up(parent);
+	if (err)
+		goto out_drop_write;
+
+	upperdir = ovl_dentry_upper(parent);
+	udir = upperdir->d_inode;
+
+	old_cred = ovl_override_creds(snap->d_sb);
+
+	inode_lock_nested(udir, I_MUTEX_PARENT);
+	whiteout = lookup_one_len(snap->d_name.name, upperdir,
+				  snap->d_name.len);
+	if (IS_ERR(whiteout)) {
+		err = PTR_ERR(whiteout);
+		goto out_unlock;
+	}
+
+	/*
+	 * We could have raced with another task that tested false
+	 * ovl_dentry_is_opaque() before udir lock, so if we find a
+	 * whiteout all is good.
+	 */
+	if (!ovl_is_whiteout(whiteout)) {
+		err = ovl_do_whiteout(udir, whiteout);
+		if (err)
+			goto out_dput_whiteout;
+	}
+
+	/*
+	 * Setting a negative snapshot dentry opaque to signify that
+	 * there is no need for explicit whiteout next time.
+	 */
+	ovl_dentry_set_opaque(snap);
+	ovl_dentry_version_inc(parent, true);
+out_dput_whiteout:
+	dput(whiteout);
+out_unlock:
+	inode_unlock(udir);
+	revert_creds(old_cred);
+out_drop_write:
+	ovl_drop_write(snap);
+	inode_unlock(sdir);
+	dput(parent);
+	return err;
+}
+
 int ovl_snapshot_want_write(struct dentry *dentry)
 {
 	struct dentry *snap = ovl_snapshot_dentry(dentry);
@@ -477,8 +546,9 @@ int ovl_snapshot_want_write(struct dentry *dentry)
 	if (!snap)
 		return 0;
 
+	/* Negative dentry may need to be explicitly whited out */
 	if (d_is_negative(dentry))
-		return 0;
+		return ovl_snapshot_whiteout(snap);
 
 	return ovl_snapshot_copy_down(dentry);
 }
