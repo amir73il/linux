@@ -591,6 +591,87 @@ bug:
 	return -EROFS;
 }
 
+/* Explicitly whiteout a negative snapshot fs dentry before create */
+static int ovl_snapshot_whiteout(struct dentry *dentry)
+{
+	struct dentry *snap = ovl_snapshot_dentry(dentry);
+	struct dentry *parent = NULL;
+	struct dentry *upperdir;
+	struct dentry *whiteout = NULL;
+	struct inode *sdir = NULL;
+	struct inode *udir = NULL;
+	const struct cred *old_cred = NULL;
+	int err = 0;
+
+	if (IS_ERR(snap))
+		return PTR_ERR(snap);
+
+	/* No need to whiteout a positive or whiteout snapshot dentry */
+	if (!snap || !d_is_negative(snap) || ovl_dentry_is_opaque(snap))
+		goto out;
+
+	parent = dget_parent(snap);
+	sdir = parent->d_inode;
+
+	inode_lock_nested(sdir, I_MUTEX_PARENT);
+
+	err = ovl_want_write(snap);
+	if (err)
+		goto out;
+
+	err = ovl_copy_up(parent);
+	if (err)
+		goto out_drop_write;
+
+	upperdir = ovl_dentry_upper(parent);
+	udir = upperdir->d_inode;
+	old_cred = ovl_override_creds(snap->d_sb);
+	inode_lock_nested(udir, I_MUTEX_PARENT);
+
+	whiteout = lookup_one_len(snap->d_name.name, upperdir,
+				  snap->d_name.len);
+	if (IS_ERR(whiteout)) {
+		err = PTR_ERR(whiteout);
+		whiteout = NULL;
+		goto out_drop_write;
+	}
+
+	/*
+	 * We could have raced with another task that tested false
+	 * ovl_dentry_is_opaque() before udir lock, so if we find a
+	 * whiteout all is good.
+	 */
+	if (!ovl_is_whiteout(whiteout)) {
+		err = ovl_do_whiteout(udir, whiteout);
+		if (err)
+			goto out_drop_write;
+	}
+
+	/*
+	 * Setting a negative snapshot dentry opaque to signify that
+	 * lower is going to be positive and set dedntry flags to suppress
+	 * copy to snapshot of future object and possibly its children.
+	 */
+	ovl_dentry_set_opaque(snap);
+	ovl_dir_modified(parent, true);
+	ovl_snapshot_set_nocow(dentry);
+	ovl_snapshot_set_children_nocow(dentry);
+
+out_drop_write:
+	if (udir)
+		inode_unlock(udir);
+	if (old_cred)
+		revert_creds(old_cred);
+	ovl_drop_write(snap);
+out:
+	if (sdir)
+		inode_unlock(sdir);
+	dput(whiteout);
+	dput(parent);
+	dput(snap);
+	return err;
+}
+
 int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 {
 	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
@@ -611,7 +692,10 @@ int ovl_snapshot_modify(struct dentry *dentry)
 	int err = 0;
 
 	if (snapmnt && ovl_snapshot_need_cow(dentry)) {
-		if (!d_is_negative(dentry))
+		/* Negative dentry may need to be explicitly whited out */
+		if (d_is_negative(dentry))
+			err = ovl_snapshot_whiteout(dentry);
+		else
 			err = ovl_snapshot_copy_up(dentry);
 	}
 
