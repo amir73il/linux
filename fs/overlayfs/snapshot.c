@@ -12,10 +12,12 @@
 
 #include <uapi/linux/magic.h>
 #include <linux/fs.h>
+#include <linux/cred.h>
 #include <linux/module.h>
 #include <linux/mount.h>
 #include <linux/namei.h>
 #include <linux/parser.h>
+#include <linux/ratelimit.h>
 #include <linux/seq_file.h>
 #include "overlayfs.h"
 
@@ -516,4 +518,89 @@ void ovl_snapshot_fs_unregister(void)
 {
 	if (registered)
 		unregister_filesystem(&ovl_snapshot_fs_type);
+}
+
+/*
+ * Helpers for overlayfs snapshot that may be called from code that is
+ * shared between snapshot fs mount and overlay fs mount.
+ */
+static struct dentry *ovl_snapshot_dentry(struct dentry *dentry)
+{
+	struct dentry *parent = dget_parent(dentry);
+	struct dentry *snap;
+
+	snap = ovl_snapshot_check_cow(parent, dentry);
+
+	dput(parent);
+	return snap;
+}
+
+/*
+ * Copy to snapshot if needed before file is modified.
+ */
+static int ovl_snapshot_copy_up(struct dentry *dentry)
+{
+	struct inode *inode = d_inode(dentry);
+	struct dentry *snap = NULL;
+	bool disconnected = dentry->d_flags & DCACHE_DISCONNECTED;
+	int err = -ENOENT;
+
+	if (WARN_ON(!inode) ||
+	    WARN_ON(disconnected))
+		goto bug;
+
+	/*
+	 * Snapshot overlay dentry may be positive or negative or NULL.
+	 * If positive, it may need to be copied up.
+	 * If negative, it should be a whiteout, because our dentry is positive.
+	 * If snapshot overlay dentry is already copied up or whiteout or if it
+	 * is an ancestor of an already whited out directory, we need to do
+	 * nothing about it.
+	 */
+	snap = ovl_snapshot_dentry(dentry);
+	if (!snap)
+		return 0;
+
+	if (IS_ERR(snap)) {
+		err = PTR_ERR(snap);
+		snap = NULL;
+		goto bug;
+	}
+
+	if (WARN_ON(d_is_negative(snap)))
+		goto bug;
+
+	/* Trigger copy up in snapshot overlay */
+	err = ovl_want_write(snap);
+	if (err)
+		goto bug;
+	err = ovl_copy_up_with_data(snap);
+	ovl_drop_write(snap);
+	if (err)
+		goto bug;
+
+	/* No need to copy to snapshot next time */
+	ovl_snapshot_set_nocow(dentry);
+	dput(snap);
+	return 0;
+bug:
+	pr_warn_ratelimited("failed copy to snapshot (%pd2, ino=%lu, err=%i)\n",
+			    dentry, inode ? inode->i_ino : 0, err);
+	dput(snap);
+	/* Allowing write would corrupt snapshot so deny */
+	return -EROFS;
+}
+
+int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
+{
+	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
+	int err = 0;
+
+	if (snapmnt && ovl_open_flags_need_copy_up(flags) &&
+	    !special_file(d_inode(dentry)->i_mode) &&
+	    ovl_snapshot_need_cow(dentry))
+		err = ovl_snapshot_copy_up(dentry);
+
+	mntput(snapmnt);
+	return err;
 }

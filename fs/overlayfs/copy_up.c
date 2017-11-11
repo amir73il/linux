@@ -940,6 +940,9 @@ int ovl_copy_up_flags(struct dentry *dentry, int flags)
 
 static bool ovl_open_need_copy_up(struct dentry *dentry, int flags)
 {
+	if (ovl_is_snapshot_fs_type(dentry->d_sb))
+		return false;
+
 	/* Copy up of disconnected dentry does not set upper alias */
 	if (ovl_already_copied_up(dentry, flags))
 		return false;
@@ -956,6 +959,9 @@ static bool ovl_open_need_copy_up(struct dentry *dentry, int flags)
 int ovl_maybe_copy_up(struct dentry *dentry, int flags)
 {
 	int err = 0;
+
+	/* Maybe copy to snapshot on open for write */
+	err = ovl_snapshot_maybe_copy_up(dentry, flags);
 
 	if (ovl_open_need_copy_up(dentry, flags)) {
 		err = ovl_want_write(dentry);
