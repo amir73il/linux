@@ -18,12 +18,19 @@
 int ovl_want_write(struct dentry *dentry)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+	int err = ovl_snapshot_want_write(dentry);
+
+	if (err)
+		return err;
+
 	return mnt_want_write(ovl_upper_mnt(ofs));
 }
 
 void ovl_drop_write(struct dentry *dentry)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+
+	ovl_snapshot_drop_write(dentry);
 	mnt_drop_write(ovl_upper_mnt(ofs));
 }
 

@@ -604,3 +604,17 @@ int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 	mntput(snapmnt);
 	return err;
 }
+
+int ovl_snapshot_modify(struct dentry *dentry)
+{
+	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
+	int err = 0;
+
+	if (snapmnt && ovl_snapshot_need_cow(dentry)) {
+		if (!d_is_negative(dentry))
+			err = ovl_snapshot_copy_up(dentry);
+	}
+
+	mntput(snapmnt);
+	return err;
+}
