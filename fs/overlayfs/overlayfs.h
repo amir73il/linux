@@ -397,6 +397,8 @@ void ovl_put_super(struct super_block *sb);
 int ovl_sync_fs(struct super_block *sb, int wait);
 int ovl_statfs(struct dentry *dentry, struct kstatfs *buf);
 char *ovl_next_opt(char **s);
+void ovl_unescape(char *s);
+int ovl_mount_dir_noesc(const char *name, struct path *path);
 int ovl_get_upper(struct ovl_fs *ofs, struct path *upperpath);
 
 #ifdef CONFIG_OVERLAY_FS_SNAPSHOT
@@ -404,6 +406,7 @@ int ovl_get_upper(struct ovl_fs *ofs, struct path *upperpath);
 extern struct file_system_type ovl_snapshot_fs_type;
 int ovl_snapshot_fs_register(void);
 void ovl_snapshot_fs_unregister(void);
+
 static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)
 {
 	return sb->s_type == &ovl_snapshot_fs_type;
@@ -412,6 +415,7 @@ static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)
 #else
 static inline int ovl_snapshot_fs_register(void) { return 0; }
 static inline void ovl_snapshot_fs_unregister(void) { }
+
 static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)
 {
 	return false;

@@ -9,6 +9,7 @@
  */
 
 struct ovl_config {
+	char *snapshot;
 	char *lowerdir;
 	char *upperdir;
 	char *workdir;
@@ -37,6 +38,7 @@ struct ovl_path {
 /* private information held for overlayfs's superblock */
 struct ovl_fs {
 	struct vfsmount *upper_mnt;
+	struct vfsmount *snapshot_mnt;
 	unsigned numlower;
 	struct ovl_layer *lower_layers;
 	/* workbasedir is the path at workdir= mount option */
@@ -66,6 +68,7 @@ struct ovl_entry {
 	union {
 		struct {
 			unsigned long flags;
+			struct dentry *__snapdentry; /* snapshot fs */
 		};
 		struct rcu_head rcu;
 	};
