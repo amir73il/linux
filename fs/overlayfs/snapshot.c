@@ -14,8 +14,11 @@
 #include <linux/fs.h>
 #include <linux/module.h>
 #include <linux/mount.h>
+#include <linux/cred.h>
+#include <linux/namei.h>
 #include <linux/parser.h>
 #include <linux/seq_file.h>
+#include <linux/ratelimit.h>
 #include "overlayfs.h"
 
 static void ovl_snapshot_dentry_release(struct dentry *dentry)
@@ -27,6 +30,8 @@ static void ovl_snapshot_dentry_release(struct dentry *dentry)
 		kfree_rcu(oe, rcu);
 	}
 }
+
+static int ovl_snapshot_copy_down(struct dentry *dentry);
 
 static struct dentry *ovl_snapshot_d_real(struct dentry *dentry,
 					  const struct inode *inode,
@@ -47,6 +52,12 @@ static struct dentry *ovl_snapshot_d_real(struct dentry *dentry,
 
 	if (!real)
 		goto bug;
+
+	if (open_flags & (O_ACCMODE|O_TRUNC)) {
+		err = ovl_snapshot_copy_down(dentry);
+		if (err)
+			return ERR_PTR(err);
+	}
 
 	if (inode && inode != d_inode(real))
 		goto bug;
@@ -409,4 +420,52 @@ int ovl_snapshot_lookup(struct dentry *parent, struct ovl_lookup_data *d,
 		return 0;
 
 	return ovl_lookup_layer(snapdir, d, ret);
+}
+
+/*
+ * Copy on write to snapshot if needed before file is modified.
+ */
+static int ovl_snapshot_copy_down(struct dentry *dentry)
+{
+	struct inode *inode = d_inode(dentry);
+	struct dentry *snap = ovl_snapshot_dentry(dentry);
+	int err = -ENOENT;
+
+	if (WARN_ON(d_is_negative(dentry)))
+		goto bug;
+
+	/*
+	 * Snapshot dentry may be positive or negative or NULL.
+	 * If positive, it may need to be copied down.
+	 * If negative, it should be a whiteout.
+	 * Otherwise, the entry is nested inside an already
+	 * whited out directory, so need to do nothing about it.
+	 */
+	if (!snap)
+		return 0;
+
+	if (d_is_negative(snap)) {
+		if (WARN_ON(!ovl_dentry_is_opaque(snap)))
+			goto bug;
+		return 0;
+	}
+
+	if (ovl_dentry_upper(snap) && ovl_dentry_has_upper_alias(snap))
+		return 0;
+
+	/* Trigger 'copy down' to snapshot */
+	err = ovl_want_write(snap);
+	if (err)
+		goto bug;
+	err = ovl_copy_up(snap);
+	ovl_drop_write(snap);
+	if (err)
+		goto bug;
+
+	return 0;
+bug:
+	pr_warn_ratelimited("overlayfs: failed copy to snapshot (%pd2, ino=%lu, err=%i)\n",
+			    dentry, inode ? inode->i_ino : 0, err);
+	/* Allowing write would corrupt snapshot so deny */
+	return -EROFS;
 }
