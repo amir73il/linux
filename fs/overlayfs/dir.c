@@ -807,11 +807,19 @@ static bool ovl_snapshot_type_merge_or_lower(struct dentry *dentry)
 	struct dentry *snap = ovl_snapshot_dentry(dentry);
 	bool ret = ovl_type_merge_or_lower(dentry);
 
-	if (ret || !snap || !snap->d_inode)
+	if (unlikely(IS_ERR(snap))) {
+		pr_warn_ratelimited("%s(%pd2): ret=%d, err=%i\n", __func__,
+				    dentry, ret, (int)PTR_ERR(snap));
+		d_drop(dentry);
 		return ret;
+	}
 
-	/* Could be upper for us and merge for underlying snapshot */
-	return ovl_type_merge_or_lower(snap);
+	/* Could be upper for us and merge for snapshot overlay */
+	if (!ret && snap && snap->d_inode)
+		ret = ovl_type_merge_or_lower(snap);
+
+	dput(snap);
+	return ret;
 }
 
 static bool ovl_can_move(struct dentry *dentry)

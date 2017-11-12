@@ -305,7 +305,7 @@ static int ovl_snapshot_fill_super(struct super_block *sb, void *data,
 		if (IS_ERR(snapmnt))
 			goto out_err;
 
-		ofs->snapshot_mnt = snapmnt;
+		ofs->__snapmnt = snapmnt;
 	}
 
 	err = -ENOMEM;
@@ -393,14 +393,90 @@ void ovl_snapshot_fs_unregister(void)
  * shared between snapshot mount and overlayfs mount.
  */
 
+static int ovl_snapshot_dentry_is_valid(struct dentry *snapdentry,
+					struct vfsmount *snapmnt)
+{
+	/* No snaphsot overlay (pre snapshot take) */
+	if (!snapmnt && !snapdentry)
+		return 0;
+
+	/* An uninitialized snapdentry after snapshot take */
+	if (!snapdentry)
+		return -ENOENT;
+
+	/*
+	 * snapmnt is NULL and snapdentry is non-NULL
+	 * or snapdentry->d_sb != snapmnt->mnt_sb. This implies
+	 * a stale snapdentry from an older snapshot overlay
+	 */
+	if (unlikely(!snapmnt ||
+		     snapmnt->mnt_sb != snapdentry->d_sb))
+		return -ESTALE;
+
+	return 0;
+}
+
+/*
+ * Return snapshot overlay path associated with a snapshot mount dentry
+ * with elevated refcount if it is valid or error if snapshot mount dentry
+ * should be revalidated.
+ */
+static int ovl_snapshot_path(struct dentry *dentry, struct path *path)
+{
+	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+	struct ovl_entry *oe = dentry->d_fsdata;
+	struct path snappath;
+	int err;
+
+	rcu_read_lock();
+	snappath.mnt = mntget(rcu_dereference(ofs->__snapmnt));
+	snappath.dentry = dget(rcu_dereference(oe->__snapdentry));
+	rcu_read_unlock();
+
+	err = ovl_snapshot_dentry_is_valid(snappath.dentry, snappath.mnt);
+	if (err)
+		goto out_err;
+
+	*path = snappath;
+	return 0;
+
+out_err:
+	path_put(&snappath);
+	return err;
+}
+
+/*
+ * Return snapshot overlay dentry associated with a snapshot mount dentry
+ * with elevated refcount if it is valid or error if snapshot mount dentry
+ * should be revalidated.
+ * If a snapshot mount dentry is used after snapshot take without being
+ * revalidated this function may return ESTALE/ENOENT.
+ */
 struct dentry *ovl_snapshot_dentry(struct dentry *dentry)
 {
-	struct ovl_entry *oe = dentry->d_fsdata;
+	struct path snappath = { };
+	int err;
 
+	/* Not a snapshot mount */
 	if (!ovl_is_snapshot_fs_type(dentry->d_sb))
 		return NULL;
 
-	return oe->__snapdentry;
+	err = ovl_snapshot_path(dentry, &snappath);
+	if (err)
+		return ERR_PTR(err);
+
+	/*
+	 * If snapentry is root, but dentry is not, that indicates that
+	 * snapentry is nested inside an already whited out directory,
+	 * so need to do nothing about it.
+	 */
+	if (snappath.dentry && IS_ROOT(snappath.dentry) && !IS_ROOT(dentry)) {
+		path_put(&snappath);
+		return NULL;
+	}
+
+	mntput(snappath.mnt);
+	return snappath.dentry;
 }
 
 /*
@@ -483,14 +559,16 @@ no_redirect:
 int ovl_snapshot_lookup(struct dentry *parent, struct ovl_lookup_data *d,
 			struct dentry **ret)
 {
-	struct ovl_fs *ofs = parent->d_sb->s_fs_info;
-	struct vfsmount *snapmnt = ofs->snapshot_mnt;
-	struct dentry *snapdir = ovl_snapshot_dentry(parent);
+	struct path snappath;
 	struct dentry *snapdentry = NULL;
-	int err = 0;
+	int err;
 
-	/* No snapmnt means no active snapshot overlay */
-	if (!snapmnt || !snapdir)
+	err = ovl_snapshot_path(parent, &snappath);
+	if (unlikely(err))
+		return err;
+
+	/* No parent snapshot dentry means no active snapshot overlay */
+	if (!snappath.dentry)
 		goto out;
 
 	/*
@@ -499,15 +577,16 @@ int ovl_snapshot_lookup(struct dentry *parent, struct ovl_lookup_data *d,
 	 * snapdentry to the snapshot overlay root. This is needed to
 	 * indicate this special case and to access snapshot overlay sb.
 	 */
-	if (!d_can_lookup(snapdir) ||
-	    ovl_dentry_lower(snapdir) != ovl_dentry_upper(parent)) {
-		snapdentry = dget(snapmnt->mnt_root);
+	if (!d_can_lookup(snappath.dentry) ||
+	    ovl_dentry_lower(snappath.dentry) != ovl_dentry_upper(parent)) {
+		snapdentry = dget(snappath.mnt->mnt_root);
 		goto out;
 	}
 
-	err = ovl_lookup_layer(snapdir, d, &snapdentry);
+	err = ovl_lookup_layer(snappath.dentry, d, &snapdentry);
 
 out:
+	path_put(&snappath);
 	*ret = snapdentry;
 	return err;
 }
@@ -519,29 +598,33 @@ static int ovl_snapshot_copy_down(struct dentry *dentry)
 {
 	struct inode *inode = d_inode(dentry);
 	struct dentry *snap = ovl_snapshot_dentry(dentry);
-	int err = -ENOENT;
-
-	if (WARN_ON(d_is_negative(dentry)))
-		goto bug;
+	int err = 0;
 
 	/*
 	 * Snapshot dentry may be positive or negative or NULL.
 	 * If positive, it may need to be copied down.
 	 * If negative, it should be a whiteout.
-	 * Otherwise, the entry is nested inside an already
-	 * whited out directory, so need to do nothing about it.
+	 * If NULL, it may be an uninitialized snapdentry after snapshot take,
+	 * or it can also be that the snapshot dentry is nested inside an
+	 * already whited out directory. Either way, we do nothing about it.
 	 */
 	if (!snap)
 		return 0;
 
+	if (unlikely(IS_ERR(snap))) {
+		err = PTR_ERR(snap);
+		snap = NULL;
+		goto bug;
+	}
+
 	if (d_is_negative(snap)) {
 		if (WARN_ON(!ovl_dentry_is_opaque(snap)))
 			goto bug;
-		return 0;
+		goto out;
 	}
 
 	if (ovl_dentry_upper(snap) && ovl_dentry_has_upper_alias(snap))
-		return 0;
+		goto out;
 
 	/* Trigger 'copy down' to snapshot */
 	err = ovl_want_write(snap);
@@ -552,27 +635,43 @@ static int ovl_snapshot_copy_down(struct dentry *dentry)
 	if (err)
 		goto bug;
 
+out:
+	dput(snap);
 	return 0;
+
 bug:
 	pr_warn_ratelimited("overlayfs: failed copy to snapshot (%pd2, ino=%lu, err=%i)\n",
 			    dentry, inode ? inode->i_ino : 0, err);
+	dput(snap);
 	/* Allowing write would corrupt snapshot so deny */
 	return -EROFS;
 }
 
 /* Explicitly whiteout a negative snapshot mount dentry before create */
-static int ovl_snapshot_whiteout(struct dentry *snap)
+static int ovl_snapshot_whiteout(struct dentry *dentry)
 {
 	struct dentry *parent;
 	struct dentry *upperdir;
 	struct inode *sdir, *udir;
 	struct dentry *whiteout;
 	const struct cred *old_cred;
-	int err;
+	struct dentry *snap = ovl_snapshot_dentry(dentry);
+	int err = 0;
+
+	if (!snap)
+		return 0;
+
+	if (unlikely(IS_ERR(snap))) {
+		err = PTR_ERR(snap);
+		pr_warn_ratelimited("%s(%pd2): err=%i\n", __func__,
+				    dentry, err);
+		d_drop(dentry);
+		return err;
+	}
 
 	/* No need to whiteout a positive or whiteout snapshot dentry */
 	if (!d_is_negative(snap) || ovl_dentry_is_opaque(snap))
-		return 0;
+		goto out;
 
 	parent = dget_parent(snap);
 	sdir = parent->d_inode;
@@ -581,7 +680,7 @@ static int ovl_snapshot_whiteout(struct dentry *snap)
 
 	err = ovl_want_write(snap);
 	if (err)
-		return err;
+		goto out;
 
 	err = ovl_copy_up(parent);
 	if (err)
@@ -626,19 +725,19 @@ out_drop_write:
 	ovl_drop_write(snap);
 	inode_unlock(sdir);
 	dput(parent);
+out:
+	dput(snap);
 	return err;
 }
 
 int ovl_snapshot_want_write(struct dentry *dentry)
 {
-	struct dentry *snap = ovl_snapshot_dentry(dentry);
-
-	if (!snap)
+	if (!ovl_is_snapshot_fs_type(dentry->d_sb))
 		return 0;
 
 	/* Negative dentry may need to be explicitly whited out */
 	if (d_is_negative(dentry))
-		return ovl_snapshot_whiteout(snap);
+		return ovl_snapshot_whiteout(dentry);
 
 	return ovl_snapshot_copy_down(dentry);
 }
@@ -648,15 +747,23 @@ void ovl_snapshot_drop_write(struct dentry *dentry)
 	struct dentry *snap = ovl_snapshot_dentry(dentry);
 	struct inode *inode = d_inode(dentry);
 
+	if (unlikely(IS_ERR(snap))) {
+		pr_warn_ratelimited("%s(%pd2): err=%i\n", __func__,
+				    dentry, (int)PTR_ERR(snap));
+		d_drop(dentry);
+		return;
+	}
+
 	/*
 	 * We may have just dropped this dentry, because it was deleted or
 	 * renamed over - then snapshot still thinks it has a lower dentry.
 	 * Unhash the snapshot dentry as well in this case.
 	 */
-	if (snap && (d_unhashed(dentry))) {
+	if (snap && d_unhashed(dentry)) {
 		pr_debug("ovl_snapshot_d_drop(%pd4, %lu): is_dir=%d, negative=%d, unhashed=%d\n",
 			dentry, inode ? inode->i_ino : 0, d_is_dir(dentry),
 			d_is_negative(dentry), d_unhashed(dentry));
 		d_drop(snap);
 	}
+	dput(snap);
 }
