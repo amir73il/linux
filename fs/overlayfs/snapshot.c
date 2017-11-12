@@ -76,9 +76,97 @@ bug:
 	return dentry;
 }
 
+static int ovl_snapshot_dentry_is_valid(struct dentry *snapdentry,
+					struct vfsmount *snapmnt)
+{
+	/* No snaphsot overlay (pre snapshot take) */
+	if (!snapmnt && !snapdentry)
+		return 0;
+
+	/* An uninitialized snapdentry after snapshot take */
+	if (!snapdentry)
+		return -ENOENT;
+
+	/*
+	 * snapmnt is NULL and snapdentry is non-NULL
+	 * or snapdentry->d_sb != snapmnt->mnt_sb. This implies
+	 * a stale snapdentry from an older snapshot overlay
+	 */
+	if (unlikely(!snapmnt ||
+		     snapmnt->mnt_sb != snapdentry->d_sb))
+		return -ESTALE;
+
+	return 0;
+}
+
+/*
+ * Return snapshot overlay path associated with a snapshot mount dentry
+ * with elevated refcount if it is valid or error if snapshot mount dentry
+ * should be revalidated.
+ */
+static int ovl_snapshot_path(struct dentry *dentry, struct path *path)
+{
+	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+	struct ovl_entry *oe = dentry->d_fsdata;
+	struct path snappath;
+	int err;
+
+	rcu_read_lock();
+	snappath.mnt = mntget(rcu_dereference(ofs->__snapmnt));
+	snappath.dentry = dget(rcu_dereference(oe->__snapdentry));
+	rcu_read_unlock();
+
+	err = ovl_snapshot_dentry_is_valid(snappath.dentry, snappath.mnt);
+	if (err)
+		goto out_err;
+
+	*path = snappath;
+	return 0;
+
+out_err:
+	path_put(&snappath);
+	return err;
+}
+
+/*
+ * Returns 1 if both snapdentry and snapmnt are NULL or
+ * if snapdentry and snapmnt point to the same super block.
+ *
+ * Returns 0 if snapdentry is NULL and snapmnt is not NULL or
+ * if snapdentry and snapmnt point to different super blocks.
+ * This will cause vfs lookup to invalidate this dentry and call ovl_lookup()
+ * again to re-lookup snapdentry from the current snapmnt.
+ */
+static int ovl_snapshot_revalidate(struct dentry *dentry, unsigned int flags)
+{
+	struct path snappath = { };
+	int err;
+
+	if (flags & LOOKUP_RCU) {
+		struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+		struct ovl_entry *oe = dentry->d_fsdata;
+
+		err = ovl_snapshot_dentry_is_valid(
+				rcu_dereference(oe->__snapdentry),
+				rcu_dereference(ofs->__snapmnt));
+	} else {
+		err = ovl_snapshot_path(dentry, &snappath);
+		path_put(&snappath);
+	}
+
+	if (likely(!err))
+		return 1;
+
+	if (err == -ESTALE || err == -ENOENT)
+	       return 0;
+
+	return err;
+}
+
 static const struct dentry_operations ovl_snapshot_dentry_operations = {
 	.d_release = ovl_snapshot_dentry_release,
 	.d_real = ovl_snapshot_d_real,
+	.d_revalidate = ovl_snapshot_revalidate,
 };
 
 static int ovl_snapshot_show_options(struct seq_file *m, struct dentry *dentry)
@@ -392,58 +480,6 @@ void ovl_snapshot_fs_unregister(void)
  * Helpers for overlayfs snapshot that may be called from code that is
  * shared between snapshot mount and overlayfs mount.
  */
-
-static int ovl_snapshot_dentry_is_valid(struct dentry *snapdentry,
-					struct vfsmount *snapmnt)
-{
-	/* No snaphsot overlay (pre snapshot take) */
-	if (!snapmnt && !snapdentry)
-		return 0;
-
-	/* An uninitialized snapdentry after snapshot take */
-	if (!snapdentry)
-		return -ENOENT;
-
-	/*
-	 * snapmnt is NULL and snapdentry is non-NULL
-	 * or snapdentry->d_sb != snapmnt->mnt_sb. This implies
-	 * a stale snapdentry from an older snapshot overlay
-	 */
-	if (unlikely(!snapmnt ||
-		     snapmnt->mnt_sb != snapdentry->d_sb))
-		return -ESTALE;
-
-	return 0;
-}
-
-/*
- * Return snapshot overlay path associated with a snapshot mount dentry
- * with elevated refcount if it is valid or error if snapshot mount dentry
- * should be revalidated.
- */
-static int ovl_snapshot_path(struct dentry *dentry, struct path *path)
-{
-	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
-	struct ovl_entry *oe = dentry->d_fsdata;
-	struct path snappath;
-	int err;
-
-	rcu_read_lock();
-	snappath.mnt = mntget(rcu_dereference(ofs->__snapmnt));
-	snappath.dentry = dget(rcu_dereference(oe->__snapdentry));
-	rcu_read_unlock();
-
-	err = ovl_snapshot_dentry_is_valid(snappath.dentry, snappath.mnt);
-	if (err)
-		goto out_err;
-
-	*path = snappath;
-	return 0;
-
-out_err:
-	path_put(&snappath);
-	return err;
-}
 
 /*
  * Return snapshot overlay dentry associated with a snapshot mount dentry
