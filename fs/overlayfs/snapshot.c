@@ -179,6 +179,8 @@ static int ovl_snapshot_show_options(struct seq_file *m, struct dentry *dentry)
 		seq_puts(m, ",redirect_dir=off");
 	if (ofs->config.snapshot)
 		seq_show_option(m, "snapshot", ofs->config.snapshot);
+	else
+		seq_puts(m, ",nosnapshot");
 
 	return 0;
 }
@@ -203,6 +205,7 @@ enum {
 	/* mount options that can be changed on remount: */
 	OPT_REMOUNT_FIRST,
 	OPT_SNAPSHOT = OPT_REMOUNT_FIRST,
+	OPT_NOSNAPSHOT,
 	OPT_ERR,
 };
 
@@ -211,6 +214,7 @@ static const match_table_t ovl_snapshot_tokens = {
 	{OPT_REDIRECT_DIR_ON,		"redirect_dir=on"},
 	{OPT_REDIRECT_DIR_OFF,		"redirect_dir=off"},
 	{OPT_SNAPSHOT,			"snapshot=%s"},
+	{OPT_NOSNAPSHOT,		"nosnapshot"},
 	{OPT_ERR,			NULL}
 };
 
@@ -254,6 +258,11 @@ static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config,
 			config->snapshot = match_strdup(&args[0]);
 			if (!config->snapshot)
 				return -ENOMEM;
+			break;
+
+		case OPT_NOSNAPSHOT:
+			kfree(config->snapshot);
+			config->snapshot = NULL;
 			break;
 
 		default:
@@ -466,24 +475,53 @@ static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
 		.upperdir = NULL,
 		.workdir = NULL,
 	};
+	char *nosnapshot = NULL;
 	int err;
 
-	if (data)
-		pr_info("%s: '%s'\n", __func__, (char *)data);
+	if (!data)
+		return 0;
+
+	pr_info("%s: -o'%s'\n", __func__, (char *)data);
+
+	/*
+	 * Set config.snapshot to an empty string and parse remount options.
+	 * If no new snapshot= option nor nosnapshot option was found,
+	 * config.snapshot will remain an empty string and nothing will change.
+	 * If snapshot= option will set a new config.snapshot value or
+	 * nosnapshot option will free the empty string, then we will
+	 * change the snapshot overlay to the new one or to NULL.
+	 */
+	if (ofs->config.snapshot) {
+		err = -ENOMEM;
+		nosnapshot = kstrdup("", GFP_KERNEL);
+		if (!nosnapshot)
+			return err;
+		config.snapshot = nosnapshot;
+	}
 
 	err = ovl_snapshot_parse_opt((char *)data, &config, true);
 	if (err)
 		goto out_free_config;
 
-	if ((!config.snapshot && !ofs->config.snapshot) ||
-	    (config.snapshot && ofs->config.snapshot &&
-	     strcmp(config.snapshot, ofs->config.snapshot) == 0))
+	/*
+	 * If parser did not change empty string or if parser found
+	 * 'nosnapshot' and there is no snapshot - do nothing
+	 */
+	if ((config.snapshot && !*config.snapshot) ||
+	    (!config.snapshot && !ofs->config.snapshot))
 		goto out_free_config;
+
+	pr_debug("%s: old snapshot='%s'\n", __func__, ofs->config.snapshot);
 
 	if (config.snapshot) {
 		err = ovl_snapshot_dir(sb, ofs, config.snapshot, &snappath);
 		if (err)
 			goto out_free_config;
+
+		/* If new snappath is same sb as old snapmnt - do nothing */
+		if (ofs->__snapmnt &&
+		    ofs->__snapmnt->mnt_sb == snappath.mnt->mnt_sb)
+			goto out_put_snappath;
 
 		snapmnt = ovl_snapshot_clone_mount(ofs, &snappath);
 		if (IS_ERR(snapmnt)) {
@@ -493,6 +531,8 @@ static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
 
 		snaproot = dget(snappath.dentry);
 	}
+
+	pr_debug("%s: new snapshot='%s'\n", __func__, config.snapshot);
 
 	kfree(ofs->config.snapshot);
 	ofs->config.snapshot = config.snapshot;
