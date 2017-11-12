@@ -38,7 +38,8 @@ struct ovl_path {
 /* private information held for overlayfs's superblock */
 struct ovl_fs {
 	struct vfsmount *upper_mnt;
-	struct vfsmount *__snapmnt;
+	struct vfsmount *snap_mnt;	/* requested */
+	struct vfsmount *__snapmnt;	/* effective */
 	unsigned numlower;
 	struct ovl_layer *lower_layers;
 	/* workbasedir is the path at workdir= mount option */
