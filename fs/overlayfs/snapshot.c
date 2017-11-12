@@ -183,10 +183,7 @@ static int ovl_snapshot_show_options(struct seq_file *m, struct dentry *dentry)
 	return 0;
 }
 
-static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
-{
-	return 0;
-}
+static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data);
 
 static const struct super_operations ovl_snapshot_super_operations = {
 	.alloc_inode	= ovl_alloc_inode,
@@ -203,7 +200,9 @@ enum {
 	OPT_UPPERDIR,
 	OPT_REDIRECT_DIR_ON,
 	OPT_REDIRECT_DIR_OFF,
-	OPT_SNAPSHOT,
+	/* mount options that can be changed on remount: */
+	OPT_REMOUNT_FIRST,
+	OPT_SNAPSHOT = OPT_REMOUNT_FIRST,
 	OPT_ERR,
 };
 
@@ -215,7 +214,8 @@ static const match_table_t ovl_snapshot_tokens = {
 	{OPT_ERR,			NULL}
 };
 
-static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config)
+static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config,
+				  bool remount)
 {
 	char *p;
 
@@ -227,6 +227,10 @@ static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config)
 			continue;
 
 		token = match_token(p, ovl_snapshot_tokens, args);
+		/* Ignore options that cannot be changed on remount */
+		if (remount && token < OPT_REMOUNT_FIRST)
+			continue;
+
 		switch (token) {
 		case OPT_UPPERDIR:
 			kfree(config->upperdir);
@@ -348,7 +352,7 @@ static int ovl_snapshot_fill_super(struct super_block *sb, void *data,
 		goto out_err;
 
 	ofs->config.redirect_dir = true;
-	err = ovl_snapshot_parse_opt((char *) data, &ofs->config);
+	err = ovl_snapshot_parse_opt((char *) data, &ofs->config, false);
 	if (err)
 		goto out_err;
 
@@ -447,6 +451,70 @@ static struct dentry *ovl_snapshot_mount(struct file_system_type *fs_type,
 					 void *raw_data)
 {
 	return mount_nodev(fs_type, flags, raw_data, ovl_snapshot_fill_super);
+}
+
+static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct ovl_entry *roe = sb->s_root->d_fsdata;
+	struct path snappath = { };
+	struct vfsmount *snapmnt = NULL;
+	struct dentry *snaproot = NULL;
+	struct ovl_config config = {
+		.snapshot = NULL,
+		.lowerdir = NULL,
+		.upperdir = NULL,
+		.workdir = NULL,
+	};
+	int err;
+
+	if (data)
+		pr_info("%s: '%s'\n", __func__, (char *)data);
+
+	err = ovl_snapshot_parse_opt((char *)data, &config, true);
+	if (err)
+		goto out_free_config;
+
+	if ((!config.snapshot && !ofs->config.snapshot) ||
+	    (config.snapshot && ofs->config.snapshot &&
+	     strcmp(config.snapshot, ofs->config.snapshot) == 0))
+		goto out_free_config;
+
+	if (config.snapshot) {
+		err = ovl_snapshot_dir(sb, ofs, config.snapshot, &snappath);
+		if (err)
+			goto out_free_config;
+
+		snapmnt = ovl_snapshot_clone_mount(ofs, &snappath);
+		if (IS_ERR(snapmnt)) {
+			err = PTR_ERR(snapmnt);
+			goto out_put_snappath;
+		}
+
+		snaproot = dget(snappath.dentry);
+	}
+
+	kfree(ofs->config.snapshot);
+	ofs->config.snapshot = config.snapshot;
+	config.snapshot = NULL;
+
+	/* prepare to drop old snapshot overlay */
+	path_put(&snappath);
+	snappath.mnt = ofs->__snapmnt;
+	snappath.dentry = roe->__snapdentry;
+	rcu_assign_pointer(ofs->__snapmnt, snapmnt);
+	rcu_assign_pointer(roe->__snapdentry, snaproot);
+	/* wait grace period before dropping old snapshot overlay */
+	synchronize_rcu();
+
+out_put_snappath:
+	path_put(&snappath);
+out_free_config:
+	kfree(config.snapshot);
+	kfree(config.lowerdir);
+	kfree(config.upperdir);
+	kfree(config.workdir);
+	return err;
 }
 
 struct file_system_type ovl_snapshot_fs_type = {
