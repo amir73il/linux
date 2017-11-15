@@ -626,6 +626,7 @@ int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index)
 	upper = ovl_index_upper(ofs, index);
 	if (IS_ERR_OR_NULL(upper)) {
 		err = PTR_ERR(upper);
+		upper = NULL;
 		/*
 		 * Directory index entries with no 'upper' xattr need to be
 		 * removed. When dir index entry has a stale 'upper' xattr,
@@ -640,7 +641,6 @@ int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index)
 	}
 
 	err = ovl_verify_fh(upper, OVL_XATTR_ORIGIN, fh);
-	dput(upper);
 	if (err)
 		goto fail;
 
@@ -654,8 +654,52 @@ int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index)
 			goto orphan;
 	}
 
+	/*
+	 * Check if nested overlay dir origin is stale/renamed and set
+	 * opaque/redirect xattr.
+	 */
+	if (d_is_dir(index) && ofs->config.redirect_origin &&
+	    ofs->lower_layers[0].mnt->mnt_sb->s_type == &ovl_fs_type) {
+		int ctr = 0;
+		struct ovl_lookup_data d = {
+			.is_dir = true,
+			.redirect = NULL,
+		};
+
+		/*
+		 * ovl_check_origin() takes upper_mnt sb_writers for fixing
+		 * opaque/redirect xattr, but we are already holding the
+		 * upper_mnt sb_writers and index dir locks, so temporary let
+		 * go of the locks.
+		 *
+		 * We could also pass an argument to ovl_check_origin() not
+		 * to take upper_mnt sb_writers, but that will still leave us
+		 * with a false positive lockdep warning about inverted locking
+		 * order upperfs_dir_lock -> ovl_dir_lock, because the index
+		 * dir of the nested overlay and the index dir of the underlying
+		 * overlay have the same lock class.
+		 *
+		 * TODO: decode origin of dir index entries on a second pass
+		 *       without grabbing the sb_writers and index dir locks.
+		 */
+		inode_unlock(d_inode(ofs->indexdir));
+		mnt_drop_write(ofs->upper_mnt);
+
+		err = ovl_check_origin(ofs, upper, &stack, &ctr, &d);
+		kfree(d.redirect);
+		if (err)
+			goto fail;
+
+		err = mnt_want_write(ofs->upper_mnt);
+		inode_lock_nested(d_inode(ofs->indexdir), I_MUTEX_PARENT);
+		if (err)
+			goto fail;
+
+	}
+
 out:
 	dput(origin.dentry);
+	dput(upper);
 	kfree(fh);
 	return err;
 
