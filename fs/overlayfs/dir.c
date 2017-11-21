@@ -798,7 +798,15 @@ static bool ovl_can_move(struct dentry *dentry)
 		!d_is_dir(dentry) || !ovl_type_merge_or_lower(dentry);
 }
 
-static char *ovl_get_redirect(struct dentry *dentry, bool samedir)
+/*
+ * This routine provides functionality similar to realpath(2), where upper
+ * redirects along the path are expanded while resolving path components.
+ * When @nofollow is true, redirects are not exapnaded. @nofollow can be used
+ * to get the upper redirect path from the underlying lower path.
+ * If @root is non NULL, get the path relative to @root dentry.
+ */
+char *ovl_get_redirect(struct dentry *dentry, bool samedir, bool nofollow,
+		       struct dentry *root)
 {
 	char *buf, *ret;
 	struct dentry *d, *tmp;
@@ -816,12 +824,13 @@ static char *ovl_get_redirect(struct dentry *dentry, bool samedir)
 
 	buflen--;
 	buf[buflen] = '\0';
-	for (d = dget(dentry); !IS_ROOT(d);) {
-		const char *name;
+	for (d = dget(dentry); !IS_ROOT(d) && d != root;) {
+		const char *name = NULL;
 		int thislen;
 
 		spin_lock(&d->d_lock);
-		name = ovl_dentry_get_redirect(d);
+		if (!nofollow)
+			name = ovl_dentry_get_redirect(d);
 		if (name) {
 			thislen = strlen(name);
 		} else {
@@ -845,7 +854,7 @@ static char *ovl_get_redirect(struct dentry *dentry, bool samedir)
 		d = tmp;
 
 		/* Absolute redirect: finished */
-		if (buf[buflen] == '/')
+		if (!nofollow && buf[buflen] == '/')
 			break;
 		buflen--;
 		buf[buflen] = '/';
@@ -866,7 +875,7 @@ static int ovl_set_redirect(struct dentry *dentry, bool samedir)
 	if (redirect && (samedir || redirect[0] == '/'))
 		return 0;
 
-	redirect = ovl_get_redirect(dentry, samedir);
+	redirect = ovl_get_redirect(dentry, samedir, false, NULL);
 	if (IS_ERR(redirect))
 		return PTR_ERR(redirect);
 

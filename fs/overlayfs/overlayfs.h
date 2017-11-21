@@ -368,6 +368,8 @@ int ovl_create_real(struct inode *dir, struct dentry *newdentry,
 		    struct cattr *attr,
 		    struct dentry *hardlink, bool debug);
 int ovl_cleanup(struct inode *dir, struct dentry *dentry);
+char *ovl_get_redirect(struct dentry *dentry, bool samedir, bool nofollow,
+		       struct dentry *root);
 
 /* copy_up.c */
 int ovl_copy_up(struct dentry *dentry);

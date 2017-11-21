@@ -398,6 +398,43 @@ static int ovl_check_origin(struct ovl_fs *ofs, struct dentry *upperdentry,
 		return err;
 	}
 
+	if (d->is_dir) {
+		struct ovl_path *origin = *stackp;
+		char *redirect;
+
+		redirect = ovl_get_redirect(origin->dentry, false, true,
+					    origin->layer->mnt->mnt_root);
+		if (IS_ERR(redirect)) {
+			dput(origin->dentry);
+			return PTR_ERR(redirect);
+		}
+
+		/*
+		 * Set redirect xattr to absolute path of decoded origin.
+		 * If origin is not on uppermost lower layer (idx > 1),
+		 * redirect xattr may be pointing at an unverified dir at the
+		 * same path on a higher lower layer, so there is no use
+		 * setting the same redirect over again.
+		 */
+		err = -EEXIST;
+		if (!d->redirect || strcmp(d->redirect, redirect)) {
+			err = mnt_want_write(ofs->upper_mnt);
+			if (!err) {
+				err = ovl_do_setxattr(upperdentry,
+						      OVL_XATTR_REDIRECT,
+						      redirect,
+						      strlen(redirect), 0);
+				mnt_drop_write(ofs->upper_mnt);
+			}
+		}
+		pr_warn_ratelimited("overlayfs: implicit redirect dir (%pd2 -> %s) %s(idx=%d, err=%i)\n",
+				    upperdentry, redirect,
+				    err ? "" : "set explicit ",
+				    origin->layer->idx, err);
+		kfree(d->redirect);
+		d->redirect = redirect;
+	}
+
 	if (WARN_ON(*ctrp))
 		return -EIO;
 
@@ -979,13 +1016,30 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		if (err)
 			goto out_put;
 
-		if (d.opaque)
+		if (d.opaque) {
 			upperopaque = true;
+		} else if (d.redirect &&
+			   !WARN_ON(!ctr || d.redirect[0] != '/')) {
+			/*
+			 * If there are lower layers below decoded origin,
+			 * return -ESTALE after setting upper redirect xattr
+			 * to retry lookup again by redirect and continue
+			 * to lower layers lookup.
+			 */
+			if (stack[0].layer->idx < roe->numlower) {
+				err = -ESTALE;
+				pr_warn_ratelimited("overlayfs: retry lookup for mismatch origin (%pd2, layer=%d, redirect=%s)\n",
+						    upperdentry, stack[0].layer->idx,
+						    d.redirect);
+				goto out_put;
+			}
 
-		/*
-		 * TODO: Continue lower layers lookup from decoded origin for
-		 *       more than a single lower layer.
-		 */
+			err = -ENOMEM;
+			kfree(upperredirect);
+			upperredirect = kstrdup(d.redirect, GFP_KERNEL);
+			if (!upperredirect)
+				goto out_put;
+		}
 	}
 
 	/*
