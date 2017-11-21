@@ -429,6 +429,8 @@ struct dentry *ovl_create_real(struct inode *dir, struct dentry *newdentry,
 			       struct ovl_cattr *attr);
 int ovl_cleanup(struct inode *dir, struct dentry *dentry);
 struct dentry *ovl_create_temp(struct dentry *workdir, struct ovl_cattr *attr);
+char *ovl_get_redirect(struct dentry *dentry, bool abs_redirect, bool nofollow,
+		       struct dentry *root);
 
 /* file.c */
 extern const struct file_operations ovl_file_operations;
