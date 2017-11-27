@@ -33,6 +33,8 @@ static bool should_merge(struct fsnotify_event *old_fsn,
 
 	if (fanotify_event_has_filename(old)) {
 		if (old->name_len != new->name_len ||
+		    FANOTIFY_FE(old_fsn)->cookie !=
+		    FANOTIFY_FE(new_fsn)->cookie ||
 		    strcmp(FANOTIFY_FE(old_fsn)->name,
 			   FANOTIFY_FE(new_fsn)->name))
 			return false;
@@ -296,7 +298,8 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 					    struct inode *inode, u32 mask,
 					    const void *data, int data_type,
 					    __kernel_fsid_t *fsid,
-					    const struct qstr *file_name)
+					    const struct qstr *file_name,
+					    u32 cookie)
 {
 	struct fanotify_event *event = NULL;
 	gfp_t gfp = GFP_KERNEL_ACCOUNT;
@@ -341,6 +344,7 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 		event = &ffe->fae;
 		event->name_len = file_name->len;
 		strcpy(ffe->name, file_name->name);
+		ffe->cookie = cookie;
 		/*
 		 * When reporting filename to watching parent (inotify style),
 		 * fid refers to parent directory.
@@ -469,7 +473,7 @@ static int fanotify_handle_event(struct fsnotify_group *group,
 	}
 
 	event = fanotify_alloc_event(group, inode, mask, data, data_type,
-				     &fsid, file_name);
+				     &fsid, file_name, cookie);
 	ret = -ENOMEM;
 	if (unlikely(!event)) {
 		/*

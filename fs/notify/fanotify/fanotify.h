@@ -120,6 +120,7 @@ static inline bool fanotify_event_has_filename(struct fanotify_event *event)
  */
 struct fanotify_filename_event {
 	struct fanotify_event fae;
+	u32 cookie;
 	/*
 	 * For filename events (create,delete,rename), fid refers to the
 	 * directory and name holds the entry name
@@ -168,4 +169,5 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 					    struct inode *inode, u32 mask,
 					    const void *data, int data_type,
 					    __kernel_fsid_t *fsid,
-					    const struct qstr *file_name);
+					    const struct qstr *file_name,
+					    u32 cookie);
