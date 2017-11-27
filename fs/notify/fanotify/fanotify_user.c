@@ -289,7 +289,12 @@ static ssize_t copy_event_to_user(struct fsnotify_group *group,
 	metadata.vers = FANOTIFY_METADATA_VERSION;
 	metadata.reserved = 0;
 	metadata.mask = event->mask & FANOTIFY_OUTGOING_EVENTS;
-	metadata.pid = pid_vnr(event->pid);
+	if (FAN_GROUP_FLAG(group, FAN_REPORT_COOKIE) &&
+	    fanotify_event_has_filename(event) &&
+	    FANOTIFY_FE(fsn_event)->cookie)
+		metadata.pid = FANOTIFY_FE(fsn_event)->cookie;
+	else
+		metadata.pid = pid_vnr(event->pid);
 
 	if (fanotify_event_has_path(event)) {
 		fd = create_fd(group, event, &f);
@@ -810,6 +815,9 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if ((flags & FAN_REPORT_FILENAME) && !(flags & FAN_REPORT_FID))
 		return -EINVAL;
 
+	if ((flags & FAN_REPORT_COOKIE) && !(flags & FAN_REPORT_FILENAME))
+		return -EINVAL;
+
 	user = get_current_user();
 	if (atomic_read(&user->fanotify_listeners) > FANOTIFY_DEFAULT_MAX_LISTENERS) {
 		free_uid(user);
@@ -835,7 +843,7 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	group->memcg = get_mem_cgroup_from_mm(current->mm);
 
 	oevent = fanotify_alloc_event(group, NULL, FS_Q_OVERFLOW, NULL,
-				      FSNOTIFY_EVENT_NONE, NULL, NULL);
+				      FSNOTIFY_EVENT_NONE, NULL, NULL, 0);
 	if (unlikely(!oevent)) {
 		fd = -ENOMEM;
 		goto out_destroy_group;
@@ -1126,7 +1134,7 @@ COMPAT_SYSCALL_DEFINE6(fanotify_mark,
  */
 static int __init fanotify_user_setup(void)
 {
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 9);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 10);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 9);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
