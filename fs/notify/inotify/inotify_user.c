@@ -46,7 +46,8 @@
 #include <asm/ioctls.h>
 
 /* configurable via /proc/sys/fs/inotify/ */
-static int inotify_max_queued_events __read_mostly;
+/* HACK: make inotify max queue size available to fanotify */
+int inotify_max_queued_events __read_mostly;
 
 struct kmem_cache *inotify_inode_mark_cachep __read_mostly;
 

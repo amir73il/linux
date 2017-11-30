@@ -30,6 +30,15 @@
 #define FANOTIFY_DEFAULT_MAX_MARKS	8192
 #define FANOTIFY_DEFAULT_MAX_LISTENERS	128
 
+#ifdef CONFIG_INOTIFY_USER
+/* HACK: make inotify max queue size available to fanotify */
+extern int inotify_max_queued_events __read_mostly;
+
+#define FANOTIFY_MAX_FILENAME_EVENTS inotify_max_queued_events
+#else
+#define FANOTIFY_MAX_FILENAME_EVENTS FANOTIFY_DEFAULT_MAX_EVENTS
+#endif
+
 /*
  * All flags that may be specified in parameter event_f_flags of fanotify_init.
  *
@@ -875,6 +884,9 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 		if (!capable(CAP_SYS_ADMIN))
 			goto out_destroy_group;
 		group->max_events = UINT_MAX;
+	} else if (flags & FAN_REPORT_FID) {
+		/* Events may contain file names, so use inotify queue size */
+		group->max_events = FANOTIFY_MAX_FILENAME_EVENTS;
 	} else {
 		group->max_events = FANOTIFY_DEFAULT_MAX_EVENTS;
 	}
