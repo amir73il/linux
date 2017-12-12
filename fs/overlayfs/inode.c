@@ -676,11 +676,10 @@ static bool ovl_hash_bylower(struct super_block *sb, struct dentry *upper,
 	return true;
 }
 
-struct inode *ovl_get_inode(struct dentry *dentry, struct dentry *upperdentry,
-			    struct dentry *index)
+struct inode *ovl_get_inode(struct super_block *sb, struct dentry *upperdentry,
+			    struct dentry *lowerdentry, struct dentry *index,
+			    unsigned int numlower)
 {
-	struct super_block *sb = dentry->d_sb;
-	struct dentry *lowerdentry = ovl_dentry_lower(dentry);
 	struct inode *realinode = upperdentry ? d_inode(upperdentry) : NULL;
 	struct inode *inode;
 	bool bylower = ovl_hash_bylower(sb, upperdentry, lowerdentry, index);
@@ -735,10 +734,8 @@ struct inode *ovl_get_inode(struct dentry *dentry, struct dentry *upperdentry,
 		ovl_set_flag(OVL_IMPURE, inode);
 
 	/* Check for non-merge dir that may have whiteouts */
-	if (S_ISDIR(realinode->i_mode)) {
-		struct ovl_entry *oe = dentry->d_fsdata;
-
-		if (((upperdentry && lowerdentry) || oe->numlower > 1) ||
+	if (is_dir) {
+		if (((upperdentry && lowerdentry) || numlower > 1) ||
 		    ovl_check_origin_xattr(upperdentry ?: lowerdentry)) {
 			ovl_set_flag(OVL_WHITEOUTS, inode);
 		}
