@@ -240,25 +240,8 @@ fh_clear_wcc(struct svc_fh *fhp)
 	fhp->fh_pre_saved = false;
 }
 
-/*
- * Fill in the pre_op attr for the wcc data
- */
-static inline void
-fill_pre_wcc(struct svc_fh *fhp)
-{
-	struct inode    *inode;
-
-	inode = d_inode(fhp->fh_dentry);
-	if (!fhp->fh_pre_saved) {
-		fhp->fh_pre_mtime = inode->i_mtime;
-		fhp->fh_pre_ctime = inode->i_ctime;
-		fhp->fh_pre_size  = inode->i_size;
-		fhp->fh_pre_change = inode->i_version;
-		fhp->fh_pre_saved = true;
-	}
-}
-
-extern void fill_post_wcc(struct svc_fh *);
+extern void fill_pre_wcc(struct svc_fh *fhp);
+extern void fill_post_wcc(struct svc_fh *fhp);
 #else
 #define fh_clear_wcc(ignored)
 #define fill_pre_wcc(ignored)
