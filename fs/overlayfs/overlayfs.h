@@ -236,6 +236,8 @@ void ovl_workdir_cleanup(struct inode *dir, struct vfsmount *mnt,
 
 /* inode.c */
 int ovl_setattr(struct dentry *dentry, struct iattr *attr);
+int ovl_getattr(struct vfsmount *mnt, struct dentry *dentry,
+		struct kstat *stat);
 
 #define STATX_TYPE		0
 #define STATX_MODE		0
