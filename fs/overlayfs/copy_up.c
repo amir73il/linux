@@ -259,6 +259,21 @@ struct ovl_fh *ovl_encode_fh(struct dentry *real, bool is_upper)
 	    WARN_ON(fh_type == FILEID_INVALID))
 		goto out;
 
+	/*
+	 * Prepending another ovl_fh header for nested overlay file handle adds
+	 * no new information for decoding. If we got a valid ovl_fh from lower
+	 * overlayfs pass it up to nested overlayfs.
+	 */
+	fh = ERR_PTR(-EINVAL);
+	if (real->d_sb->s_type == &ovl_fs_type) {
+		if (WARN_ON(is_upper) ||
+		    WARN_ON(fh_type != OVL_FILEID) ||
+		    WARN_ON(ovl_check_fh_len(buf, buflen)))
+			goto out;
+
+		return buf;
+	}
+
 	BUILD_BUG_ON(MAX_HANDLE_SZ + offsetof(struct ovl_fh, fid) > 255);
 	fh_len = offsetof(struct ovl_fh, fid) + buflen;
 	fh = kmalloc(fh_len, GFP_KERNEL);

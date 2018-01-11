@@ -121,7 +121,8 @@ static int __ovl_statx(const struct path *path, struct kstat *stat,
 			     (is_dir || lowerstat.nlink == 1)))
 				stat->ino = lowerstat.ino;
 
-			if (samefs)
+			if (samefs &&
+			    realpath.dentry->d_sb->s_type != &ovl_fs_type)
 				WARN_ON_ONCE(stat->dev != lowerstat.dev);
 			else
 				stat->dev = ovl_get_pseudo_dev(dentry);

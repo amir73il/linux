@@ -52,6 +52,14 @@ struct super_block *ovl_same_sb(struct super_block *sb)
 
 bool ovl_can_decode_fh(struct super_block *sb)
 {
+	/* We don't need uuid to encode/decode nested overlay file handles */
+	if (sb->s_type == &ovl_fs_type) {
+		sb = ovl_same_sb(sb);
+		if (!sb)
+			return 0;
+		/* Fall through to check underlying fs file handles support */
+	}
+
 	return (sb->s_export_op && sb->s_export_op->fh_to_dentry &&
 		!uuid_is_null(&sb->s_uuid));
 }
