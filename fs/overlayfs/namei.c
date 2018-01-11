@@ -548,7 +548,15 @@ int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index)
 	upper = ovl_index_upper(ofs, index);
 	if (IS_ERR_OR_NULL(upper)) {
 		err = PTR_ERR(upper);
-		if (!err)
+		/*
+		 * Directory index entries with no 'upper' xattr need to be
+		 * removed. When dir index entry has a stale 'upper' xattr,
+		 * we assume that upper dir was removed and we treat the dir
+		 * index as orphan entry that needs to be whited out.
+		 */
+		if (err == -ESTALE)
+			goto orphan;
+		else if (!err)
 			err = -ESTALE;
 		goto fail;
 	}
@@ -565,7 +573,7 @@ int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index)
 			goto fail;
 
 		if (ovl_get_nlink(origin.dentry, index, 0) == 0)
-			err = -ENOENT;
+			goto orphan;
 	}
 
 out:
@@ -576,6 +584,13 @@ out:
 fail:
 	pr_warn_ratelimited("overlayfs: failed to verify index (%pd2, ftype=%x, err=%i)\n",
 			    index, d_inode(index)->i_mode & S_IFMT, err);
+	goto out;
+
+orphan:
+	pr_warn_ratelimited("overlayfs: orphan index entry (%pd2, ftype=%x, nlink=%u)\n",
+			    index, d_inode(index)->i_mode & S_IFMT,
+			    d_inode(index)->i_nlink);
+	err = -ENOENT;
 	goto out;
 }
 
