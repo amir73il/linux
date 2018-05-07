@@ -1260,13 +1260,13 @@ static bool ovl_lower_uuid_ok(struct ovl_fs *ofs, const uuid_t *uuid)
 	if (!ofs->config.nfs_export && !(ofs->config.index && ofs->upper_mnt))
 		return true;
 
-	for (i = 0; i < ofs->numlowerfs; i++) {
+	for (i = 0; i < ofs->numlower; i++) {
 		/*
 		 * We use uuid to associate an overlay lower file handle with a
 		 * lower layer, so we can accept lower fs with null uuid as long
 		 * as all lower layers with null uuid are on the same fs.
 		 */
-		if (uuid_equal(&ofs->lower_fs[i].sb->s_uuid, uuid))
+		if (uuid_equal(&ofs->lower_layers[i].mnt->mnt_sb->s_uuid, uuid))
 			return false;
 	}
 	return true;
@@ -1276,16 +1276,17 @@ static bool ovl_lower_uuid_ok(struct ovl_fs *ofs, const uuid_t *uuid)
 static int ovl_get_fsid(struct ovl_fs *ofs, const struct path *path)
 {
 	struct super_block *sb = path->mnt->mnt_sb;
+	dev_t key = ovl_sb_key(sb);
 	unsigned int i;
 	dev_t dev;
 	int err;
 
 	/* fsid 0 is reserved for upper fs even with non upper overlay */
-	if (ofs->upper_mnt && ofs->upper_mnt->mnt_sb == sb)
+	if (ofs->upper_mnt && ovl_sb_key(ofs->upper_mnt->mnt_sb) == key)
 		return 0;
 
 	for (i = 0; i < ofs->numlowerfs; i++) {
-		if (ofs->lower_fs[i].sb == sb)
+		if (ofs->lower_fs[i].key == key)
 			return i + 1;
 	}
 
@@ -1303,7 +1304,7 @@ static int ovl_get_fsid(struct ovl_fs *ofs, const struct path *path)
 		return err;
 	}
 
-	ofs->lower_fs[ofs->numlowerfs].sb = sb;
+	ofs->lower_fs[ofs->numlowerfs].key = key;
 	ofs->lower_fs[ofs->numlowerfs].pseudo_dev = dev;
 	ofs->numlowerfs++;
 
@@ -1582,7 +1583,6 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 
 		ovl_update_sb_limits(sb, ofs->upper_mnt->mnt_sb);
 		sb->s_time_gran = ofs->upper_mnt->mnt_sb->s_time_gran;
-
 	}
 	oe = ovl_get_lowerstack(sb, ofs);
 	err = PTR_ERR(oe);

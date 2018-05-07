@@ -23,9 +23,14 @@ struct ovl_config {
 };
 
 struct ovl_sb {
-	struct super_block *sb;
+	dev_t key;
 	dev_t pseudo_dev;
 };
+
+static inline dev_t ovl_sb_key(struct super_block *sb)
+{
+	return sb->s_ino_domain ?: sb->s_dev;
+}
 
 struct ovl_layer {
 	struct vfsmount *mnt;

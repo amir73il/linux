@@ -50,7 +50,7 @@ struct super_block *ovl_same_sb(struct super_block *sb)
 	if (!ofs->numlowerfs)
 		return ofs->upper_mnt->mnt_sb;
 	else if (ofs->numlowerfs == 1 && !ofs->upper_mnt)
-		return ofs->lower_fs[0].sb;
+		return ofs->lower_layers[0].mnt->mnt_sb;
 	else
 		return NULL;
 }
