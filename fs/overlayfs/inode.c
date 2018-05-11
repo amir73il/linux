@@ -852,6 +852,7 @@ struct inode *ovl_get_inode(struct super_block *sb,
 			}
 
 			dput(upperdentry);
+			kfree(oip->redirect);
 			goto out;
 		}
 
@@ -874,6 +875,8 @@ struct inode *ovl_get_inode(struct super_block *sb,
 
 	if (oip->index)
 		ovl_set_flag(OVL_INDEX, inode);
+
+	OVL_I(inode)->redirect = oip->redirect;
 
 	/* Check for non-merge dir that may have whiteouts */
 	if (is_dir) {
