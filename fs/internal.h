@@ -84,7 +84,12 @@ extern void chroot_fs_refs(const struct path *, const struct path *);
 /*
  * file_table.c
  */
-extern struct file *get_empty_filp(void);
+extern struct file *__get_empty_filp(bool account);
+
+static inline struct file *get_empty_filp(void)
+{
+	return __get_empty_filp(true);
+}
 
 /*
  * super.c
