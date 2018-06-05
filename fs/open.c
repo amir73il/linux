@@ -866,6 +866,44 @@ int vfs_open(const struct path *path, struct file *file,
 	return do_dentry_open(file, d_backing_inode(dentry), NULL, cred);
 }
 
+/**
+ * path_open() - Open an inode by a particular name.
+ * @path: The name of the file.
+ * @flags: The O_ flags used to open this file.
+ * @inode: The inode to open.
+ * @cred: The task's credentials used when opening this file.
+ *
+ * Context: Process context.
+ * Return: A pointer to a struct file or an IS_ERR pointer.  Cannot return NULL.
+ */
+struct file *path_open(const struct path *path, int flags, struct inode *inode,
+		       const struct cred *cred)
+{
+	struct file *file;
+	int error;
+
+	file = get_empty_filp();
+	if (IS_ERR(file))
+		return file;
+
+	file->f_flags = flags;
+	file->f_path = *path;
+	error = do_dentry_open(file, inode, NULL, cred);
+	if (error) {
+		put_filp(file);
+		return ERR_PTR(error);
+	}
+
+	error = open_check_o_direct(file);
+	if (error) {
+		fput(file);
+		file = ERR_PTR(error);
+	}
+
+	return file;
+}
+EXPORT_SYMBOL_GPL(path_open);
+
 struct file *dentry_open(const struct path *path, int flags,
 			 const struct cred *cred)
 {
