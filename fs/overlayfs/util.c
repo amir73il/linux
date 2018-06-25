@@ -91,7 +91,8 @@ bool ovl_verify_lower(struct super_block *sb)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;
 
-	return ofs->config.nfs_export && ofs->config.index;
+	return ofs->config.redirect_origin ||
+		(ofs->config.nfs_export && ofs->config.index);
 }
 
 bool ovl_consistent_fd(struct super_block *sb)
