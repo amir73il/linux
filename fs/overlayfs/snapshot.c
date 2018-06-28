@@ -19,6 +19,7 @@
 #include <linux/parser.h>
 #include <linux/seq_file.h>
 #include <linux/ratelimit.h>
+#include <linux/exportfs.h>
 #include "overlayfs.h"
 
 static void ovl_snapshot_dentry_release(struct dentry *dentry)
@@ -254,6 +255,57 @@ static const struct super_operations ovl_snapshot_super_operations = {
 	.remount_fs	= ovl_snapshot_remount,
 };
 
+static int ovl_snapshot_encode_fh(struct inode *inode, u32 *fid, int *max_len,
+				  struct inode *parent)
+{
+	/* Encode the real fs inode */
+	return exportfs_encode_inode_fh(ovl_inode_upper(inode),
+					(struct fid *)fid, max_len,
+					parent ? ovl_inode_upper(parent) :
+						 NULL);
+}
+
+static int ovl_snapshot_acceptable(void *context, struct dentry *dentry)
+{
+	return 1;
+}
+
+static struct dentry *ovl_snapshot_fh_to_dentry(struct super_block *sb,
+						struct fid *fid,
+						int fh_len, int fh_type)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct dentry *this = NULL;
+	struct dentry *real;
+	struct inode *inode;
+
+	/* Decode the real fs inode */
+	real = exportfs_decode_fh(ofs->upper_mnt, fid, fh_len, fh_type,
+				  ovl_snapshot_acceptable, NULL);
+	if (IS_ERR_OR_NULL(real))
+		return real;
+
+	/* Lookup snapshot fs dentry from real fs inode */
+	inode = ovl_lookup_inode(sb, real, true);
+	if (IS_ERR(inode))
+		return ERR_CAST(inode);
+	if (inode) {
+		this = d_find_any_alias(inode);
+		iput(inode);
+	}
+
+	/*
+	 * Decode of non cached dentry is not implemented yet -
+	 * should be similar to overlay upper handle decode.
+	 */
+	return this ?: ERR_PTR(-EACCES);
+}
+
+const struct export_operations ovl_snapshot_export_operations = {
+	.encode_fh	= ovl_snapshot_encode_fh,
+	.fh_to_dentry	= ovl_snapshot_fh_to_dentry,
+};
+
 enum {
 	OPT_UPPERDIR,
 	OPT_REDIRECT_DIR_ON,
@@ -473,7 +525,9 @@ static int ovl_snapshot_fill_super(struct super_block *sb, void *data,
 		goto out_err;
 
 	sb->s_d_op = &ovl_snapshot_dentry_operations;
-	sb->s_export_op = &ovl_export_operations;
+
+	if (ovl_can_decode_fh(upperpath.dentry->d_sb))
+		sb->s_export_op = &ovl_snapshot_export_operations;
 
 	/* Never override disk quota limits or use reserved space */
 	cap_lower(cred->cap_effective, CAP_SYS_RESOURCE);
