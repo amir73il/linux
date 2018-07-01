@@ -152,21 +152,32 @@ invalid:
 }
 
 struct dentry *ovl_decode_real_fh(struct ovl_fh *fh, struct vfsmount *mnt,
-				  bool connected)
+				  bool connected, bool nested)
 {
 	struct dentry *real;
-	int bytes;
+	int bytes, type;
+	void *fid;
 
 	/*
 	 * Make sure that the stored uuid matches the uuid of the lower
-	 * layer where file handle will be decoded.
+	 * layer where file handle will be decoded. Pass nested ovl_fh to
+	 * lower overlay that will match uuid to its own layers.
 	 */
-	if (!uuid_equal(&fh->uuid, &mnt->mnt_sb->s_uuid))
+	if (nested) {
+		if (!ovl_is_overlay_fs(mnt->mnt_sb))
+			return NULL;
+		fid = fh;
+		type = OVL_FILEID;
+		bytes = fh->len;
+	} else if (uuid_equal(&fh->uuid, &mnt->mnt_sb->s_uuid)) {
+		fid = fh->fid;
+		type = fh->type;
+		bytes = (fh->len - offsetof(struct ovl_fh, fid));
+	} else {
 		return NULL;
+	}
 
-	bytes = (fh->len - offsetof(struct ovl_fh, fid));
-	real = exportfs_decode_fh(mnt, (struct fid *)fh->fid,
-				  bytes >> 2, (int)fh->type,
+	real = exportfs_decode_fh(mnt, fid, (bytes + 3) >> 2, type,
 				  connected ? ovl_acceptable : NULL, mnt);
 	if (IS_ERR(real)) {
 		/*
@@ -326,10 +337,11 @@ int ovl_check_origin_fh(struct ovl_fs *ofs, struct ovl_fh *fh, bool connected,
 {
 	struct dentry *origin = NULL;
 	int i;
+	bool nested = ofs->config.nfs_export == OVL_NFS_EXPORT_NESTED;
 
 	for (i = 0; i < ofs->numlower; i++) {
 		origin = ovl_decode_real_fh(fh, ofs->lower_layers[i].mnt,
-					    connected);
+					    connected, nested);
 		if (origin)
 			break;
 	}
@@ -421,13 +433,13 @@ static int ovl_verify_fh(struct dentry *dentry, const char *name,
  * Return 0 on match, -ESTALE on mismatch, -ENODATA on no xattr, < 0 on error.
  */
 int ovl_verify_set_fh(struct dentry *dentry, const char *name,
-		      struct dentry *real, bool is_upper, bool set)
+		      struct dentry *real, bool is_upper, bool set, bool nested)
 {
 	struct inode *inode;
 	struct ovl_fh *fh;
 	int err;
 
-	fh = ovl_encode_real_fh(real, is_upper);
+	fh = ovl_encode_real_fh(real, is_upper, nested);
 	err = PTR_ERR(fh);
 	if (IS_ERR(fh)) {
 		fh = NULL;
@@ -465,7 +477,7 @@ struct dentry *ovl_index_upper(struct ovl_fs *ofs, struct dentry *index)
 	if (IS_ERR_OR_NULL(fh))
 		return ERR_CAST(fh);
 
-	upper = ovl_decode_real_fh(fh, ofs->upper_mnt, true);
+	upper = ovl_decode_real_fh(fh, ofs->upper_mnt, true, false);
 	kfree(fh);
 
 	if (IS_ERR_OR_NULL(upper))
@@ -628,12 +640,12 @@ static int ovl_get_index_name_fh(struct ovl_fh *fh, struct qstr *name)
  * index dir was cleared. Either way, that index cannot be used to indentify
  * the overlay inode.
  */
-int ovl_get_index_name(struct dentry *origin, struct qstr *name)
+int ovl_get_index_name(struct dentry *origin, struct qstr *name, bool nested)
 {
 	struct ovl_fh *fh;
 	int err;
 
-	fh = ovl_encode_real_fh(origin, false);
+	fh = ovl_encode_real_fh(origin, false, nested);
 	if (IS_ERR(fh))
 		return PTR_ERR(fh);
 
@@ -683,8 +695,9 @@ struct dentry *ovl_lookup_index(struct ovl_fs *ofs, struct dentry *upper,
 	struct qstr name;
 	bool is_dir = d_is_dir(origin);
 	int err;
+	bool nested = ofs->config.nfs_export == OVL_NFS_EXPORT_NESTED;
 
-	err = ovl_get_index_name(origin, &name);
+	err = ovl_get_index_name(origin, &name, nested);
 	if (err)
 		return ERR_PTR(err);
 
@@ -931,7 +944,8 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		if (upperdentry && !ctr &&
 		    ((d.is_dir && ovl_verify_lower(dentry->d_sb)) ||
 		     (!d.is_dir && ofs->config.index && origin_path))) {
-			err = ovl_verify_origin(upperdentry, this, false);
+			err = ovl_verify_origin(upperdentry, this, false,
+					ovl_export_nested(dentry->d_sb));
 			if (err) {
 				dput(this);
 				if (d.is_dir)

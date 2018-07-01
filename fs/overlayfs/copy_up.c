@@ -227,7 +227,8 @@ int ovl_set_attr(struct dentry *upperdentry, struct kstat *stat)
 	return err;
 }
 
-struct ovl_fh *ovl_encode_real_fh(struct dentry *real, bool is_upper)
+struct ovl_fh *ovl_encode_real_fh(struct dentry *real, bool is_upper,
+				  bool nested)
 {
 	struct ovl_fh *fh;
 	int fh_type, fh_len, dwords;
@@ -253,6 +254,24 @@ struct ovl_fh *ovl_encode_real_fh(struct dentry *real, bool is_upper)
 	    WARN_ON(buflen > MAX_HANDLE_SZ) ||
 	    WARN_ON(fh_type == FILEID_INVALID))
 		goto out;
+
+	/*
+	 * Prepending another ovl_fh header for nested overlay file handle adds
+	 * no new information for decoding. With nfs_export=nested, if we got a
+	 * valid ovl_fh from lower overlay, pass it up as is to nested overlay.
+	 */
+	fh = ERR_PTR(-EINVAL);
+	if (nested) {
+		fh = buf;
+		if (WARN_ON(is_upper) ||
+		    WARN_ON(!ovl_is_overlay_fs(real->d_sb)) ||
+		    WARN_ON(fh_type != OVL_FILEID) ||
+		    WARN_ON(fh->flags & OVL_FH_FLAG_PATH_NESTED) ||
+		    WARN_ON(ovl_check_fh_len(buf, buflen)))
+			goto out;
+
+		return fh;
+	}
 
 	BUILD_BUG_ON(MAX_HANDLE_SZ + offsetof(struct ovl_fh, fid) > 255);
 	fh_len = offsetof(struct ovl_fh, fid) + buflen;
@@ -294,8 +313,9 @@ int ovl_set_origin(struct dentry *dentry, struct dentry *lower,
 	 * so we can use the overlay.origin xattr to distignuish between a copy
 	 * up and a pure upper inode.
 	 */
-	if (ovl_can_decode_fh(lower->d_sb)) {
-		fh = ovl_encode_real_fh(lower, false);
+	if (ovl_can_decode_real_fh(lower->d_sb)) {
+		fh = ovl_encode_real_fh(lower, false,
+					ovl_export_nested(dentry->d_sb));
 		if (IS_ERR(fh))
 			return PTR_ERR(fh);
 	}
@@ -316,7 +336,7 @@ static int ovl_set_upper_fh(struct dentry *upper, struct dentry *index)
 	const struct ovl_fh *fh;
 	int err;
 
-	fh = ovl_encode_real_fh(upper, true);
+	fh = ovl_encode_real_fh(upper, true, false);
 	if (IS_ERR(fh))
 		return PTR_ERR(fh);
 
@@ -356,7 +376,8 @@ static int ovl_create_index(struct dentry *dentry, struct dentry *origin,
 	if (WARN_ON(ovl_test_flag(OVL_INDEX, d_inode(dentry))))
 		return -EIO;
 
-	err = ovl_get_index_name(origin, &name);
+	err = ovl_get_index_name(origin, &name,
+				 ovl_export_nested(dentry->d_sb));
 	if (err)
 		return err;
 
@@ -673,7 +694,8 @@ static int ovl_do_copy_up(struct ovl_copy_up_ctx *c)
 
 	if (to_index) {
 		c->destdir = ovl_indexdir(c->dentry->d_sb);
-		err = ovl_get_index_name(c->lowerpath.dentry, &c->destname);
+		err = ovl_get_index_name(c->lowerpath.dentry, &c->destname,
+					 ovl_export_nested(c->dentry->d_sb));
 		if (err)
 			return err;
 	} else if (WARN_ON(!c->parent)) {

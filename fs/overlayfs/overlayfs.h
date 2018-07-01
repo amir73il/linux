@@ -48,6 +48,12 @@ enum ovl_entry_flag {
 	OVL_E_CONNECTED,
 };
 
+enum ovl_nfs_export_mode {
+	OVL_NFS_EXPORT_OFF,
+	OVL_NFS_EXPORT_ON,
+	OVL_NFS_EXPORT_NESTED,
+};
+
 /*
  * The tuple (fh,uuid) is a universal unique identifier for a copy up origin,
  * where:
@@ -62,9 +68,11 @@ enum ovl_entry_flag {
 #define OVL_FH_FLAG_ANY_ENDIAN	(1 << 1)
 /* Is the real inode encoded in fid an upper inode? */
 #define OVL_FH_FLAG_PATH_UPPER	(1 << 2)
+/* File handle from nested (lower) overlayfs - set only on-wire */
+#define OVL_FH_FLAG_PATH_NESTED	(1 << 3)
 
 #define OVL_FH_FLAG_ALL (OVL_FH_FLAG_BIG_ENDIAN | OVL_FH_FLAG_ANY_ENDIAN | \
-			 OVL_FH_FLAG_PATH_UPPER)
+			 OVL_FH_FLAG_PATH_UPPER | OVL_FH_FLAG_PATH_NESTED)
 
 #if defined(__LITTLE_ENDIAN)
 #define OVL_FH_FLAG_CPU_ENDIAN 0
@@ -209,7 +217,8 @@ void ovl_drop_write(struct dentry *dentry);
 struct dentry *ovl_workdir(struct dentry *dentry);
 const struct cred *ovl_override_creds(struct super_block *sb);
 struct super_block *ovl_same_sb(struct super_block *sb);
-int ovl_can_decode_fh(struct super_block *sb);
+bool ovl_export_nested(struct super_block *sb);
+int ovl_can_decode_real_fh(struct super_block *sb);
 struct dentry *ovl_indexdir(struct super_block *sb);
 bool ovl_index_all(struct super_block *sb);
 bool ovl_verify_lower(struct super_block *sb);
@@ -307,14 +316,15 @@ static inline void ovl_inode_unlock(struct inode *inode)
 /* namei.c */
 int ovl_check_fh_len(struct ovl_fh *fh, int fh_len);
 struct dentry *ovl_decode_real_fh(struct ovl_fh *fh, struct vfsmount *mnt,
-				  bool connected);
+				  bool connected, bool nested);
 int ovl_check_origin_fh(struct ovl_fs *ofs, struct ovl_fh *fh, bool connected,
 			struct dentry *upperdentry, struct ovl_path **stackp);
 int ovl_verify_set_fh(struct dentry *dentry, const char *name,
-		      struct dentry *real, bool is_upper, bool set);
+		      struct dentry *real, bool is_upper, bool set,
+		      bool nested);
 struct dentry *ovl_index_upper(struct ovl_fs *ofs, struct dentry *index);
 int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index);
-int ovl_get_index_name(struct dentry *origin, struct qstr *name);
+int ovl_get_index_name(struct dentry *origin, struct qstr *name, bool nested);
 struct dentry *ovl_get_index_fh(struct ovl_fs *ofs, struct ovl_fh *fh);
 struct dentry *ovl_lookup_index(struct ovl_fs *ofs, struct dentry *upper,
 				struct dentry *origin, bool verify);
@@ -324,15 +334,18 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 bool ovl_lower_positive(struct dentry *dentry);
 
 static inline int ovl_verify_origin(struct dentry *upper,
-				    struct dentry *origin, bool set)
+				    struct dentry *origin, bool set,
+				    bool nested)
 {
-	return ovl_verify_set_fh(upper, OVL_XATTR_ORIGIN, origin, false, set);
+	return ovl_verify_set_fh(upper, OVL_XATTR_ORIGIN, origin, false, set,
+				 nested);
 }
 
 static inline int ovl_verify_upper(struct dentry *index,
 				    struct dentry *upper, bool set)
 {
-	return ovl_verify_set_fh(index, OVL_XATTR_UPPER, upper, true, set);
+	return ovl_verify_set_fh(index, OVL_XATTR_UPPER, upper, true, set,
+				 false);
 }
 
 /* readdir.c */
@@ -427,9 +440,18 @@ int ovl_copy_up_flags(struct dentry *dentry, int flags);
 int ovl_maybe_copy_up(struct dentry *dentry, int flags);
 int ovl_copy_xattr(struct dentry *old, struct dentry *new);
 int ovl_set_attr(struct dentry *upper, struct kstat *stat);
-struct ovl_fh *ovl_encode_real_fh(struct dentry *real, bool is_upper);
+struct ovl_fh *ovl_encode_real_fh(struct dentry *real, bool is_upper,
+				  bool nested);
 int ovl_set_origin(struct dentry *dentry, struct dentry *lower,
 		   struct dentry *upper);
 
 /* export.c */
 extern const struct export_operations ovl_export_operations;
+
+/* super.c */
+extern struct file_system_type ovl_fs_type;
+
+static inline bool ovl_is_overlay_fs(struct super_block *sb)
+{
+	return sb->s_type == &ovl_fs_type;
+}

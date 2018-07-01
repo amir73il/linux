@@ -55,6 +55,14 @@ struct super_block *ovl_same_sb(struct super_block *sb)
 		return NULL;
 }
 
+/* Use compact file handles for lower nested overlayfs */
+bool ovl_export_nested(struct super_block *sb)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+
+	return ofs->config.nfs_export == OVL_NFS_EXPORT_NESTED;
+}
+
 /*
  * Check if underlying fs supports file handles and try to determine encoding
  * type, in order to deduce maximum inode number used by fs.
@@ -63,9 +71,18 @@ struct super_block *ovl_same_sb(struct super_block *sb)
  * Return 1 (FILEID_INO32_GEN) if fs uses the default 32bit inode encoding.
  * Return -1 if fs uses a non default encoding with unknown inode size.
  */
-int ovl_can_decode_fh(struct super_block *sb)
+int ovl_can_decode_real_fh(struct super_block *sb)
 {
 	if (!sb->s_export_op || !sb->s_export_op->fh_to_dentry)
+		return 0;
+
+	/*
+	 * In case FILESYSTEM_MAX_STACK_DEPTH ever grows, we only support
+	 * one level of nesting in ovl_fh. This test should be optimized out
+	 * at build time.
+	 */
+	if (FILESYSTEM_MAX_STACK_DEPTH > 2 && ovl_export_nested(sb) &&
+	    ovl_is_overlay_fs(sb) && sb->s_stack_depth > 1)
 		return 0;
 
 	return sb->s_export_op->encode_fh ? -1 : FILEID_INO32_GEN;
@@ -697,7 +714,8 @@ static void ovl_cleanup_index(struct dentry *dentry)
 	struct qstr name = { };
 	int err;
 
-	err = ovl_get_index_name(lowerdentry, &name);
+	err = ovl_get_index_name(lowerdentry, &name,
+				 ovl_export_nested(dentry->d_sb));
 	if (err)
 		goto fail;
 
