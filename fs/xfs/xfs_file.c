@@ -905,7 +905,7 @@ xfs_file_clone_range(
 				     len, false);
 }
 
-STATIC ssize_t
+STATIC int
 xfs_file_dedupe_range(
 	struct file	*src_file,
 	u64		loff,
@@ -913,13 +913,8 @@ xfs_file_dedupe_range(
 	struct file	*dst_file,
 	u64		dst_loff)
 {
-	int		error;
-
-	error = xfs_reflink_remap_range(src_file, loff, dst_file, dst_loff,
+	return xfs_reflink_remap_range(src_file, loff, dst_file, dst_loff,
 				     len, true);
-	if (error)
-		return error;
-	return len;
 }
 
 STATIC int
