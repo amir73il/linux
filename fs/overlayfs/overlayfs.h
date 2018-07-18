@@ -397,6 +397,9 @@ struct dentry *ovl_create_real(struct inode *dir, struct dentry *newdentry,
 int ovl_cleanup(struct inode *dir, struct dentry *dentry);
 struct dentry *ovl_create_temp(struct dentry *workdir, struct ovl_cattr *attr);
 
+/* file.c */
+extern const struct file_operations ovl_file_operations;
+
 /* Glue code for v4.9 backport */
 typedef int rwf_t;
 #define IOCB_NOWAIT 0
