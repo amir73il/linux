@@ -1885,9 +1885,8 @@ out_error:
 }
 EXPORT_SYMBOL(vfs_dedupe_file_range_compare);
 
-static int vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
-				     struct file *dst_file, loff_t dst_pos,
-				     u64 len)
+int vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
+			      struct file *dst_file, loff_t dst_pos, u64 len)
 {
 	s64 ret;
 
@@ -1922,6 +1921,7 @@ out_drop_write:
 
 	return ret;
 }
+EXPORT_SYMBOL(vfs_dedupe_file_range_one);
 
 int vfs_dedupe_file_range(struct file *file, struct file_dedupe_range *same)
 {
