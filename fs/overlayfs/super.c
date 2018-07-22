@@ -116,6 +116,11 @@ bug:
 	return dentry;
 }
 
+static bool ovl_dentry_is_dead(struct dentry *d)
+{
+	return unlikely(!d->d_inode || IS_DEADDIR(d->d_inode));
+}
+
 static int ovl_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
@@ -125,15 +130,13 @@ static int ovl_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 	for (i = 0; i < oe->numlower; i++) {
 		struct dentry *d = oe->lowerstack[i].dentry;
 
+		if (ovl_dentry_is_dead(d))
+			return 0;
+
 		if (d->d_flags & DCACHE_OP_REVALIDATE) {
 			ret = d->d_op->d_revalidate(d, flags);
-			if (ret < 0)
+			if (ret <= 0)
 				return ret;
-			if (!ret) {
-				if (!(flags & LOOKUP_RCU))
-					d_invalidate(d);
-				return -ESTALE;
-			}
 		}
 	}
 	return 1;
@@ -147,6 +150,9 @@ static int ovl_dentry_weak_revalidate(struct dentry *dentry, unsigned int flags)
 
 	for (i = 0; i < oe->numlower; i++) {
 		struct dentry *d = oe->lowerstack[i].dentry;
+
+		if (ovl_dentry_is_dead(d))
+			return 0;
 
 		if (d->d_flags & DCACHE_OP_WEAK_REVALIDATE) {
 			ret = d->d_op->d_weak_revalidate(d, flags);
@@ -1501,7 +1507,7 @@ static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
 		oe->lowerstack[i].layer = &ofs->lower_layers[i];
 	}
 
-	if (remote)
+	if (remote || ofs->config.redirect_origin)
 		sb->s_d_op = &ovl_reval_dentry_operations;
 	else
 		sb->s_d_op = &ovl_dentry_operations;
