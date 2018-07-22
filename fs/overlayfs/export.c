@@ -714,10 +714,14 @@ static struct dentry *ovl_lower_fh_to_d(struct super_block *sb,
 
 	/* First lookup overlay inode in inode cache by origin fh */
 	err = ovl_check_origin_fh(ofs, fh, false, NULL, &stack);
-	if (err)
-		return ERR_PTR(err);
-
-	if (!d_is_dir(origin.dentry) ||
+	if (err) {
+		/*
+		 * With "redirect_dir=origin" lower may be deleted and object
+		 * may become an indexed upper, so we need to lookup index.
+		 */
+		if (err != -ESTALE || !ofs->config.redirect_origin)
+			return ERR_PTR(err);
+	} else if (!d_is_dir(origin.dentry) ||
 	    !(origin.dentry->d_flags & DCACHE_DISCONNECTED)) {
 		inode = ovl_lookup_inode(sb, origin.dentry, false);
 		err = PTR_ERR(inode);
@@ -753,6 +757,10 @@ static struct dentry *ovl_lower_fh_to_d(struct super_block *sb,
 		dput(upper);
 		goto out;
 	}
+
+	err = -ESTALE;
+	if (!origin.dentry)
+		goto out_err;
 
 	/* Find origin.dentry again with ovl_acceptable() layer check */
 	if (d_is_dir(origin.dentry)) {
