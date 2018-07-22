@@ -99,6 +99,7 @@ bool ovl_dentry_remote(struct dentry *dentry)
 void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 			     unsigned int mask)
 {
+	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 	struct ovl_entry *oe = OVL_E(dentry);
 	unsigned int i, flags = 0;
 
@@ -106,6 +107,10 @@ void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 		flags |= upperdentry->d_flags;
 	for (i = 0; i < oe->numlower; i++)
 		flags |= oe->lowerstack[i].dentry->d_flags;
+
+	/* Revalidate on local fs lower changes */
+	if (oe->numlower && ovl_is_snapshot(ofs))
+		flags |= mask;
 
 	spin_lock(&dentry->d_lock);
 	dentry->d_flags &= ~mask;
