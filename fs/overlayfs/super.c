@@ -113,20 +113,23 @@ bug:
 	return dentry;
 }
 
+static bool ovl_dentry_is_dead(struct dentry *d)
+{
+	return unlikely(!d->d_inode || IS_DEADDIR(d->d_inode));
+}
+
 static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak)
 {
 	int ret = 1;
+
+	if (ovl_dentry_is_dead(d))
+		return 0;
 
 	if (weak) {
 		if (d->d_flags & DCACHE_OP_WEAK_REVALIDATE)
 			ret =  d->d_op->d_weak_revalidate(d, flags);
 	} else if (d->d_flags & DCACHE_OP_REVALIDATE) {
 		ret = d->d_op->d_revalidate(d, flags);
-		if (!ret) {
-			if (!(flags & LOOKUP_RCU))
-				d_invalidate(d);
-			ret = -ESTALE;
-		}
 	}
 	return ret;
 }
