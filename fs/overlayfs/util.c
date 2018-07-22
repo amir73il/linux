@@ -79,6 +79,14 @@ bool ovl_verify_lower(struct super_block *sb)
 	return ofs->config.nfs_export || !ofs->config.redirect_follow;
 }
 
+/* Revalidate lower dentry on lookup */
+bool ovl_reval_lower(struct super_block *sb)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+
+	return !ofs->config.redirect_follow;
+}
+
 struct ovl_entry *ovl_alloc_entry(unsigned int numlower)
 {
 	size_t size = offsetof(struct ovl_entry, lowerstack[numlower]);
@@ -106,6 +114,10 @@ void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 		flags |= upperdentry->d_flags;
 	for (i = 0; i < oe->numlower; i++)
 		flags |= oe->lowerstack[i].dentry->d_flags;
+
+	/* Revalidate on local fs lower changes */
+	if (oe->numlower && ovl_reval_lower(dentry->d_sb))
+		flags |= mask;
 
 	spin_lock(&dentry->d_lock);
 	dentry->d_flags &= ~mask;
