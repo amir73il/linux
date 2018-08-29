@@ -188,6 +188,8 @@ int vfs_fadvise(struct file *file, loff_t offset, loff_t len, int advice)
 }
 EXPORT_SYMBOL(vfs_fadvise);
 
+#ifdef CONFIG_ADVISE_SYSCALLS
+
 SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 {
 	struct fd f = fdget(fd);
@@ -209,4 +211,5 @@ SYSCALL_DEFINE4(fadvise64, int, fd, loff_t, offset, size_t, len, int, advice)
 	return sys_fadvise64_64(fd, offset, len, advice);
 }
 
+#endif
 #endif
