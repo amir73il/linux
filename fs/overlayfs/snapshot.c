@@ -13,6 +13,7 @@
 #include <uapi/linux/magic.h>
 #include <linux/fs.h>
 #include <linux/cred.h>
+#include <linux/exportfs.h>
 #include <linux/module.h>
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -249,6 +250,77 @@ static const struct super_operations ovl_snapshot_super_operations = {
 	.remount_fs	= ovl_snapshot_remount,
 };
 
+static int ovl_snapshot_encode_fh(struct inode *inode, u32 *fid, int *max_len,
+				  struct inode *parent)
+{
+	/* Encode the real fs inode */
+	return exportfs_encode_inode_fh(ovl_inode_upper(inode),
+					(struct fid *)fid, max_len,
+					parent ? ovl_inode_upper(parent) :
+					NULL);
+}
+
+static int ovl_snapshot_acceptable(void *context, struct dentry *dentry)
+{
+	return 1;
+}
+
+static struct dentry *ovl_snapshot_lookup_real(struct super_block *sb,
+					       struct dentry *real)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct ovl_layer upper_layer = { .mnt = ofs->upper_mnt };
+	struct dentry *this = NULL;
+	struct inode *inode;
+
+	/* Lookup snapshot fs dentry from real fs inode */
+	inode = ovl_lookup_inode(sb, real, true);
+	if (IS_ERR(inode))
+		return ERR_CAST(inode);
+	if (inode) {
+		this = d_find_any_alias(inode);
+		iput(inode);
+		if (this)
+			return this;
+	}
+
+	/* Decode of disconnected dentries is not implemented */
+	if ((real->d_flags & DCACHE_DISCONNECTED) || d_unhashed(real))
+		return ERR_PTR(-ENOENT);
+
+	/*
+	 * If real dentry is connected and hashed, get a connected overlay
+	 * dentry whose real dentry is @real.
+	 */
+	return ovl_lookup_real(sb, real, &upper_layer);
+}
+
+static struct dentry *ovl_snapshot_fh_to_dentry(struct super_block *sb,
+						struct fid *fid,
+						int fh_len, int fh_type)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct dentry *real;
+	struct dentry *this;
+
+	/* Decode the real fs inode */
+	real = exportfs_decode_fh(ofs->upper_mnt, fid, fh_len, fh_type,
+				  ovl_snapshot_acceptable, NULL);
+	if (IS_ERR_OR_NULL(real))
+		return real;
+
+	this = ovl_snapshot_lookup_real(sb, real);
+	dput(real);
+
+	return this;
+}
+
+const struct export_operations ovl_snapshot_export_operations = {
+	.encode_fh      = ovl_snapshot_encode_fh,
+	.fh_to_dentry   = ovl_snapshot_fh_to_dentry,
+};
+
+
 enum {
 	OPT_SNAPSHOT,
 	OPT_NOSNAPSHOT,
@@ -426,6 +498,9 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 		goto out_err;
 
 	sb->s_d_op = &ovl_snapshot_dentry_operations;
+
+	if (ovl_can_decode_real_fh(upperpath.dentry->d_sb))
+		sb->s_export_op = &ovl_snapshot_export_operations;
 
 	/* Never override disk quota limits or use reserved space */
 	cap_lower(cred->cap_effective, CAP_SYS_RESOURCE);
