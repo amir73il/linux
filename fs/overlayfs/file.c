@@ -116,7 +116,8 @@ static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
 	if (unlikely((file->f_flags ^ real->file->f_flags) & ~O_NOATIME))
 		return ovl_change_flags(real->file, file->f_flags);
 
-	return 0;
+	/* Maybe copy an open for write file to new snapshot */
+	return ovl_snapshot_maybe_copy_up(file_dentry(file), file->f_flags);
 }
 
 static int ovl_real_fdget(const struct file *file, struct fd *real)
