@@ -110,6 +110,12 @@ static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
 {
 	struct inode *inode = file_inode(file);
 	struct inode *realinode;
+	int err;
+
+	/* Maybe copy an open for write file to new snapshot */
+	err = ovl_snapshot_maybe_copy_up(file_dentry(file), file->f_flags);
+	if (err)
+		return err;
 
 	real->flags = 0;
 	real->file = file->private_data;
