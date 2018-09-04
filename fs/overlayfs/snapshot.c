@@ -118,6 +118,13 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 		goto out_unlock;
 	}
 
+	if (OVL_FS(dentry->d_sb)->config.metacopy && !is_dir &&
+	    !d_is_negative(dentry) && !ovl_snapshot_need_cow(parent)) {
+		/* Only copy directory skeleton to snapshot */
+		ovl_snapshot_set_nocow(dentry);
+		goto out_unlock;
+	}
+
 	old_cred = ovl_override_creds(dentry->d_sb);
 	/* Find dir or non-dir parent by index in snapshot */
 	snapdir = ovl_snapshot_lookup_dir(snapmnt->mnt_sb, dir);
@@ -234,6 +241,8 @@ static int ovl_snapshot_show_options(struct seq_file *m, struct dentry *dentry)
 		seq_show_option(m, "snapshot", ofs->config.snapshot);
 	else
 		seq_puts(m, ",nosnapshot");
+	if (ofs->config.metacopy)
+		seq_puts(m, ",metacopy=on");
 
 	return 0;
 }
@@ -299,12 +308,16 @@ const struct export_operations ovl_snapshot_export_operations = {
 enum {
 	OPT_SNAPSHOT,
 	OPT_NOSNAPSHOT,
+	OPT_METACOPY_ON,
+	OPT_METACOPY_OFF,
 	OPT_ERR,
 };
 
 static const match_table_t ovl_snapshot_tokens = {
 	{OPT_SNAPSHOT,		"snapshot=%s"},
 	{OPT_NOSNAPSHOT,	"nosnapshot"},
+	{OPT_METACOPY_ON,	"metacopy=on"},
+	{OPT_METACOPY_OFF,	"metacopy=off"},
 	{OPT_ERR,		NULL}
 };
 
@@ -331,6 +344,14 @@ static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config)
 		case OPT_NOSNAPSHOT:
 			kfree(config->snapshot);
 			config->snapshot = NULL;
+			break;
+
+		case OPT_METACOPY_ON:
+			config->metacopy = true;
+			break;
+
+		case OPT_METACOPY_OFF:
+			config->metacopy = false;
 			break;
 
 		default:
@@ -720,6 +741,22 @@ out:
 	return err;
 }
 
+static int ovl_snapshot_copy_up_meta(struct dentry *dentry)
+{
+	struct dentry *parent;
+	int err;
+
+	if (d_is_dir(dentry) || !OVL_FS(dentry->d_sb)->config.metacopy)
+		return ovl_snapshot_copy_up(dentry);
+
+	/* Only copy directory skeleton to snapshot */
+	parent = dget_parent(dentry);
+	err = ovl_snapshot_copy_up(parent);
+	dput(parent);
+
+	return err;
+}
+
 int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 {
 	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
@@ -728,7 +765,7 @@ int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 	if (snapmnt && ovl_open_flags_need_copy_up(flags) &&
 	    !special_file(d_inode(dentry)->i_mode) &&
 	    ovl_snapshot_need_cow(dentry))
-		err = ovl_snapshot_copy_up(dentry);
+		err = ovl_snapshot_copy_up_meta(dentry);
 
 	mntput(snapmnt);
 	return err;
@@ -744,7 +781,7 @@ int ovl_snapshot_modify(struct dentry *dentry)
 		if (d_is_negative(dentry))
 			err = ovl_snapshot_whiteout(dentry);
 		else
-			err = ovl_snapshot_copy_up(dentry);
+			err = ovl_snapshot_copy_up_meta(dentry);
 	}
 
 	mntput(snapmnt);
