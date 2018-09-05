@@ -21,6 +21,7 @@ struct ovl_config {
 	bool index;
 	bool nfs_export;
 	bool consistent_fd;
+	bool metacopy;
 };
 
 struct ovl_layer {
