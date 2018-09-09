@@ -9,6 +9,7 @@
  */
 
 struct ovl_config {
+	char *snapshot;
 	char *lowerdir;
 	char *upperdir;
 	char *workdir;
@@ -47,6 +48,7 @@ struct ovl_path {
 /* private information held for overlayfs's superblock */
 struct ovl_fs {
 	struct vfsmount *upper_mnt;
+	struct vfsmount *snap_mnt;
 	unsigned int numlower;
 	/* Number of unique lower sb that differ from upper sb */
 	unsigned int numlowerfs;
@@ -76,6 +78,11 @@ struct ovl_fs {
 	/* Inode numbers in all layers do not use the high xino_bits */
 	unsigned int xino_bits;
 };
+
+static inline struct ovl_fs *OVL_FS(struct super_block *sb)
+{
+	return (struct ovl_fs *) sb->s_fs_info;
+}
 
 /* private information held for every overlayfs dentry */
 struct ovl_entry {
