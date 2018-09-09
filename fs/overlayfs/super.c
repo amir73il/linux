@@ -230,6 +230,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 	if (ofs->upperdir_locked)
 		ovl_inuse_unlock(ofs->upper_mnt->mnt_root);
 	mntput(ofs->upper_mnt);
+	mntput(ofs->snap_mnt);
 	for (i = 0; i < ofs->numlower; i++)
 		mntput(ofs->lower_layers[i].mnt);
 	for (i = 0; i < ofs->numlowerfs; i++)
@@ -237,6 +238,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 	kfree(ofs->lower_layers);
 	kfree(ofs->lower_fs);
 
+	kfree(ofs->config.snapshot);
 	kfree(ofs->config.lowerdir);
 	kfree(ofs->config.upperdir);
 	kfree(ofs->config.workdir);
@@ -723,7 +725,7 @@ out_err:
 	goto out_unlock;
 }
 
-static void ovl_unescape(char *s)
+void ovl_unescape(char *s)
 {
 	char *d = s;
 
@@ -736,7 +738,7 @@ static void ovl_unescape(char *s)
 	}
 }
 
-static int ovl_mount_dir_noesc(const char *name, struct path *path)
+int ovl_mount_dir_noesc(const char *name, struct path *path)
 {
 	int err = -EINVAL;
 
