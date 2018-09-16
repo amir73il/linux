@@ -230,7 +230,10 @@ void ovl_free_fs(struct ovl_fs *ofs)
 	if (ofs->upperdir_locked)
 		ovl_inuse_unlock(ofs->upper_mnt->mnt_root);
 	mntput(ofs->upper_mnt);
-	mntput(ofs->snap_mnt);
+	if (ofs->snap) {
+		mntput(ofs->snap->mnt);
+		kfree(ofs->snap);
+	}
 	for (i = 0; i < ofs->numlower; i++)
 		mntput(ofs->lower_layers[i].mnt);
 	for (i = 0; i < ofs->numlowerfs; i++)
