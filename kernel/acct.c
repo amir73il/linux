@@ -251,8 +251,8 @@ static int acct_on(struct filename *pathname)
 	rcu_read_lock();
 	old = xchg(&ns->bacct, &acct->pin);
 	mutex_unlock(&acct->lock);
-	pin_kill(old);
 	mnt_drop_write(mnt);
+	pin_kill(old);
 	mntput(mnt);
 	return 0;
 }
