@@ -56,6 +56,50 @@ module_param_named(xino_auto, ovl_xino_auto_def, bool, 0644);
 MODULE_PARM_DESC(ovl_xino_auto_def,
 		 "Auto enable xino feature");
 
+static bool ovl_metacopy_def = IS_ENABLED(CONFIG_OVERLAY_FS_METACOPY);
+module_param_named(metacopy, ovl_metacopy_def, bool, 0644);
+MODULE_PARM_DESC(ovl_metacopy_def,
+		 "Default to on or off for the metadata only copy up feature");
+
+static int ovl_feature_requires(struct ovl_config *config, const char *feature,
+				const char *requirement)
+{
+	if (config->strict) {
+		pr_err("overlayfs: %s requires %s.\n", feature, requirement);
+		return -EINVAL;
+	}
+
+	pr_warn("overlayfs: %s requies %s, disabling %s feature.\n", feature,
+		requirement, feature);
+
+	return 0;
+}
+
+/*
+ * Check dependencies between features.
+ *
+ * @enabled is a boolean variable that depends on the boolean @required
+ * variable.
+ *
+ * If !@config->strict, the feature is disabled when requirement is not met.
+ * If @config->strict, return error when requirement is not met.
+ *
+ * @feature is the name of the feature and @requirement is the description of
+ * the requirement for the error/warning message.
+ */
+static int ovl_feature_check(struct ovl_config *config, bool *enabled,
+			     bool required, const char *feature,
+			     const char *requirement)
+{
+	/* If feature is enabled, required condition should be met */
+	if (!*enabled || required)
+		return 0;
+
+	*enabled = false;
+
+	return ovl_feature_requires(config, feature, requirement);
+}
+
 static void ovl_entry_stack_free(struct ovl_entry *oe)
 {
 	unsigned int i;
@@ -63,11 +107,6 @@ static void ovl_entry_stack_free(struct ovl_entry *oe)
 	for (i = 0; i < oe->numlower; i++)
 		dput(oe->lowerstack[i].dentry);
 }
-
-static bool ovl_metacopy_def = IS_ENABLED(CONFIG_OVERLAY_FS_METACOPY);
-module_param_named(metacopy, ovl_metacopy_def, bool, 0644);
-MODULE_PARM_DESC(ovl_metacopy_def,
-		 "Default to on or off for the metadata only copy up feature");
 
 static void ovl_dentry_release(struct dentry *dentry)
 {
@@ -548,6 +587,7 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 
 		case OPT_METACOPY_ON:
 			config->metacopy = true;
+			config->strict = true;
 			break;
 
 		case OPT_METACOPY_OFF:
@@ -573,15 +613,13 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 		return err;
 
 	/* metacopy feature with upper requires redirect_dir=on */
-	if (config->upperdir && config->metacopy && !config->redirect_dir) {
-		pr_warn("overlayfs: metadata only copy up requires \"redirect_dir=on\", falling back to metacopy=off.\n");
-		config->metacopy = false;
-	} else if (config->metacopy && !config->redirect_follow) {
-		pr_warn("overlayfs: metadata only copy up requires \"redirect_dir=follow\" on non-upper mount, falling back to metacopy=off.\n");
-		config->metacopy = false;
-	}
+	err = ovl_feature_check(config, &config->metacopy,
+				config->upperdir ? config->redirect_dir :
+						   config->redirect_follow,
+				"metadata only copy up",
+				"\"redirect_dir=on\" or \"redirect_dir=follow\" on non-upper mount");
 
-	return 0;
+	return err;
 }
 
 #define OVL_WORKDIR_NAME "work"
@@ -1055,9 +1093,13 @@ static int ovl_make_workdir(struct ovl_fs *ofs, struct path *workpath)
 	if (err) {
 		ofs->noxattr = true;
 		ofs->config.index = false;
-		ofs->config.metacopy = false;
-		pr_warn("overlayfs: upper fs does not support xattr, falling back to index=off and metacopy=off.\n");
-		err = 0;
+		pr_warn("overlayfs: upper fs does not support xattr, falling back to index=off.\n");
+		err = ovl_feature_check(&ofs->config, &ofs->config.metacopy,
+					!ofs->noxattr,
+					"metadata only copy up",
+					"upper fs xattr support");
+		if (err)
+			goto out;
 	} else {
 		vfs_removexattr(ofs->workdir, OVL_XATTR_OPAQUE);
 	}
