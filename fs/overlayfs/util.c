@@ -521,13 +521,13 @@ bool ovl_already_copied_up(struct dentry *dentry, int flags)
 
 int ovl_copy_up_start(struct dentry *dentry, int flags)
 {
-	struct ovl_inode *oi = OVL_I(d_inode(dentry));
+	struct inode *inode = d_inode(dentry);
 	int err;
 
-	err = mutex_lock_interruptible(&oi->lock);
+	err = ovl_inode_lock(inode);
 	if (!err && ovl_already_copied_up_locked(dentry, flags)) {
 		err = 1; /* Already copied up */
-		mutex_unlock(&oi->lock);
+		ovl_inode_unlock(inode);
 	}
 
 	return err;
@@ -535,7 +535,7 @@ int ovl_copy_up_start(struct dentry *dentry, int flags)
 
 void ovl_copy_up_end(struct dentry *dentry)
 {
-	mutex_unlock(&OVL_I(d_inode(dentry))->lock);
+	ovl_inode_unlock(d_inode(dentry));
 }
 
 bool ovl_check_origin_xattr(struct dentry *dentry)
@@ -752,11 +752,11 @@ fail:
  */
 int ovl_nlink_start(struct dentry *dentry)
 {
-	struct ovl_inode *oi = OVL_I(d_inode(dentry));
+	struct inode *inode = d_inode(dentry);
 	const struct cred *old_cred;
 	int err;
 
-	if (WARN_ON(!d_inode(dentry)))
+	if (WARN_ON(!inode))
 		return -ENOENT;
 
 	/*
@@ -779,11 +779,11 @@ int ovl_nlink_start(struct dentry *dentry)
 			return err;
 	}
 
-	err = mutex_lock_interruptible(&oi->lock);
+	err = ovl_inode_lock(inode);
 	if (err)
 		return err;
 
-	if (d_is_dir(dentry) || !ovl_test_flag(OVL_INDEX, d_inode(dentry)))
+	if (d_is_dir(dentry) || !ovl_test_flag(OVL_INDEX, inode))
 		goto out;
 
 	old_cred = ovl_override_creds(dentry->d_sb);
@@ -798,15 +798,16 @@ int ovl_nlink_start(struct dentry *dentry)
 
 out:
 	if (err)
-		mutex_unlock(&oi->lock);
+		ovl_inode_unlock(inode);
 
 	return err;
 }
 
 void ovl_nlink_end(struct dentry *dentry)
 {
-	if (ovl_test_flag(OVL_INDEX, d_inode(dentry)) &&
-	    d_inode(dentry)->i_nlink == 0) {
+	struct inode *inode = d_inode(dentry);
+
+	if (ovl_test_flag(OVL_INDEX, inode) && inode->i_nlink == 0) {
 		const struct cred *old_cred;
 
 		old_cred = ovl_override_creds(dentry->d_sb);
@@ -814,7 +815,7 @@ void ovl_nlink_end(struct dentry *dentry)
 		revert_creds(old_cred);
 	}
 
-	mutex_unlock(&OVL_I(d_inode(dentry))->lock);
+	ovl_inode_unlock(inode);
 }
 
 int ovl_lock_rename_workdir(struct dentry *workdir, struct dentry *upperdir)
