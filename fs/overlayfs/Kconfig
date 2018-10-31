@@ -109,6 +109,7 @@ config OVERLAY_FS_METACOPY
 	bool "Overlayfs: turn on metadata only copy up feature by default"
 	depends on OVERLAY_FS
 	select OVERLAY_FS_REDIRECT_DIR
+	select OVERLAY_FS_STRICT
 	help
 	  If this config option is enabled then overlay filesystems will
 	  copy up only metadata where appropriate and data copy up will
@@ -120,5 +121,27 @@ config OVERLAY_FS_METACOPY
 	  Note, that this feature is not backward compatible.  That is,
 	  mounting an overlay which has metacopy only inodes on a kernel
 	  that doesn't support this feature will have unexpected results.
+
+	  If unsure, say N.
+
+config OVERLAY_FS_STRICT
+	bool "Overlayfs: turn on strict requirements by default"
+	depends on OVERLAY_FS
+	help
+	  The overlayfs filesystem is fully functional and optimal when the
+	  underlying filesystems support extended attributes, d_type values
+	  in readdir, O_TMPFILE and RENAME_WHITEOUT.  In addition, some
+	  overlay filesystem features require that underlying filesystems
+	  support exporting NFS file handles.
+
+	  If this config option is enabled, then overlay filesystem mount
+	  will fail if any of the requirements from underlying filesystems
+	  are not met.  When strict requirements are enabled, overlay filesystem
+	  mount will also fail if any of the mount options are conflicting,
+	  for example: "nfs_export=on,metacopy=on".
+
+	  If this config option is enabled, it is still possible to turn off
+	  strict requirements globally with the "strict=off" module option or
+	  on a filesystem instance basis with the "strict=off" mount option.
 
 	  If unsure, say N.

@@ -61,6 +61,11 @@ module_param_named(metacopy, ovl_metacopy_def, bool, 0644);
 MODULE_PARM_DESC(ovl_metacopy_def,
 		 "Default to on or off for the metadata only copy up feature");
 
+static bool ovl_strict_def = IS_ENABLED(CONFIG_OVERLAY_FS_STRICT);
+module_param_named(strict, ovl_strict_def, bool, 0644);
+MODULE_PARM_DESC(ovl_strict_def,
+		 "Default to on or off for strict feature requirements");
+
 static int ovl_feature_requires(struct ovl_config *config, const char *feature,
 				const char *requirement)
 {
@@ -401,6 +406,8 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 	if (ofs->config.metacopy != ovl_metacopy_def)
 		seq_printf(m, ",metacopy=%s",
 			   ofs->config.metacopy ? "on" : "off");
+	if (ofs->config.strict != ovl_strict_def)
+		seq_printf(m, ",strict=%s", ofs->config.strict ? "on" : "off");
 	return 0;
 }
 
@@ -440,6 +447,8 @@ enum {
 	OPT_XINO_AUTO,
 	OPT_METACOPY_ON,
 	OPT_METACOPY_OFF,
+	OPT_STRICT_ON,
+	OPT_STRICT_OFF,
 	OPT_ERR,
 };
 
@@ -458,6 +467,8 @@ static const match_table_t ovl_tokens = {
 	{OPT_XINO_AUTO,			"xino=auto"},
 	{OPT_METACOPY_ON,		"metacopy=on"},
 	{OPT_METACOPY_OFF,		"metacopy=off"},
+	{OPT_STRICT_ON,			"strict=on"},
+	{OPT_STRICT_OFF,		"strict=off"},
 	{OPT_ERR,			NULL}
 };
 
@@ -592,6 +603,14 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 
 		case OPT_METACOPY_OFF:
 			config->metacopy = false;
+			break;
+
+		case OPT_STRICT_ON:
+			config->strict = true;
+			break;
+
+		case OPT_STRICT_OFF:
+			config->strict = false;
 			break;
 
 		default:
@@ -1540,6 +1559,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	ofs->config.nfs_export = ovl_nfs_export_def;
 	ofs->config.xino = ovl_xino_def();
 	ofs->config.metacopy = ovl_metacopy_def;
+	ofs->config.strict = ovl_strict_def;
 	err = ovl_parse_opt((char *) data, &ofs->config);
 	if (err)
 		goto out_err;
