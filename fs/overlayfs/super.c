@@ -1327,9 +1327,15 @@ static int ovl_get_fsid(struct ovl_fs *ofs, const struct path *path)
 	if (!ovl_lower_uuid_ok(ofs, &sb->s_uuid)) {
 		ofs->config.index = false;
 		ofs->config.nfs_export = false;
-		pr_warn("overlayfs: %s uuid detected in lower fs '%pd2', falling back to index=off,nfs_export=off.\n",
+		pr_warn("overlayfs: %s uuid detected in lower fs '%pd2'.\n",
 			uuid_is_null(&sb->s_uuid) ? "null" : "conflicting",
 			path->dentry);
+
+		err = ovl_feature_requires(&ofs->config,
+					   "NFS export and inode index",
+					   "unique uuid with multiple underlying fs");
+		if (err)
+			return err;
 	}
 
 	err = get_anon_bdev(&dev);
