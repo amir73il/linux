@@ -1054,10 +1054,57 @@ out:
 	return err;
 }
 
+/*
+ * Returns 1 if RENAME_WHITEOUT is supported, 0 if not supported and
+ * negative values if error is encountered.
+ */
+static int ovl_check_rename_whiteout(struct dentry *workdir)
+{
+	struct inode *dir = d_inode(workdir);
+	struct dentry *temp;
+	struct dentry *dest;
+	int err;
+
+	inode_lock_nested(dir, I_MUTEX_PARENT);
+
+	temp = ovl_create_temp(workdir, OVL_CATTR(S_IFREG | 0));
+	err = PTR_ERR(temp);
+	if (IS_ERR(temp))
+		goto out_unlock;
+
+	dest = ovl_create_temp(workdir, OVL_CATTR(S_IFREG | 0));
+	err = PTR_ERR(dest);
+	if (IS_ERR(dest)) {
+		dput(temp);
+		goto out_unlock;
+	}
+
+	err = ovl_do_rename(dir, temp, dir, dest, RENAME_WHITEOUT);
+	if (err == -EINVAL)
+		err = 0;
+	else if (!err)
+		err = 1;
+
+	/*
+	 * Best effort cleanup of temp file, leaving dest file or whiteout
+	 * behind. We could use leftover whiteout as singleton whiteout...
+	 */
+	ovl_cleanup(dir, temp);
+	dput(dest);
+	dput(temp);
+
+out_unlock:
+	inode_unlock(dir);
+
+	return err;
+}
+
 static int ovl_make_workdir(struct ovl_fs *ofs, struct path *workpath)
 {
 	struct vfsmount *mnt = ofs->upper_mnt;
 	struct dentry *temp;
+	bool rename_whiteout;
+	bool d_type;
 	int fh_type;
 	int err;
 
@@ -1079,11 +1126,8 @@ static int ovl_make_workdir(struct ovl_fs *ofs, struct path *workpath)
 	if (err < 0)
 		goto out;
 
-	/*
-	 * We allowed this configuration and don't want to break users over
-	 * kernel upgrade. So warn instead of erroring out.
-	 */
-	if (!err)
+	d_type = err;
+	if (!d_type)
 		pr_warn("overlayfs: upper fs needs to support d_type.\n");
 
 	/* Check if upper/work fs supports O_TMPFILE */
@@ -1094,6 +1138,16 @@ static int ovl_make_workdir(struct ovl_fs *ofs, struct path *workpath)
 	else
 		pr_warn("overlayfs: upper fs does not support tmpfile.\n");
 
+
+	/* Check if upper/work fs supports RENAME_WHITEOUT */
+	err = ovl_check_rename_whiteout(ofs->workdir);
+	if (err < 0)
+		goto out;
+
+	rename_whiteout = err;
+	if (!rename_whiteout)
+		pr_warn("overlayfs: upper fs does not support RENAME_WHITEOUT.\n");
+
 	/*
 	 * Check if upper/work fs supports trusted.overlay.* xattr
 	 */
@@ -1103,6 +1157,14 @@ static int ovl_make_workdir(struct ovl_fs *ofs, struct path *workpath)
 		pr_warn("overlayfs: upper fs does not support xattr.\n");
 	} else {
 		vfs_removexattr(ofs->workdir, OVL_XATTR_OPAQUE);
+	}
+
+	/* With 'strict' policy, sub-optimal upper fs are not allowed */
+	if (ofs->config.strict &&
+	    (!d_type || !ofs->tmpfile || !rename_whiteout || ofs->noxattr)) {
+		pr_err("overlayfs: upper fs missing required features, mount with '-o strict=off' to override strict features check.\n");
+		err = -EINVAL;
+		goto out;
 	}
 
 	/* metacopy depends on redirect_dir which depend on xattr */
