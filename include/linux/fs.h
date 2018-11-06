@@ -1492,7 +1492,21 @@ struct super_block {
 	/*
 	 * Indicates how deep in a filesystem stack this SB is
 	 */
-	int s_stack_depth;
+	unsigned short		s_stack_depth;
+	/*
+	 * s_max_ino_bits and s_ino_domain may be used by stacking filesystems
+	 * that want to harness unique inode numbers of underlying filesystem.
+	 * For non stacked filesystem, s_ino_domain defaults to s_dev.
+	 * Stacking filesystem may "inherit" s_ino_domain from underlying
+	 * filesystem when inode numbers of stacked inode are the same as the
+	 * underlying inode numbers.
+	 * A filesystem may advertise the maximum used inode number bits by
+	 * setting s_max_ino_bits to non zero value.
+	 * Stacking filesystems may use this information to multiplex several
+	 * inode number domains into a new domain of unique inode numbers.
+	 */
+	unsigned short		s_max_ino_bits;
+	dev_t			s_ino_domain;
 
 	/* s_inode_list_lock protects s_inodes */
 	spinlock_t		s_inode_list_lock ____cacheline_aligned_in_smp;

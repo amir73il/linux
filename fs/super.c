@@ -530,6 +530,8 @@ retry:
 		return ERR_PTR(err);
 	}
 	s->s_type = type;
+	/* May be overridden by stacked filesystem */
+	s->s_ino_domain = s->s_dev;
 	strlcpy(s->s_id, type->name, sizeof(s->s_id));
 	list_add_tail(&s->s_list, &super_blocks);
 	hlist_add_head(&s->s_instances, &type->fs_supers);
