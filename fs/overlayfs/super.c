@@ -69,7 +69,7 @@ module_param_named(metacopy, ovl_metacopy_def, bool, 0644);
 MODULE_PARM_DESC(metacopy,
 		 "Default to on or off for the metadata only copy up feature");
 
-static void ovl_dentry_release(struct dentry *dentry)
+void ovl_dentry_release(struct dentry *dentry)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
 
@@ -79,8 +79,7 @@ static void ovl_dentry_release(struct dentry *dentry)
 	}
 }
 
-static struct dentry *ovl_d_real(struct dentry *dentry,
-				 const struct inode *inode)
+struct dentry *ovl_d_real(struct dentry *dentry, const struct inode *inode)
 {
 	struct dentry *real;
 
@@ -177,7 +176,7 @@ static const struct dentry_operations ovl_reval_dentry_operations = {
 
 static struct kmem_cache *ovl_inode_cachep;
 
-static struct inode *ovl_alloc_inode(struct super_block *sb)
+struct inode *ovl_alloc_inode(struct super_block *sb)
 {
 	struct ovl_inode *oi = kmem_cache_alloc(ovl_inode_cachep, GFP_KERNEL);
 
@@ -203,7 +202,7 @@ static void ovl_i_callback(struct rcu_head *head)
 	kmem_cache_free(ovl_inode_cachep, OVL_I(inode));
 }
 
-static void ovl_destroy_inode(struct inode *inode)
+void ovl_destroy_inode(struct inode *inode)
 {
 	struct ovl_inode *oi = OVL_I(inode);
 
@@ -219,7 +218,7 @@ static void ovl_destroy_inode(struct inode *inode)
 	call_rcu(&inode->i_rcu, ovl_i_callback);
 }
 
-static void ovl_free_fs(struct ovl_fs *ofs)
+void ovl_free_fs(struct ovl_fs *ofs)
 {
 	unsigned i;
 
@@ -253,7 +252,7 @@ static void ovl_free_fs(struct ovl_fs *ofs)
 	kfree(ofs);
 }
 
-static void ovl_put_super(struct super_block *sb)
+void ovl_put_super(struct super_block *sb)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;
 
@@ -261,7 +260,7 @@ static void ovl_put_super(struct super_block *sb)
 }
 
 /* Sync real dirty inodes in upper filesystem (if it exists) */
-static int ovl_sync_fs(struct super_block *sb, int wait)
+int ovl_sync_fs(struct super_block *sb, int wait)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;
 	struct super_block *upper_sb;
@@ -298,7 +297,7 @@ static int ovl_sync_fs(struct super_block *sb, int wait)
  * Get the filesystem statistics.  As writes always target the upper layer
  * filesystem pass the statfs to the upper filesystem (if it exists)
  */
-static int ovl_statfs(struct dentry *dentry, struct kstatfs *buf)
+int ovl_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 	struct dentry *root_dentry = dentry->d_sb->s_root;
@@ -447,7 +446,7 @@ static const match_table_t ovl_tokens = {
 	{OPT_ERR,			NULL}
 };
 
-static char *ovl_next_opt(char **s)
+char *ovl_next_opt(char **s)
 {
 	char *sbegin = *s;
 	char *p;
@@ -910,7 +909,7 @@ ovl_posix_acl_xattr_set(const struct xattr_handler *handler,
 			return PTR_ERR(acl);
 	}
 	err = -EOPNOTSUPP;
-	if (!IS_POSIXACL(d_inode(workdir)))
+	if (workdir && !IS_POSIXACL(d_inode(workdir)))
 		goto out_acl_release;
 	if (!realinode->i_op->set_acl)
 		goto out_acl_release;
@@ -1008,7 +1007,7 @@ static const struct xattr_handler ovl_other_xattr_handler = {
 	.set = ovl_other_xattr_set,
 };
 
-static const struct xattr_handler *ovl_xattr_handlers[] = {
+const struct xattr_handler *ovl_xattr_handlers[] = {
 #ifdef CONFIG_FS_POSIX_ACL
 	&ovl_posix_acl_access_xattr_handler,
 	&ovl_posix_acl_default_xattr_handler,
@@ -1055,8 +1054,8 @@ static int ovl_report_in_use(struct ovl_fs *ofs, const char *name)
 	}
 }
 
-static int ovl_get_upper(struct super_block *sb, struct ovl_fs *ofs,
-			 struct path *upperpath)
+int ovl_get_upper(struct super_block *sb, struct ovl_fs *ofs,
+		  struct path *upperpath)
 {
 	struct vfsmount *upper_mnt;
 	int err;
@@ -1783,11 +1782,16 @@ static int __init ovl_init(void)
 	if (err)
 		kmem_cache_destroy(ovl_inode_cachep);
 
+	/* This module may also serve mount -t snapshot */
+	if (ovl_snapshot_fs_register())
+		pr_warn("overlayfs: failed to register snapshotfs\n");
+
 	return err;
 }
 
 static void __exit ovl_exit(void)
 {
+	ovl_snapshot_fs_unregister();
 	unregister_filesystem(&ovl_fs_type);
 
 	/*
