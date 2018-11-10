@@ -766,6 +766,9 @@ int ovl_nlink_start(struct dentry *dentry)
 	if (WARN_ON(!inode))
 		return -ENOENT;
 
+	if (!ovl_dentry_lower(dentry))
+		return 0;
+
 	/*
 	 * With inodes index is enabled, we store the union overlay nlink
 	 * in an xattr on the index inode. When whiting out an indexed lower,
@@ -813,6 +816,9 @@ out:
 void ovl_nlink_end(struct dentry *dentry)
 {
 	struct inode *inode = d_inode(dentry);
+
+	if (!ovl_dentry_lower(dentry))
+		return;
 
 	if (ovl_test_flag(OVL_INDEX, inode) && inode->i_nlink == 0) {
 		const struct cred *old_cred;
