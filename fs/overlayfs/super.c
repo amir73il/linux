@@ -252,6 +252,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 		ovl_inuse_unlock(ofs->upper_mnt->mnt_root);
 	mntput(ofs->upper_mnt);
 	ovl_snap_free(ofs->snap);
+	ovl_snap_free(ofs->new_snap);
 	for (i = 0; i < ofs->numlower; i++) {
 		iput(ofs->lower_layers[i].trap);
 		mntput(ofs->lower_layers[i].mnt);

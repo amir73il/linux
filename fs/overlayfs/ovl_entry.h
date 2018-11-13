@@ -53,7 +53,8 @@ struct ovl_snap {
 /* private information held for overlayfs's superblock */
 struct ovl_fs {
 	struct vfsmount *upper_mnt;
-	struct ovl_snap *snap;
+	struct ovl_snap *snap;		/* effective */
+	struct ovl_snap *new_snap;	/* requested */
 	unsigned int numlower;
 	/* Number of unique lower sb that differ from upper sb */
 	unsigned int numlowerfs;
