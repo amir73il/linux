@@ -12,6 +12,7 @@
 #include <linux/xattr.h>
 #include <linux/uio.h>
 #include <linux/uaccess.h>
+#include <linux/mm.h>
 #include "overlayfs.h"
 
 static char ovl_whatisit(struct inode *inode, struct inode *realinode)
@@ -140,6 +141,9 @@ static int ovl_open(struct inode *inode, struct file *file)
 
 static int ovl_release(struct inode *inode, struct file *file)
 {
+	if (file->f_mode & FMODE_WRITE)
+		ovl_snapshot_put_write_access(file);
+
 	fput(file->private_data);
 
 	return 0;
@@ -317,6 +321,8 @@ static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	return ret;
 }
 
+#define VM_WRITE_SHARED		(VM_WRITE | VM_SHARED)
+
 static int ovl_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct file *realfile = file->private_data;
@@ -328,6 +334,13 @@ static int ovl_mmap(struct file *file, struct vm_area_struct *vma)
 
 	if (WARN_ON(file != vma->vm_file))
 		return -EIO;
+
+	if ((vma->vm_flags & VM_WRITE_SHARED) == VM_WRITE_SHARED) {
+		/* Get reference count on writable shared maps */
+		ret = ovl_snapshot_get_write_access(file);
+		if (ret)
+			return ret;
+	}
 
 	vma->vm_file = get_file(realfile);
 

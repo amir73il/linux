@@ -83,6 +83,8 @@ struct ovl_fs {
 	struct inode *indexdir_trap;
 	/* Inode numbers in all layers do not use the high xino_bits */
 	unsigned int xino_bits;
+	/* Number of files writably mapped upper fs files */
+	atomic_t writable_map_count;
 };
 
 static inline struct ovl_fs *OVL_FS(struct super_block *sb)

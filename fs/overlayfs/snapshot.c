@@ -335,13 +335,44 @@ static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data);
 
 static int ovl_snapshot_freeze(struct super_block *sb)
 {
-	return freeze_super(OVL_FS(sb)->upper_mnt->mnt_sb);
+	int err;
+
+	/* Deny writable maps */
+	if (!atomic_dec_unless_positive(&OVL_FS(sb)->writable_map_count)) {
+		pr_warn("%s: writable maps exist, count = %d.\n", __func__,
+			atomic_read(&OVL_FS(sb)->writable_map_count));
+		return -EBUSY;
+	}
+
+	err = freeze_super(sb);
+	if (err) {
+		pr_warn("%s: freeze super failed, err = %i.\n",
+			__func__, err);
+		goto out_err;
+	}
+
+	err = freeze_super(OVL_FS(sb)->upper_mnt->mnt_sb);
+	if (err) {
+		pr_warn("%s: freeze upper fs failed, err = %i.\n",
+			__func__, err);
+		thaw_super(sb);
+		goto out_err;
+	}
+
+	return 0;
+
+out_err:
+	atomic_inc(&OVL_FS(sb)->writable_map_count);
+	return err;
 }
 
 static int ovl_snapshot_unfreeze(struct super_block *sb)
 {
 	/* Make requested snapshot effective before thawing fs */
 	ovl_snapshot_barrier(sb);
+
+	/* Allow writable maps */
+	WARN_ON_ONCE(atomic_inc_return(&OVL_FS(sb)->writable_map_count) != 0);
 
 	return thaw_super(OVL_FS(sb)->upper_mnt->mnt_sb);
 }
@@ -355,7 +386,7 @@ static const struct super_operations ovl_snapshot_super_operations = {
 	.statfs		= ovl_statfs,
 	.show_options	= ovl_snapshot_show_options,
 	.remount_fs	= ovl_snapshot_remount,
-	.freeze_fs	= ovl_snapshot_freeze,
+	.freeze_super	= ovl_snapshot_freeze,
 	.unfreeze_fs	= ovl_snapshot_unfreeze,
 };
 
@@ -628,6 +659,7 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 		goto out_err;
 
 	ofs->snap = snap;
+	atomic_set(&ofs->writable_map_count, 0);
 
 	err = -ENOMEM;
 	oe = ovl_alloc_entry(0);
@@ -999,4 +1031,48 @@ int ovl_snapshot_modify(struct dentry *dentry)
 
 	mntput(snapmnt);
 	return err;
+}
+
+int ovl_snapshot_get_write_shared_access(struct file *file)
+{
+	struct dentry *dentry = file->f_path.dentry;
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+
+	/* Prevent freezing snapshot fs if writable maps exist */
+	if (!atomic_inc_unless_negative(&ofs->writable_map_count)) {
+		pr_warn("%s(%pd2): writable map denied, count = %d.\n",
+			__func__, dentry,
+			atomic_read(&ofs->writable_map_count));
+		return -ETXTBSY;
+	}
+
+	pr_debug("%s(%pd2): writable map count = %d.\n",
+		 __func__, dentry, atomic_read(&ofs->writable_map_count));
+	return 0;
+}
+
+void ovl_snapshot_put_write_shared_access(struct file *file)
+{
+	struct dentry *dentry = file->f_path.dentry;
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+	struct file *realfile = file->private_data;
+	int count;
+
+	if (atomic_long_read(&realfile->f_count) > 1 &&
+	    mapping_writably_mapped(realfile->f_mapping)) {
+		/*
+		 * Last reference to overlay file dropped, but writable
+		 * map to underlying upper fs still exist. freeze will be
+		 * blocked for the lifetime of this filesystem instance.
+		 */
+		pr_warn("%s(%pd2): dangeling upper fs writable map, count = %d.\n",
+			__func__, dentry,
+			atomic_read(&ofs->writable_map_count));
+		return;
+	}
+
+	count = atomic_dec_return(&ofs->writable_map_count);
+	WARN_ON_ONCE(count < 0);
+	pr_debug("%s(%pd2): writable map count = %d.\n",
+		 __func__, dentry, count);
 }
