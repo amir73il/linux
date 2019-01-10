@@ -290,7 +290,7 @@ static void untag_chunk(struct node *p)
 		goto Fallback;
 
 	if (fsnotify_add_mark_locked(&new->mark, entry->connector->obj,
-				     FSNOTIFY_OBJ_TYPE_INODE, 1)) {
+				     FSNOTIFY_OBJ_TYPE_INODE, 1, NULL)) {
 		fsnotify_put_mark(&new->mark);
 		goto Fallback;
 	}
@@ -436,7 +436,7 @@ static int tag_chunk(struct inode *inode, struct audit_tree *tree)
 	}
 
 	if (fsnotify_add_mark_locked(chunk_entry, old_entry->connector->obj,
-				     FSNOTIFY_OBJ_TYPE_INODE, 1)) {
+				     FSNOTIFY_OBJ_TYPE_INODE, 1, NULL)) {
 		spin_unlock(&old_entry->lock);
 		mutex_unlock(&old_entry->group->mark_mutex);
 		fsnotify_put_mark(chunk_entry);
