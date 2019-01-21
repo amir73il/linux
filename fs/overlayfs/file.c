@@ -11,6 +11,11 @@
 #include <linux/mount.h>
 #include <linux/xattr.h>
 #include <linux/uio.h>
+#include <linux/mm.h>
+#include <linux/iomap.h>
+#include <linux/pagemap.h>
+#include <linux/writeback.h>
+#include <linux/ratelimit.h>
 #include "overlayfs.h"
 
 static char ovl_whatisit(struct inode *inode, struct inode *realinode)
@@ -80,6 +85,14 @@ static int ovl_change_flags(struct file *file, unsigned int flags)
 	return 0;
 }
 
+static bool ovl_filemap_support(struct file *file)
+{
+	struct ovl_fs *ofs = file_inode(file)->i_sb->s_fs_info;
+
+	/* TODO: implement aops to upper inode data */
+	return ofs->upper_mnt && ovl_aops.writepage;
+}
+
 static int ovl_file_maybe_copy_up(const struct file *file)
 {
 	int copy_up_flags = 0;
@@ -125,6 +138,28 @@ static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
 static int ovl_real_fdget(const struct file *file, struct fd *real)
 {
 	return ovl_real_fdget_meta(file, real, false);
+}
+
+static bool ovl_should_use_filemap(struct file *file)
+{
+	if (!ovl_filemap_support(file))
+		return false;
+
+	/*
+	 * Use overlay inode page cache for all inodes that could be dirty,
+	 * including pure upper inodes, so ovl_sync_fs() can sync all dirty
+	 * overlay inodes without having to sync all upper fs dirty inodes.
+	 */
+	return ovl_has_upperdata(file_inode(file));
+}
+
+static int ovl_flush_filemap(struct file *file, loff_t offset, loff_t len)
+{
+	if (!ovl_should_use_filemap(file))
+		return 0;
+
+	return filemap_write_and_wait_range(file_inode(file)->i_mapping,
+					    offset, len);
 }
 
 static int ovl_open(struct inode *inode, struct file *file)
@@ -203,7 +238,7 @@ static rwf_t ovl_iocb_to_rwf(struct kiocb *iocb)
 	return flags;
 }
 
-static ssize_t ovl_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+static ssize_t ovl_real_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 {
 	struct file *file = iocb->ki_filp;
 	struct fd real;
@@ -229,7 +264,17 @@ static ssize_t ovl_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 	return ret;
 }
 
-static ssize_t ovl_write_iter(struct kiocb *iocb, struct iov_iter *iter)
+static ssize_t ovl_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+{
+	struct file *file = iocb->ki_filp;
+
+	if (ovl_should_use_filemap(file))
+		return generic_file_read_iter(iocb, iter);
+
+	return ovl_real_read_iter(iocb, iter);
+}
+
+static ssize_t ovl_real_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 {
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file_inode(file);
@@ -269,7 +314,19 @@ out_unlock:
 	return ret;
 }
 
-static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
+static ssize_t ovl_write_iter(struct kiocb *iocb, struct iov_iter *iter)
+{
+	struct file *file = iocb->ki_filp;
+
+	if (ovl_should_use_filemap(file))
+		return generic_file_write_iter(iocb, iter);
+
+	return ovl_real_write_iter(iocb, iter);
+}
+
+
+static int ovl_real_fsync(struct file *file, loff_t start, loff_t end,
+			  int datasync)
 {
 	struct fd real;
 	const struct cred *old_cred;
@@ -291,7 +348,15 @@ static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	return ret;
 }
 
-static int ovl_mmap(struct file *file, struct vm_area_struct *vma)
+static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
+{
+	if (ovl_should_use_filemap(file))
+		return __generic_file_fsync(file, start, end, datasync);
+
+	return ovl_real_fsync(file, start, end, datasync);
+}
+
+static int ovl_real_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct file *realfile = file->private_data;
 	const struct cred *old_cred;
@@ -322,12 +387,26 @@ static int ovl_mmap(struct file *file, struct vm_area_struct *vma)
 	return ret;
 }
 
-static long ovl_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
+static int ovl_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	if (ovl_should_use_filemap(file))
+		generic_file_mmap(file, vma);
+
+	return ovl_real_mmap(file, vma);
+}
+
+static long ovl_fallocate(struct file *file, int mode, loff_t offset,
+			  loff_t len)
 {
 	struct inode *inode = file_inode(file);
 	struct fd real;
 	const struct cred *old_cred;
 	int ret;
+
+	/* XXX: Different modes need to flush different ranges... */
+	ret = ovl_flush_filemap(file, 0, LLONG_MAX);
+	if (ret)
+		return ret;
 
 	ret = ovl_real_fdget(file, &real);
 	if (ret)
@@ -345,7 +424,8 @@ static long ovl_fallocate(struct file *file, int mode, loff_t offset, loff_t len
 	return ret;
 }
 
-static int ovl_fadvise(struct file *file, loff_t offset, loff_t len, int advice)
+static int ovl_real_fadvise(struct file *file, loff_t offset, loff_t len,
+			    int advice)
 {
 	struct fd real;
 	const struct cred *old_cred;
@@ -362,6 +442,18 @@ static int ovl_fadvise(struct file *file, loff_t offset, loff_t len, int advice)
 	fdput(real);
 
 	return ret;
+}
+
+extern int generic_fadvise(struct file *file, loff_t offset, loff_t len,
+			   int advice);
+
+static int ovl_fadvise(struct file *file, loff_t offset, loff_t len, int advice)
+{
+	if (ovl_should_use_filemap(file))
+		return generic_fadvise(file, offset, len, advice);
+
+	/* XXX: Should we allow messing with lower shared page cache? */
+	return ovl_real_fadvise(file, offset, len, advice);
 }
 
 static long ovl_real_ioctl(struct file *file, unsigned int cmd,
@@ -454,6 +546,15 @@ static loff_t ovl_copyfile(struct file *file_in, loff_t pos_in,
 	struct fd real_in, real_out;
 	const struct cred *old_cred;
 	loff_t ret;
+
+	/* XXX: For some ops zero length means EOF... */
+	ret = ovl_flush_filemap(file_out, pos_out, len ?: LLONG_MAX);
+	if (ret)
+		return ret;
+
+	ret = ovl_flush_filemap(file_in, pos_in, len ?: LLONG_MAX);
+	if (ret)
+		return ret;
 
 	ret = ovl_real_fdget(file_out, &real_out);
 	if (ret)
