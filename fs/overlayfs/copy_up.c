@@ -731,10 +731,7 @@ static bool ovl_need_meta_copy_up(struct dentry *dentry, umode_t mode,
 	if (!S_ISREG(mode))
 		return false;
 
-	if (flags && ((OPEN_FMODE(flags) & FMODE_WRITE) || (flags & O_TRUNC)))
-		return false;
-
-	return true;
+	return !ovl_open_flags_need_data_copy_up(flags);
 }
 
 /* Copy up data of an inode which was copied up metadata only in the past. */

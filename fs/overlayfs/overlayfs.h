@@ -195,12 +195,20 @@ static inline struct dentry *ovl_do_tmpfile(struct dentry *dentry, umode_t mode)
 	return ret;
 }
 
-static inline bool ovl_open_flags_need_copy_up(int flags)
+static inline bool ovl_open_flags_need_data_copy_up(int flags)
 {
 	if (!flags)
 		return false;
 
+	/* Either O_RDWR or O_WRONLY will trigger data copy up */
 	return ((OPEN_FMODE(flags) & FMODE_WRITE) || (flags & O_TRUNC));
+}
+
+static inline bool ovl_open_flags_need_copy_up(int flags)
+{
+	/* O_RDWR|O_WRONLY together will trigger meta copy up */
+	return (flags & O_ACCMODE) == (O_RDWR | O_WRONLY) ||
+		ovl_open_flags_need_data_copy_up(flags);
 }
 
 /* util.c */
