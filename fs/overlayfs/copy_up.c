@@ -872,17 +872,14 @@ int ovl_copy_up_flags(struct dentry *dentry, int flags)
 
 static bool ovl_open_need_copy_up(struct dentry *dentry, int flags)
 {
-	/* Copy up of disconnected dentry does not set upper alias */
-	if (ovl_already_copied_up(dentry, flags))
-		return false;
-
-	if (special_file(d_inode(dentry)->i_mode))
+	/* Not called from regular file ops? */
+	if (WARN_ON(special_file(d_inode(dentry)->i_mode)))
 		return false;
 
 	if (!ovl_open_flags_need_copy_up(flags))
 		return false;
 
-	return true;
+	return !ovl_already_copied_up(dentry, flags);
 }
 
 int ovl_maybe_copy_up(struct dentry *dentry, int flags)
