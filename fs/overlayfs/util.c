@@ -367,7 +367,7 @@ void ovl_set_upperdata(struct inode *inode)
 /* Caller should hold ovl_inode->lock */
 bool ovl_dentry_needs_data_copy_up_locked(struct dentry *dentry, int flags)
 {
-	if (!ovl_open_flags_need_copy_up(flags))
+	if (!(flags & OVL_COPY_UP_DATA))
 		return false;
 
 	return !ovl_test_flag(OVL_UPPERDATA, d_inode(dentry));
@@ -375,7 +375,7 @@ bool ovl_dentry_needs_data_copy_up_locked(struct dentry *dentry, int flags)
 
 bool ovl_dentry_needs_data_copy_up(struct dentry *dentry, int flags)
 {
-	if (!ovl_open_flags_need_copy_up(flags))
+	if (!(flags & OVL_COPY_UP_DATA))
 		return false;
 
 	return !ovl_has_upperdata(d_inode(dentry));

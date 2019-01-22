@@ -80,6 +80,19 @@ static int ovl_change_flags(struct file *file, unsigned int flags)
 	return 0;
 }
 
+static int ovl_file_maybe_copy_up(const struct file *file)
+{
+	int copy_up_flags = 0;
+
+	if (file->f_flags & O_TRUNC) {
+		copy_up_flags = OVL_COPY_UP_DATA | OVL_COPY_UP_TRUNC;
+	} else if (file->f_mode & FMODE_WRITE) {
+		copy_up_flags = OVL_COPY_UP_DATA;
+	}
+
+	return ovl_maybe_copy_up(file_dentry(file), copy_up_flags);
+}
+
 static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
 			       bool allow_meta)
 {
@@ -119,7 +132,7 @@ static int ovl_open(struct inode *inode, struct file *file)
 	struct file *realfile;
 	int err;
 
-	err = ovl_maybe_copy_up(file_dentry(file), file->f_flags);
+	err = ovl_file_maybe_copy_up(file);
 	if (err)
 		return err;
 
@@ -389,7 +402,7 @@ static long ovl_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (ret)
 			return ret;
 
-		ret = ovl_maybe_copy_up(file_dentry(file), O_WRONLY);
+		ret = ovl_maybe_copy_up(file_dentry(file), OVL_COPY_UP_DATA);
 		if (!ret) {
 			ret = ovl_real_ioctl(file, cmd, arg);
 

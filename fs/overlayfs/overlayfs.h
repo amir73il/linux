@@ -195,14 +195,6 @@ static inline struct dentry *ovl_do_tmpfile(struct dentry *dentry, umode_t mode)
 	return ret;
 }
 
-static inline bool ovl_open_flags_need_copy_up(int flags)
-{
-	if (!flags)
-		return false;
-
-	return ((OPEN_FMODE(flags) & FMODE_WRITE) || (flags & O_TRUNC));
-}
-
 /* util.c */
 int ovl_want_write(struct dentry *dentry);
 void ovl_drop_write(struct dentry *dentry);
@@ -416,8 +408,6 @@ struct dentry *ovl_create_temp(struct dentry *workdir, struct ovl_cattr *attr);
 extern const struct file_operations ovl_file_operations;
 
 /* copy_up.c */
-int ovl_copy_up(struct dentry *dentry);
-int ovl_copy_up_with_data(struct dentry *dentry);
 int ovl_copy_up_flags(struct dentry *dentry, int flags);
 int ovl_maybe_copy_up(struct dentry *dentry, int flags);
 int ovl_copy_xattr(struct dentry *old, struct dentry *new);
@@ -425,6 +415,21 @@ int ovl_set_attr(struct dentry *upper, struct kstat *stat);
 struct ovl_fh *ovl_encode_real_fh(struct dentry *real, bool is_upper);
 int ovl_set_origin(struct dentry *dentry, struct dentry *lower,
 		   struct dentry *upper);
+
+/* Copy up flags */
+#define OVL_COPY_UP_META	1
+#define OVL_COPY_UP_DATA	2
+#define OVL_COPY_UP_TRUNC	4
+
+static inline int ovl_copy_up_with_data(struct dentry *dentry)
+{
+	return ovl_copy_up_flags(dentry, OVL_COPY_UP_DATA);
+}
+
+static inline int ovl_copy_up(struct dentry *dentry)
+{
+	return ovl_copy_up_flags(dentry, OVL_COPY_UP_META);
+}
 
 /* export.c */
 extern const struct export_operations ovl_export_operations;

@@ -731,7 +731,7 @@ static bool ovl_need_meta_copy_up(struct dentry *dentry, umode_t mode,
 	if (!S_ISREG(mode))
 		return false;
 
-	if (flags && ((OPEN_FMODE(flags) & FMODE_WRITE) || (flags & O_TRUNC)))
+	if (flags & (OVL_COPY_UP_DATA | OVL_COPY_UP_TRUNC))
 		return false;
 
 	return true;
@@ -799,7 +799,7 @@ static int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 	}
 
 	/* maybe truncate regular file. this has no effect on dirs */
-	if (flags & O_TRUNC)
+	if (flags & OVL_COPY_UP_TRUNC)
 		ctx.stat.size = 0;
 
 	if (S_ISLNK(ctx.stat.mode)) {
@@ -872,17 +872,14 @@ int ovl_copy_up_flags(struct dentry *dentry, int flags)
 
 static bool ovl_open_need_copy_up(struct dentry *dentry, int flags)
 {
-	/* Copy up of disconnected dentry does not set upper alias */
-	if (ovl_already_copied_up(dentry, flags))
+	if (!flags)
 		return false;
 
-	if (special_file(d_inode(dentry)->i_mode))
+	/* Not called from regular file ops? */
+	if (WARN_ON(special_file(d_inode(dentry)->i_mode)))
 		return false;
 
-	if (!ovl_open_flags_need_copy_up(flags))
-		return false;
-
-	return true;
+	return !ovl_already_copied_up(dentry, flags);
 }
 
 int ovl_maybe_copy_up(struct dentry *dentry, int flags)
@@ -900,12 +897,3 @@ int ovl_maybe_copy_up(struct dentry *dentry, int flags)
 	return err;
 }
 
-int ovl_copy_up_with_data(struct dentry *dentry)
-{
-	return ovl_copy_up_flags(dentry, O_WRONLY);
-}
-
-int ovl_copy_up(struct dentry *dentry)
-{
-	return ovl_copy_up_flags(dentry, 0);
-}
