@@ -404,9 +404,70 @@ static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	return ovl_real_fsync(file, start, end, datasync);
 }
 
+static struct page *ovl_real_get_page(struct file *file, pgoff_t index)
+{
+	struct file *realfile = file->private_data;
+	struct page *page;
+
+	page = read_mapping_page(file_inode(realfile)->i_mapping, index, NULL);
+	if (IS_ERR(page))
+		return page;
+	if (!PageUptodate(page)) {
+		put_page(page);
+		return ERR_PTR(-EIO);
+	}
+	lock_page(page);
+
+	return page;
+}
+
+static void ovl_copy_page(struct page *dst_page, struct page *src_page)
+{
+	void *src_addr = kmap_atomic(src_page);
+	void *dst_addr = kmap_atomic(dst_page);
+
+	flush_dcache_page(src_page);
+	memcpy(dst_addr, src_addr, PAGE_SIZE);
+
+	kunmap_atomic(dst_addr);
+	kunmap_atomic(src_addr);
+}
+
+static int ovl_do_readpage(struct file *file, struct page *page)
+{
+	struct page *realpage;
+	int ret = 0;
+
+	realpage = ovl_real_get_page(file, page->index);
+	if (!IS_ERR(realpage)) {
+		ovl_copy_page(page, realpage);
+		unlock_page(realpage);
+		put_page(realpage);
+	} else {
+		ret = PTR_ERR(realpage);
+		clear_highpage(page);
+	}
+
+	flush_dcache_page(page);
+	SetPageUptodate(page);
+
+	return ret;
+}
+
+static int ovl_readpage(struct file *file, struct page *page)
+{
+	int ret;
+
+	ret = ovl_do_readpage(file, page);
+	unlock_page(page);
+
+	return ret;
+}
+
 const struct address_space_operations ovl_aops = {
+	.readpage	= ovl_readpage,
 	/* For O_DIRECT dentry_open() checks f_mapping->a_ops->direct_IO */
-	.direct_IO		= noop_direct_IO,
+	.direct_IO	= noop_direct_IO,
 };
 
 static vm_fault_t ovl_fault(struct vm_fault *vmf)
