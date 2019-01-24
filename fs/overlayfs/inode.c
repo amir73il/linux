@@ -453,7 +453,7 @@ int ovl_update_time(struct inode *inode, struct timespec64 *ts, int flags)
 			inode->i_atime = d_inode(upperpath.dentry)->i_atime;
 		}
 	}
-	return 0;
+	return generic_update_time(inode, ts, flags);
 }
 
 static int ovl_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,

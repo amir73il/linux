@@ -925,10 +925,49 @@ static int ovl_write_end(struct file *file, struct address_space *mapping,
 	return __generic_write_end(file_inode(file), pos, copied, page);
 }
 
+static int ovl_real_writepage(struct page *page, struct writeback_control *wbc)
+{
+	struct inode *realinode = ovl_inode_real(page->mapping->host);
+	struct page *realpage;
+	int ret;
+
+	if (!realinode->i_mapping || !realinode->i_mapping->a_ops->writepage)
+		return -EIO;
+
+	realpage = grab_cache_page(realinode->i_mapping, page->index);
+	copy_highpage(realpage, page);
+	set_page_dirty(realpage);
+
+	/* Start writeback on and unlock real page */
+	ret = realinode->i_mapping->a_ops->writepage(realpage, wbc);
+	put_page(realpage);
+
+	return ret;
+}
+
+static int ovl_writepage(struct page *page, struct writeback_control *wbc)
+{
+	int ret;
+
+	set_page_writeback(page);
+	ret = ovl_real_writepage(page, wbc);
+	unlock_page(page);
+
+	/*
+	 * writepage responsibility is to get the data to our backing store.
+	 * Persisting backing store to media requires a call to ovl_sync_fs.
+	 */
+	end_page_writeback(page);
+
+	return ret;
+}
+
 const struct address_space_operations ovl_aops = {
 	.readpage	= ovl_readpage,
 	.write_begin	= ovl_write_begin,
 	.write_end	= ovl_write_end,
+	.set_page_dirty	= __set_page_dirty_nobuffers,
+	.writepage	= ovl_writepage,
 	/* For O_DIRECT dentry_open() checks f_mapping->a_ops->direct_IO */
 	.direct_IO	= noop_direct_IO,
 };
