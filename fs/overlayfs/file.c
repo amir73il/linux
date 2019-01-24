@@ -495,10 +495,19 @@ static int ovl_write_end(struct file *file, struct address_space *mapping,
 	return __generic_write_end(file_inode(file), pos, copied, page);
 }
 
+/* Volatile writepage to test filemap operations and lazy copy up */
+static int ovl_noop_writepage(struct page *page, struct writeback_control *wbc)
+{
+	unlock_page(page);
+	return 0;
+}
+
 const struct address_space_operations ovl_aops = {
 	.readpage	= ovl_readpage,
 	.write_begin	= ovl_write_begin,
 	.write_end	= ovl_write_end,
+	.set_page_dirty	= __set_page_dirty_no_writeback,
+	.writepage	= ovl_noop_writepage,
 	/* For O_DIRECT dentry_open() checks f_mapping->a_ops->direct_IO */
 	.direct_IO	= noop_direct_IO,
 };
