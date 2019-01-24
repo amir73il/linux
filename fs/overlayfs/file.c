@@ -464,8 +464,41 @@ static int ovl_readpage(struct file *file, struct page *page)
 	return ret;
 }
 
+static int ovl_write_begin(struct file *file, struct address_space *mapping,
+			   loff_t pos, unsigned len, unsigned flags,
+			   struct page **pagep, void **fsdata)
+{
+	struct page *page;
+	pgoff_t index;
+
+	index = pos >> PAGE_SHIFT;
+
+	page = grab_cache_page_write_begin(mapping, index, flags);
+	if (!page)
+		return -ENOMEM;
+
+	*pagep = page;
+
+	if (!PageUptodate(page) && (len != PAGE_SIZE))
+		return ovl_do_readpage(file, page);
+
+	return 0;
+}
+
+extern int __generic_write_end(struct inode *inode, loff_t pos, unsigned copied,
+			       struct page *page);
+
+static int ovl_write_end(struct file *file, struct address_space *mapping,
+			 loff_t pos, unsigned len, unsigned copied,
+			 struct page *page, void *fsdata)
+{
+	return __generic_write_end(file_inode(file), pos, copied, page);
+}
+
 const struct address_space_operations ovl_aops = {
 	.readpage	= ovl_readpage,
+	.write_begin	= ovl_write_begin,
+	.write_end	= ovl_write_end,
 	/* For O_DIRECT dentry_open() checks f_mapping->a_ops->direct_IO */
 	.direct_IO	= noop_direct_IO,
 };

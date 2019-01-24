@@ -2117,6 +2117,7 @@ int __generic_write_end(struct inode *inode, loff_t pos, unsigned copied,
 		mark_inode_dirty(inode);
 	return copied;
 }
+EXPORT_SYMBOL(__generic_write_end);
 
 int block_write_end(struct file *file, struct address_space *mapping,
 			loff_t pos, unsigned len, unsigned copied,
