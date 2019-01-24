@@ -148,7 +148,8 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 	enum ovl_path_type type;
 	struct path realpath;
 	const struct cred *old_cred;
-	bool is_dir = S_ISDIR(dentry->d_inode->i_mode);
+	struct inode *inode = d_inode(dentry);
+	bool is_dir = S_ISDIR(inode->i_mode);
 	bool samefs = ovl_same_sb(dentry->d_sb);
 	struct ovl_layer *lower_layer = NULL;
 	int err;
@@ -161,6 +162,13 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 	err = vfs_getattr(&realpath, stat, request_mask, flags);
 	if (err)
 		goto out;
+
+	/*
+	 * With overlay page cache, overlay inode i_size is more uptodate than
+	 * real inode i_size. Perhaps we should generic_fillattr() and only
+	 * update individual stats from real inode?
+	 */
+	stat->size = i_size_read(inode);
 
 	/*
 	 * For non-dir or same fs, we use st_ino of the copy up origin.
@@ -200,7 +208,7 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 			 * upper hardlink is not broken and that a redirected
 			 * dir is the only redirect to that origin.
 			 */
-			if (ovl_test_flag(OVL_INDEX, d_inode(dentry)) ||
+			if (ovl_test_flag(OVL_INDEX, inode) ||
 			    (!ovl_verify_lower(dentry->d_sb) &&
 			     (is_dir || lowerstat.nlink == 1))) {
 				stat->ino = lowerstat.ino;
@@ -256,8 +264,8 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 	 * and non-covered lower hardlinks. It does not include the upper
 	 * index hardlink.
 	 */
-	if (!is_dir && ovl_test_flag(OVL_INDEX, d_inode(dentry)))
-		stat->nlink = dentry->d_inode->i_nlink;
+	if (!is_dir && ovl_test_flag(OVL_INDEX, inode))
+		stat->nlink = inode->i_nlink;
 
 out:
 	revert_creds(old_cred);
