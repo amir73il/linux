@@ -14,6 +14,7 @@
 #include <linux/mm.h>
 #include <linux/iomap.h>
 #include <linux/pagemap.h>
+#include <linux/fadvise.h>
 #include <linux/writeback.h>
 #include <linux/ratelimit.h>
 #include "overlayfs.h"
@@ -157,6 +158,8 @@ static int ovl_real_fdget(const struct file *file, struct fd *real)
 
 static bool ovl_should_use_filemap_meta(struct file *file, bool allow_meta)
 {
+	struct inode *inode = file_inode(file);
+	struct inode *upper;
 	int err;
 
 	if (!ovl_filemap_support(file))
@@ -164,9 +167,7 @@ static bool ovl_should_use_filemap_meta(struct file *file, bool allow_meta)
 
 	/*
 	 * If file was opened O_RDWR with lazy copy up of data, the first
-	 * data access file operation will trigger data copy up. If file was
-	 * opened O_RDWR and @allow_meta is true, we use overlay inode filemap
-	 * operations, but defer data copy up further.
+	 * data access file operation will trigger data copy up.
 	 *
 	 * For example, mmap() and fsync() are metadata only operations that
 	 * do not trigger lazy copy up of data, but read() (on a file open for
@@ -179,7 +180,17 @@ static bool ovl_should_use_filemap_meta(struct file *file, bool allow_meta)
 		return false;
 	}
 
-	if (allow_meta && (file->f_mode & FMODE_WRITE))
+	/* Does upper inode support page cache operations? */
+	upper = ovl_inode_upper(inode);
+	if (!upper || unlikely(!upper->i_mapping ||
+			       !upper->i_mapping->a_ops->readpage))
+		return false;
+
+	/*
+	 * If file was opened O_RDWR and @allow_meta is true, we use overlay
+	 * inode filemap operations, but defer data copy up further.
+	 */
+	if (allow_meta && file->f_mode & FMODE_WRITE)
 		return true;
 
 	/*
@@ -187,7 +198,7 @@ static bool ovl_should_use_filemap_meta(struct file *file, bool allow_meta)
 	 * including pure upper inodes, so ovl_sync_fs() can sync all dirty
 	 * overlay inodes without having to sync all upper fs dirty inodes.
 	 */
-	return ovl_has_upperdata(file_inode(file));
+	return upper && ovl_has_upperdata(inode);
 }
 
 static bool ovl_should_use_filemap(struct file *file)
@@ -404,10 +415,12 @@ static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 static vm_fault_t ovl_fault(struct vm_fault *vmf)
 {
 	struct file *file = vmf->vma->vm_file;
+	struct file *realfile = file->private_data;
 	struct inode *inode = file_inode(file);
 	bool blocking = (vmf->flags & FAULT_FLAG_KILLABLE) ||
 			((vmf->flags & FAULT_FLAG_ALLOW_RETRY) &&
 			 !(vmf->flags & FAULT_FLAG_RETRY_NOWAIT));
+	bool is_upper = ovl_has_upperdata(inode);
 	int ret = VM_FAULT_NOPAGE;
 	int err = 0;
 
@@ -415,7 +428,7 @@ static vm_fault_t ovl_fault(struct vm_fault *vmf)
 	 * Handle fault of pages in maps that were created from file that was
 	 * opened O_RDWR and before data copy up.
 	 */
-	if (!ovl_has_upperdata(inode)) {
+	if (!is_upper) {
 		/* TODO: async copy up data? */
 		if (!blocking)
 			goto out_err;
@@ -427,14 +440,20 @@ static vm_fault_t ovl_fault(struct vm_fault *vmf)
 		if (err)
 			goto out_err;
 
-		return VM_FAULT_RETRY;
+		return ret;
+	} else {
+		err = vfs_fadvise(realfile, vmf->pgoff << PAGE_SHIFT,
+				  file->f_ra.ra_pages, POSIX_FADV_WILLNEED);
+		if (err)
+			goto out_err;
 	}
 
 	return filemap_fault(vmf);
 
 out_err:
-	pr_warn_ratelimited("overlayfs: %s copy up data on page fault (%pd2, err=%i)\n",
+	pr_warn_ratelimited("overlayfs: %s %s data on page fault (%pd2, err=%i)\n",
 			    blocking ? "failed to" : "no wait for",
+			    is_upper ? "readahead" : "copy up",
 			    file_dentry(file), err);
 
 	return ret;
