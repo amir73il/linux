@@ -851,8 +851,84 @@ static int ovl_readpage(struct file *file, struct page *page)
 	return ret;
 }
 
+static int ovl_write_begin(struct file *file, struct address_space *mapping,
+			   loff_t pos, unsigned len, unsigned flags,
+			   struct page **pagep, void **fsdata)
+{
+	struct page *page;
+	pgoff_t index;
+	int err;
+
+	index = pos >> PAGE_SHIFT;
+
+	page = grab_cache_page_write_begin(mapping, index, flags);
+	if (!page)
+		return -ENOMEM;
+
+	if (!PageUptodate(page) && len != PAGE_SIZE) {
+		err = ovl_do_readpage(file, page);
+		if (err) {
+			pr_warn("ovl_do_readpage: %i", err);
+			unlock_page(page);
+			put_page(page);
+
+			return -EIO;
+		}
+	}
+
+	*pagep = page;
+
+	return 0;
+}
+
+static int ovl_real_write_end(struct file *file, loff_t pos,
+			      unsigned int copied, struct page *page)
+{
+	struct file *realfile = file->private_data;
+	unsigned int offset = (pos & (PAGE_SIZE - 1));
+	struct bio_vec bvec = {
+		.bv_page = page,
+		.bv_len = copied,
+		.bv_offset = offset,
+	};
+	struct iov_iter iter;
+	const struct cred *old_cred;
+	ssize_t ret;
+
+	iov_iter_bvec(&iter, WRITE, &bvec, 1, copied);
+
+	old_cred = ovl_override_creds(file_inode(file)->i_sb);
+	ret = vfs_iter_write(realfile, &iter, &pos, 0);
+	revert_creds(old_cred);
+
+	return ret < 0 ? ret : 0;
+}
+
+extern int __generic_write_end(struct inode *inode, loff_t pos, unsigned copied,
+			       struct page *page);
+
+static int ovl_write_end(struct file *file, struct address_space *mapping,
+			 loff_t pos, unsigned len, unsigned copied,
+			 struct page *page, void *fsdata)
+{
+	int err;
+
+	err = ovl_real_write_end(file, pos, copied, page);
+	if (err) {
+		pr_warn("ovl_write_end: %i", err);
+		unlock_page(page);
+		put_page(page);
+
+		return -EIO;
+	}
+
+	return __generic_write_end(file_inode(file), pos, copied, page);
+}
+
 const struct address_space_operations ovl_aops = {
 	.readpage	= ovl_readpage,
+	.write_begin	= ovl_write_begin,
+	.write_end	= ovl_write_end,
 	/* For O_DIRECT dentry_open() checks f_mapping->a_ops->direct_IO */
 	.direct_IO	= noop_direct_IO,
 };
