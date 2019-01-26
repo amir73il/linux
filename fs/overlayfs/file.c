@@ -767,3 +767,64 @@ const struct file_operations ovl_file_operations = {
 	.copy_file_range	= ovl_copy_file_range,
 	.remap_file_range	= ovl_remap_file_range,
 };
+
+static struct page *ovl_real_get_page(struct file *realfile, pgoff_t index)
+{
+	struct page *page;
+
+	page = read_mapping_page(file_inode(realfile)->i_mapping, index, NULL);
+	if (IS_ERR(page))
+		return page;
+
+	if (!PageUptodate(page)) {
+		put_page(page);
+		return ERR_PTR(-EIO);
+	}
+
+	lock_page(page);
+
+	return page;
+}
+
+static int ovl_real_copy_page(struct file *realfile, struct page *page)
+{
+	struct page *realpage;
+
+	realpage = ovl_real_get_page(realfile, page->index);
+	if (IS_ERR(realpage))
+		return PTR_ERR(realpage);
+
+	copy_highpage(page, realpage);
+	unlock_page(realpage);
+	put_page(realpage);
+
+	return 0;
+}
+
+static int ovl_do_readpage(struct file *file, struct page *page)
+{
+	struct file *realfile = file->private_data;
+	int ret;
+
+	ret = ovl_real_copy_page(realfile, page);
+	if (!ret)
+		SetPageUptodate(page);
+
+	return 0;
+}
+
+static int ovl_readpage(struct file *file, struct page *page)
+{
+	int ret;
+
+	ret = ovl_do_readpage(file, page);
+	unlock_page(page);
+
+	return ret;
+}
+
+const struct address_space_operations ovl_aops = {
+	.readpage	= ovl_readpage,
+	/* For O_DIRECT dentry_open() checks f_mapping->a_ops->direct_IO */
+	.direct_IO	= noop_direct_IO,
+};

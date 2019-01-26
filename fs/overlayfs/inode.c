@@ -504,11 +504,6 @@ static const struct inode_operations ovl_special_inode_operations = {
 	.update_time	= ovl_update_time,
 };
 
-const struct address_space_operations ovl_aops = {
-	/* For O_DIRECT dentry_open() checks f_mapping->a_ops->direct_IO */
-	.direct_IO		= noop_direct_IO,
-};
-
 /*
  * It is possible to stack overlayfs instance on top of another
  * overlayfs instance as lower layer. We need to annonate the
