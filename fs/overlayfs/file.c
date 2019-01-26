@@ -85,7 +85,7 @@ static int ovl_change_flags(struct file *file, unsigned int flags)
 	return 0;
 }
 
-static bool ovl_filemap_support(struct file *file)
+static bool ovl_filemap_support(const struct file *file)
 {
 	struct ovl_fs *ofs = file_inode(file)->i_sb->s_fs_info;
 
@@ -93,12 +93,15 @@ static bool ovl_filemap_support(struct file *file)
 	return ofs->upper_mnt && ovl_aops.writepage;
 }
 
-static int ovl_file_maybe_copy_up(const struct file *file)
+static int ovl_file_maybe_copy_up(const struct file *file, bool allow_meta)
 {
 	int copy_up_flags = 0;
 
 	if (file->f_flags & O_TRUNC) {
 		copy_up_flags = OVL_COPY_UP_DATA | OVL_COPY_UP_TRUNC;
+	} else if (allow_meta && (file->f_flags & O_ACCMODE) == O_RDWR) {
+		/* On open O_RDWR, defer copy up data to first data access */
+		copy_up_flags = OVL_COPY_UP_META;
 	} else if (file->f_mode & FMODE_WRITE) {
 		copy_up_flags = OVL_COPY_UP_DATA;
 	}
@@ -111,9 +114,21 @@ static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
 {
 	struct inode *inode = file_inode(file);
 	struct inode *realinode;
+	int err;
 
 	real->flags = 0;
 	real->file = file->private_data;
+
+	/*
+	 * Lazy copy up caches the meta copy upper file on open O_RDWR.
+	 * We need to promote upper inode to full data copy up before
+	 * we allow access to real file data on a writable file, otherwise
+	 * we may try to open a lower file O_RDWR or perform data operations
+	 * (e.g. fallocate) on the metacopy inode.
+	 */
+	err = ovl_file_maybe_copy_up(file, allow_meta);
+	if (err)
+		return err;
 
 	if (allow_meta)
 		realinode = ovl_inode_real(inode);
@@ -140,10 +155,32 @@ static int ovl_real_fdget(const struct file *file, struct fd *real)
 	return ovl_real_fdget_meta(file, real, false);
 }
 
-static bool ovl_should_use_filemap(struct file *file)
+static bool ovl_should_use_filemap_meta(struct file *file, bool allow_meta)
 {
+	int err;
+
 	if (!ovl_filemap_support(file))
 		return false;
+
+	/*
+	 * If file was opened O_RDWR with lazy copy up of data, the first
+	 * data access file operation will trigger data copy up. If file was
+	 * opened O_RDWR and @allow_meta is true, we use overlay inode filemap
+	 * operations, but defer data copy up further.
+	 *
+	 * For example, mmap() and fsync() are metadata only operations that
+	 * do not trigger lazy copy up of data, but read() (on a file open for
+	 * write) is a data access operation that does trigger data copy up.
+	 */
+	err = ovl_file_maybe_copy_up(file, allow_meta);
+	if (err) {
+		pr_warn_ratelimited("overlayfs: failed lazy copy up data (%pd2, err=%i)\n",
+				    file_dentry(file), err);
+		return false;
+	}
+
+	if (allow_meta && (file->f_mode & FMODE_WRITE))
+		return true;
 
 	/*
 	 * Use overlay inode page cache for all inodes that could be dirty,
@@ -153,9 +190,14 @@ static bool ovl_should_use_filemap(struct file *file)
 	return ovl_has_upperdata(file_inode(file));
 }
 
+static bool ovl_should_use_filemap(struct file *file)
+{
+	return ovl_should_use_filemap_meta(file, false);
+}
+
 static int ovl_flush_filemap(struct file *file, loff_t offset, loff_t len)
 {
-	if (!ovl_should_use_filemap(file))
+	if (!ovl_should_use_filemap_meta(file, true))
 		return 0;
 
 	return filemap_write_and_wait_range(file_inode(file)->i_mapping,
@@ -166,15 +208,18 @@ static int ovl_open(struct inode *inode, struct file *file)
 {
 	struct file *realfile;
 	int err;
+	bool allow_meta = (file->f_mode & FMODE_WRITE) &&
+			ovl_filemap_support(file);
 
-	err = ovl_file_maybe_copy_up(file);
+	err = ovl_file_maybe_copy_up(file, allow_meta);
 	if (err)
 		return err;
 
 	/* No longer need these flags, so don't pass them on to underlying fs */
 	file->f_flags &= ~(O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC);
 
-	realfile = ovl_open_realfile(file, ovl_inode_realdata(inode));
+	realfile = ovl_open_realfile(file, allow_meta ? ovl_inode_real(inode) :
+				     ovl_inode_realdata(inode));
 	if (IS_ERR(realfile))
 		return PTR_ERR(realfile);
 
@@ -350,7 +395,7 @@ static int ovl_real_fsync(struct file *file, loff_t start, loff_t end,
 
 static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	if (ovl_should_use_filemap(file))
+	if (ovl_should_use_filemap_meta(file, true))
 		return __generic_file_fsync(file, start, end, datasync);
 
 	return ovl_real_fsync(file, start, end, datasync);
@@ -389,7 +434,7 @@ static int ovl_real_mmap(struct file *file, struct vm_area_struct *vma)
 
 static int ovl_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	if (ovl_should_use_filemap(file))
+	if (ovl_should_use_filemap_meta(file, true))
 		generic_file_mmap(file, vma);
 
 	return ovl_real_mmap(file, vma);
@@ -449,7 +494,7 @@ extern int generic_fadvise(struct file *file, loff_t offset, loff_t len,
 
 static int ovl_fadvise(struct file *file, loff_t offset, loff_t len, int advice)
 {
-	if (ovl_should_use_filemap(file))
+	if (ovl_should_use_filemap_meta(file, true))
 		return generic_fadvise(file, offset, len, advice);
 
 	/* XXX: Should we allow messing with lower shared page cache? */
