@@ -35,9 +35,18 @@ static struct file *ovl_open_realfile(const struct file *file,
 	struct inode *inode = file_inode(file);
 	struct file *realfile;
 	const struct cred *old_cred;
+	int flags = file->f_flags | O_NOATIME;
+
+	if (realinode == ovl_inode_upper(inode)) {
+		/* tmpfs has no readpage a_op, so need to read realfile */
+		if ((flags & O_WRONLY) &&
+		    (!realinode->i_mapping ||
+		     !realinode->i_mapping->a_ops->readpage))
+			flags = (flags & ~O_ACCMODE) | O_RDWR;
+	}
 
 	old_cred = ovl_override_creds(inode->i_sb);
-	realfile = open_with_fake_path(&file->f_path, file->f_flags | O_NOATIME,
+	realfile = open_with_fake_path(&file->f_path, flags,
 				       realinode, current_cred());
 	revert_creds(old_cred);
 
@@ -159,7 +168,6 @@ static int ovl_real_fdget(const struct file *file, struct fd *real)
 static bool ovl_should_use_filemap_meta(struct file *file, bool allow_meta)
 {
 	struct inode *inode = file_inode(file);
-	struct inode *upper;
 	int err;
 
 	if (!ovl_filemap_support(file))
@@ -180,12 +188,6 @@ static bool ovl_should_use_filemap_meta(struct file *file, bool allow_meta)
 		return false;
 	}
 
-	/* Does upper inode support page cache operations? */
-	upper = ovl_inode_upper(inode);
-	if (!upper || unlikely(!upper->i_mapping ||
-			       !upper->i_mapping->a_ops->readpage))
-		return false;
-
 	/*
 	 * If file was opened O_RDWR and @allow_meta is true, we use overlay
 	 * inode filemap operations, but defer data copy up further.
@@ -198,7 +200,7 @@ static bool ovl_should_use_filemap_meta(struct file *file, bool allow_meta)
 	 * including pure upper inodes, so ovl_sync_fs() can sync all dirty
 	 * overlay inodes without having to sync all upper fs dirty inodes.
 	 */
-	return upper && ovl_has_upperdata(inode);
+	return ovl_has_upperdata(inode);
 }
 
 static bool ovl_should_use_filemap(struct file *file)
@@ -801,12 +803,38 @@ static int ovl_real_copy_page(struct file *realfile, struct page *page)
 	return 0;
 }
 
+static int ovl_real_readpage(struct file *realfile, struct page *page)
+{
+	struct bio_vec bvec = {
+		.bv_page = page,
+		.bv_len = PAGE_SIZE,
+		.bv_offset = 0,
+	};
+	loff_t pos = page->index << PAGE_SHIFT;
+	struct iov_iter iter;
+	ssize_t ret;
+
+	iov_iter_bvec(&iter, READ, &bvec, 1, PAGE_SIZE);
+
+	ret = vfs_iter_read(realfile, &iter, &pos, 0);
+
+	return ret < 0 ? ret : 0;
+}
+
 static int ovl_do_readpage(struct file *file, struct page *page)
 {
 	struct file *realfile = file->private_data;
+	const struct cred *old_cred;
 	int ret;
 
-	ret = ovl_real_copy_page(realfile, page);
+	/* tmpfs has no readpage a_op, so need to read with f_op */
+	old_cred = ovl_override_creds(file_inode(file)->i_sb);
+	if (!realfile->f_mapping || !realfile->f_mapping->a_ops->readpage)
+		ret = ovl_real_readpage(realfile, page);
+	else
+		ret = ovl_real_copy_page(realfile, page);
+	revert_creds(old_cred);
+
 	if (!ret)
 		SetPageUptodate(page);
 
