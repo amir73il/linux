@@ -401,6 +401,51 @@ static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	return ovl_real_fsync(file, start, end, datasync);
 }
 
+static vm_fault_t ovl_fault(struct vm_fault *vmf)
+{
+	struct file *file = vmf->vma->vm_file;
+	struct inode *inode = file_inode(file);
+	bool blocking = (vmf->flags & FAULT_FLAG_KILLABLE) ||
+			((vmf->flags & FAULT_FLAG_ALLOW_RETRY) &&
+			 !(vmf->flags & FAULT_FLAG_RETRY_NOWAIT));
+	int ret = VM_FAULT_NOPAGE;
+	int err = 0;
+
+	/*
+	 * Handle fault of pages in maps that were created from file that was
+	 * opened O_RDWR and before data copy up.
+	 */
+	if (!ovl_has_upperdata(inode)) {
+		/* TODO: async copy up data? */
+		if (!blocking)
+			goto out_err;
+
+		up_read(&vmf->vma->vm_mm->mmap_sem);
+		/* We must return VM_FAULT_RETRY if we released mmap_sem */
+		ret = VM_FAULT_RETRY;
+		err = ovl_maybe_copy_up(file_dentry(file), OVL_COPY_UP_DATA);
+		if (err)
+			goto out_err;
+
+		return VM_FAULT_RETRY;
+	}
+
+	return filemap_fault(vmf);
+
+out_err:
+	pr_warn_ratelimited("overlayfs: %s copy up data on page fault (%pd2, err=%i)\n",
+			    blocking ? "failed to" : "no wait for",
+			    file_dentry(file), err);
+
+	return ret;
+}
+
+static const struct vm_operations_struct ovl_file_vm_ops = {
+	.fault		= ovl_fault,
+	.map_pages	= filemap_map_pages,
+	.page_mkwrite   = filemap_page_mkwrite,
+};
+
 static int ovl_real_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct file *realfile = file->private_data;
@@ -434,8 +479,20 @@ static int ovl_real_mmap(struct file *file, struct vm_area_struct *vma)
 
 static int ovl_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	if (ovl_should_use_filemap_meta(file, true))
-		generic_file_mmap(file, vma);
+	/*
+	 * All maps (also private and non writable) that are created from file
+	 * that was opened after copy up, map overlay inode pages. If the file
+	 * was opened O_RDWR with lazy copy up of data, the first page fault
+	 * will trigger data copy up.
+	 *
+	 * FIXME: SHARED maps that are created from file opened O_RDONLY before
+	 * data copy up will stay mapped to lower real file also after copy up.
+	 */
+	if (ovl_should_use_filemap_meta(file, true)) {
+		vma->vm_ops = &ovl_file_vm_ops;
+		file_accessed(file);
+		return 0;
+	}
 
 	return ovl_real_mmap(file, vma);
 }
