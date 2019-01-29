@@ -413,7 +413,7 @@ void ovl_inode_init(struct inode *inode, struct dentry *upperdentry,
 	if (lowerdata)
 		OVL_I(inode)->lowerdata = igrab(d_inode(lowerdata));
 
-	ovl_copyattr(realinode, inode);
+	ovl_copyattr_size(realinode, inode);
 	ovl_copyflags(realinode, inode);
 	if (!inode->i_ino)
 		inode->i_ino = realinode->i_ino;

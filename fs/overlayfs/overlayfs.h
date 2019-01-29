@@ -12,6 +12,9 @@
 #include <linux/fs.h>
 #include "ovl_entry.h"
 
+struct workqueue_struct;
+extern struct workqueue_struct *ovl_wq;
+
 enum ovl_path_type {
 	__OVL_PATH_UPPER	= (1 << 0),
 	__OVL_PATH_MERGE	= (1 << 1),
@@ -376,6 +379,11 @@ static inline void ovl_copyattr(struct inode *from, struct inode *to)
 	to->i_atime = from->i_atime;
 	to->i_mtime = from->i_mtime;
 	to->i_ctime = from->i_ctime;
+}
+
+static inline void ovl_copyattr_size(struct inode *from, struct inode *to)
+{
+	ovl_copyattr(from, to);
 	i_size_write(to, i_size_read(from));
 }
 

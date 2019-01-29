@@ -9,6 +9,7 @@
 
 #include <uapi/linux/magic.h>
 #include <linux/fs.h>
+#include <linux/file.h>
 #include <linux/namei.h>
 #include <linux/xattr.h>
 #include <linux/mount.h>
@@ -16,6 +17,7 @@
 #include <linux/module.h>
 #include <linux/statfs.h>
 #include <linux/seq_file.h>
+#include <linux/workqueue.h>
 #include <linux/posix_acl_xattr.h>
 #include <linux/exportfs.h>
 #include "overlayfs.h"
@@ -26,6 +28,8 @@ MODULE_LICENSE("GPL");
 
 
 struct ovl_dir_cache;
+
+struct workqueue_struct *ovl_wq;
 
 #define OVL_MAX_STACK 500
 
@@ -185,6 +189,7 @@ static struct inode *ovl_alloc_inode(struct super_block *sb)
 	oi->__upperdentry = NULL;
 	oi->lower = NULL;
 	oi->lowerdata = NULL;
+	oi->upper_file = NULL;
 	mutex_init(&oi->lock);
 
 	return &oi->vfs_inode;
@@ -201,6 +206,8 @@ static void ovl_destroy_inode(struct inode *inode)
 {
 	struct ovl_inode *oi = OVL_I(inode);
 
+	if (oi->upper_file)
+		fput(oi->upper_file);
 	dput(oi->__upperdentry);
 	iput(oi->lower);
 	if (S_ISDIR(inode->i_mode))
@@ -378,7 +385,6 @@ static int ovl_remount(struct super_block *sb, int *flags, char *data)
 static const struct super_operations ovl_super_operations = {
 	.alloc_inode	= ovl_alloc_inode,
 	.destroy_inode	= ovl_destroy_inode,
-	.drop_inode	= generic_delete_inode,
 	.put_super	= ovl_put_super,
 	.sync_fs	= ovl_sync_fs,
 	.statfs		= ovl_statfs,
@@ -1427,6 +1433,10 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	struct cred *cred;
 	int err;
 
+	err = super_setup_bdi(sb);
+	if (err)
+		goto out;
+
 	err = -ENOMEM;
 	ofs = kzalloc(sizeof(struct ovl_fs), GFP_KERNEL);
 	if (!ofs)
@@ -1585,7 +1595,11 @@ static void ovl_inode_init_once(void *foo)
 
 static int __init ovl_init(void)
 {
-	int err;
+	int err = -ENOMEM;
+
+	ovl_wq = alloc_workqueue("ovl_writeback", 0, 0);
+	if (!ovl_wq)
+		goto out;
 
 	ovl_inode_cachep = kmem_cache_create("ovl_inode",
 					     sizeof(struct ovl_inode), 0,
@@ -1593,12 +1607,19 @@ static int __init ovl_init(void)
 					      SLAB_MEM_SPREAD|SLAB_ACCOUNT),
 					     ovl_inode_init_once);
 	if (ovl_inode_cachep == NULL)
-		return -ENOMEM;
+		goto out_destroy_wq;
 
 	err = register_filesystem(&ovl_fs_type);
 	if (err)
-		kmem_cache_destroy(ovl_inode_cachep);
+		goto out_cache_destroy;
 
+	return 0;
+
+out_cache_destroy:
+	kmem_cache_destroy(ovl_inode_cachep);
+out_destroy_wq:
+	destroy_workqueue(ovl_wq);
+out:
 	return err;
 }
 
@@ -1612,6 +1633,8 @@ static void __exit ovl_exit(void)
 	 */
 	rcu_barrier();
 	kmem_cache_destroy(ovl_inode_cachep);
+
+	destroy_workqueue(ovl_wq);
 
 }
 

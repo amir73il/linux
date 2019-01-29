@@ -99,6 +99,7 @@ struct ovl_inode {
 	struct inode vfs_inode;
 	struct dentry *__upperdentry;
 	struct inode *lower;
+	struct file *upper_file;
 
 	/* synchronize copy up and more */
 	struct mutex lock;

@@ -8,6 +8,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/cred.h>
 #include <linux/xattr.h>
@@ -18,10 +19,12 @@
 
 int ovl_setattr(struct dentry *dentry, struct iattr *attr)
 {
+	struct inode *upperinode, *inode = d_inode(dentry);
 	int err;
 	bool full_copy_up = false;
 	struct dentry *upperdentry;
 	const struct cred *old_cred;
+	bool is_truncate = attr->ia_valid & ATTR_SIZE;
 
 	err = setattr_prepare(dentry, attr);
 	if (err)
@@ -31,46 +34,56 @@ int ovl_setattr(struct dentry *dentry, struct iattr *attr)
 	if (err)
 		goto out;
 
-	if (attr->ia_valid & ATTR_SIZE) {
+	if (is_truncate) {
 		struct inode *realinode = d_inode(ovl_dentry_real(dentry));
 
 		err = -ETXTBSY;
 		if (atomic_read(&realinode->i_writecount) < 0)
 			goto out_drop_write;
 
+		err = filemap_write_and_wait_range(inode->i_mapping,
+						   0, LLONG_MAX);
+		if (err)
+			goto out_drop_write;
+
+
 		/* Truncate should trigger data copy up as well */
 		full_copy_up = true;
+
 	}
 
 	if (!full_copy_up)
 		err = ovl_copy_up(dentry);
 	else
 		err = ovl_copy_up_with_data(dentry);
-	if (!err) {
-		struct inode *winode = NULL;
 
-		upperdentry = ovl_dentry_upper(dentry);
+	if (err)
+		goto out_drop_write;
 
-		if (attr->ia_valid & ATTR_SIZE) {
-			winode = d_inode(upperdentry);
-			err = get_write_access(winode);
-			if (err)
-				goto out_drop_write;
-		}
+	upperdentry = ovl_dentry_upper(dentry);
+	upperinode = d_inode(upperdentry);
 
-		if (attr->ia_valid & (ATTR_KILL_SUID|ATTR_KILL_SGID))
-			attr->ia_valid &= ~ATTR_MODE;
+	if (is_truncate) {
+		err = get_write_access(upperinode);
+		if (err)
+			goto out_drop_write;
+	}
 
-		inode_lock(upperdentry->d_inode);
-		old_cred = ovl_override_creds(dentry->d_sb);
-		err = notify_change(upperdentry, attr, NULL);
-		revert_creds(old_cred);
+	if (attr->ia_valid & (ATTR_KILL_SUID|ATTR_KILL_SGID))
+		attr->ia_valid &= ~ATTR_MODE;
+
+	inode_lock(upperinode);
+	old_cred = ovl_override_creds(dentry->d_sb);
+	err = notify_change(upperdentry, attr, NULL);
+	revert_creds(old_cred);
+	if (!err)
+		ovl_copyattr(upperinode, inode);
+	inode_unlock(upperinode);
+
+	if (is_truncate) {
 		if (!err)
-			ovl_copyattr(upperdentry->d_inode, dentry->d_inode);
-		inode_unlock(upperdentry->d_inode);
-
-		if (winode)
-			put_write_access(winode);
+			truncate_setsize(inode, i_size_read(upperinode));
+		put_write_access(upperinode);
 	}
 out_drop_write:
 	ovl_drop_write(dentry);
@@ -148,7 +161,8 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 	enum ovl_path_type type;
 	struct path realpath;
 	const struct cred *old_cred;
-	bool is_dir = S_ISDIR(dentry->d_inode->i_mode);
+	struct inode *inode = d_inode(dentry);
+	bool is_dir = S_ISDIR(inode->i_mode);
 	bool samefs = ovl_same_sb(dentry->d_sb);
 	struct ovl_layer *lower_layer = NULL;
 	int err;
@@ -161,6 +175,13 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 	err = vfs_getattr(&realpath, stat, request_mask, flags);
 	if (err)
 		goto out;
+
+	/*
+	 * With overlay page cache, overlay inode i_size is more uptodate than
+	 * real inode i_size. Perhaps we should generic_fillattr() and only
+	 * update individual stats from real inode?
+	 */
+	stat->size = i_size_read(inode);
 
 	/*
 	 * For non-dir or same fs, we use st_ino of the copy up origin.
