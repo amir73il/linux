@@ -414,7 +414,7 @@ static ssize_t ovl_real_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 	file_end_write(real.file);
 	revert_creds(old_cred);
 
-	/* Update size */
+	/* Update size/c/mtime */
 	ovl_copyattr_size(ovl_inode_real(inode), inode);
 
 	fdput(real);
@@ -597,7 +597,7 @@ static long ovl_fallocate(struct file *file, int mode, loff_t offset,
 	ret = vfs_fallocate(real.file, mode, offset, len);
 	revert_creds(old_cred);
 
-	/* Update size */
+	/* Update size/c/mtime */
 	ovl_copyattr_size(ovl_inode_real(inode), inode);
 
 	/* and invalidate mappings and page cache */
@@ -681,14 +681,21 @@ static long ovl_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return ret;
 
 		ret = ovl_maybe_copy_up(file_dentry(file), OVL_COPY_UP_DATA);
-		if (!ret) {
-			ret = ovl_real_ioctl(file, cmd, arg);
+		if (ret)
+			goto drop_write;
 
-			inode_lock(inode);
-			ovl_copyflags(ovl_inode_real(inode), inode);
-			inode_unlock(inode);
-		}
+		ret = ovl_flush_filemap(file, 0, LLONG_MAX);
+		if (ret)
+			goto drop_write;
 
+		ret = ovl_real_ioctl(file, cmd, arg);
+
+		inode_lock(inode);
+		ovl_copyflags(ovl_inode_real(inode), inode);
+		if (!ret)
+			ovl_copy_ctime(ovl_inode_real(inode), inode);
+		inode_unlock(inode);
+drop_write:
 		mnt_drop_write_file(file);
 		break;
 
@@ -771,7 +778,7 @@ static loff_t ovl_copyfile(struct file *file_in, loff_t pos_in,
 	}
 	revert_creds(old_cred);
 
-	/* Update size */
+	/* Update size/c/mtime */
 	ovl_copyattr_size(ovl_inode_real(inode_out), inode_out);
 
 	if (op != OVL_DEDUPE)
@@ -850,10 +857,16 @@ static int ovl_real_readpage(struct file *realfile, struct page *page)
 	loff_t pos = page->index << PAGE_SHIFT;
 	struct iov_iter iter;
 	ssize_t ret;
+	rwf_t flags = 0;
+
+	if (realfile->f_mapping->a_ops &&
+	    realfile->f_mapping->a_ops->direct_IO) {
+		flags |= RWF_DIRECT;
+	}
 
 	iov_iter_bvec(&iter, READ, &bvec, 1, PAGE_SIZE);
 
-	ret = vfs_iter_read(realfile, &iter, &pos, RWF_DIRECT);
+	ret = vfs_iter_read(realfile, &iter, &pos, flags);
 	if (ret >= 0 && ret < PAGE_SIZE)
 		zero_user_segment(page, ret, PAGE_SIZE);
 
@@ -960,10 +973,11 @@ static int ovl_write_end(struct file *file, struct address_space *mapping,
 
 static int ovl_real_writepage(struct page *page, struct writeback_control *wbc)
 {
-	struct ovl_inode *oi = OVL_I(page->mapping->host);
+	struct inode *inode = page->mapping->host;
+	struct ovl_inode *oi = OVL_I(inode);
 	struct file *realfile = oi->upper_file;
 	loff_t pos = page->index << PAGE_SHIFT;
-	loff_t size = i_size_read(page->mapping->host);
+	loff_t size = i_size_read(inode);
 	size_t len = PAGE_SIZE;
 	struct bio_vec bvec = {
 		.bv_page = page,
@@ -978,7 +992,7 @@ static int ovl_real_writepage(struct page *page, struct writeback_control *wbc)
 		pr_info("ovl_writepage: size = %lli pos = %lli\n", size, pos);
 		return 0;
 	}
-	
+
 	if (size < pos + PAGE_SIZE) {
 		/* Can't do direct I/O for tail pages */
 		len = size - pos;
@@ -987,7 +1001,7 @@ static int ovl_real_writepage(struct page *page, struct writeback_control *wbc)
 		flags |= RWF_DIRECT;
 	}
 
-	//pr_info("ovl_real_writepage(%lli)\n", pos);
+	//pr_info("ovl_real_writepage(%p/%lli)...\n", inode, pos);
 	iov_iter_bvec(&iter, WRITE, &bvec, 1, len);
 
 	ret = vfs_iter_write(realfile, &iter, &pos, flags);
@@ -997,7 +1011,7 @@ static int ovl_real_writepage(struct page *page, struct writeback_control *wbc)
 
 	/* FADV_DONTNEED for tail pages*/
 
-	//pr_info("ovl_real_writepage(%lli) = %li\n", pos, ret);
+	//pr_info("ovl_real_writepage(%p/%lli) = %li\n", inode, pos, ret);
 
 	return ret < 0 ? ret : 0;
 }
@@ -1020,6 +1034,9 @@ static int ovl_writepage(struct page *page, struct writeback_control *wbc)
 	 * Persisting backing store to media requires a call to ovl_sync_fs.
 	 */
 	end_page_writeback(page);
+
+	/* Redirty ovl inode due to just having modified upper c/mtime */
+	__mark_inode_dirty(page->mapping->host, I_DIRTY_TIME | I_DIRTY_SYNC);
 
 	return ret;
 }
@@ -1045,7 +1062,7 @@ static ssize_t ovl_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 		ret = vfs_iter_write(real.file, iter, &iocb->ki_pos, flags);
 		file_end_write(real.file);
 
-		/* Update size */
+		/* Update size/c/mtime */
 		ovl_copyattr_size(ovl_inode_real(inode), inode);
 	}
 	revert_creds(old_cred);

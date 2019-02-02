@@ -262,7 +262,8 @@ int notify_change(struct dentry * dentry, struct iattr * attr, struct inode **de
 
 	now = current_time(inode);
 
-	attr->ia_ctime = now;
+	if (!(ia_valid & ATTR_CTIME_SET))
+		attr->ia_ctime = now;
 	if (!(ia_valid & ATTR_ATIME_SET))
 		attr->ia_atime = now;
 	if (!(ia_valid & ATTR_MTIME_SET))

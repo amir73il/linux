@@ -220,6 +220,32 @@ static void ovl_destroy_inode(struct inode *inode)
 	call_rcu(&inode->i_rcu, ovl_i_callback);
 }
 
+static int ovl_write_inode(struct inode *inode, struct writeback_control *wbc)
+{
+	int err;
+	const struct cred *old_cred;
+	struct dentry *upperdentry = ovl_i_dentry_upper(inode);
+	struct inode *upperinode = d_inode(upperdentry);
+	struct iattr attr = {
+		.ia_valid = ATTR_CTIME | ATTR_CTIME_SET |
+			    ATTR_MTIME | ATTR_MTIME_SET,
+		.ia_ctime = inode->i_ctime,
+		.ia_mtime = inode->i_mtime,
+	};
+
+	pr_info("ovl_write_inode(%p)...\n", inode);
+
+	inode_lock(upperinode);
+	old_cred = ovl_override_creds(inode->i_sb);
+	err = notify_change(upperdentry, &attr, NULL);
+	revert_creds(old_cred);
+	inode_unlock(upperinode);
+
+	pr_info("ovl_write_inode(%p): %i\n", inode, err);
+
+	return err;
+}
+
 static void ovl_free_fs(struct ovl_fs *ofs)
 {
 	unsigned i;
@@ -385,6 +411,7 @@ static int ovl_remount(struct super_block *sb, int *flags, char *data)
 static const struct super_operations ovl_super_operations = {
 	.alloc_inode	= ovl_alloc_inode,
 	.destroy_inode	= ovl_destroy_inode,
+	.write_inode	= ovl_write_inode,
 	.put_super	= ovl_put_super,
 	.sync_fs	= ovl_sync_fs,
 	.statfs		= ovl_statfs,

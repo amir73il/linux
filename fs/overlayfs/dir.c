@@ -699,8 +699,11 @@ static int ovl_link(struct dentry *old, struct inode *newdir,
 			ovl_type_origin(old));
 	if (err)
 		iput(inode);
+	else
+		ovl_copy_ctime(ovl_inode_upper(inode), inode);
 
 	ovl_nlink_end(old);
+
 out_drop_write:
 	ovl_drop_write(old);
 out:
@@ -871,7 +874,7 @@ static int ovl_do_remove(struct dentry *dentry, bool is_dir)
 	 */
 	upperdentry = ovl_dentry_upper(dentry);
 	if (upperdentry)
-		ovl_copyattr(d_inode(upperdentry), d_inode(dentry));
+		ovl_copy_ctime(d_inode(upperdentry), d_inode(dentry));
 
 out_drop_write:
 	ovl_drop_write(dentry);
@@ -1213,9 +1216,9 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 			 (d_inode(new) && ovl_type_origin(new)));
 
 	/* copy ctime: */
-	ovl_copyattr(d_inode(olddentry), d_inode(old));
+	ovl_copy_ctime(d_inode(olddentry), d_inode(old));
 	if (d_inode(new) && ovl_dentry_upper(new))
-		ovl_copyattr(d_inode(newdentry), d_inode(new));
+		ovl_copy_ctime(d_inode(newdentry), d_inode(new));
 
 out_dput:
 	dput(newdentry);

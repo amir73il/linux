@@ -77,7 +77,7 @@ int ovl_setattr(struct dentry *dentry, struct iattr *attr)
 	err = notify_change(upperdentry, attr, NULL);
 	revert_creds(old_cred);
 	if (!err)
-		ovl_copyattr(upperinode, inode);
+		ovl_copyattr_time(upperinode, inode);
 	inode_unlock(upperinode);
 
 	if (is_truncate) {
@@ -181,7 +181,11 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 	 * real inode i_size. Perhaps we should generic_fillattr() and only
 	 * update individual stats from real inode?
 	 */
-	stat->size = i_size_read(inode);
+	if (d_inode(realpath.dentry) == ovl_inode_upper(inode)) {
+		stat->size = i_size_read(inode);
+		stat->ctime = inode->i_ctime;
+		stat->mtime = inode->i_mtime;
+	}
 
 	/*
 	 * For non-dir or same fs, we use st_ino of the copy up origin.
@@ -378,7 +382,7 @@ int ovl_xattr_set(struct dentry *dentry, struct inode *inode, const char *name,
 	revert_creds(old_cred);
 
 	/* copy c/mtime */
-	ovl_copyattr(d_inode(realdentry), inode);
+	ovl_copyattr_time(d_inode(realdentry), inode);
 
 out_drop_write:
 	ovl_drop_write(dentry);
@@ -473,7 +477,10 @@ int ovl_update_time(struct inode *inode, struct timespec64 *ts, int flags)
 			touch_atime(&upperpath);
 			inode->i_atime = d_inode(upperpath.dentry)->i_atime;
 		}
+		return 0;
 	}
+	//pr_info("ovl_update_time(%p/%lli.%09lu/%i)\n",
+	//	inode, ts->tv_sec, ts->tv_nsec, flags);
 	return generic_update_time(inode, ts, flags);
 }
 
@@ -585,7 +592,8 @@ static void ovl_fill_inode(struct inode *inode, umode_t mode, dev_t rdev,
 		inode->i_ino = get_next_ino();
 	}
 	inode->i_mode = mode;
-	inode->i_flags |= S_NOCMTIME;
+	if (!S_ISREG(mode))
+		inode->i_flags |= S_NOCMTIME;
 #ifdef CONFIG_FS_POSIX_ACL
 	inode->i_acl = inode->i_default_acl = ACL_DONT_CACHE;
 #endif

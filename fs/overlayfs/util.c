@@ -456,7 +456,7 @@ static void ovl_dentry_version_inc(struct dentry *dentry, bool impurity)
 void ovl_dir_modified(struct dentry *dentry, bool impurity)
 {
 	/* Copy mtime/ctime */
-	ovl_copyattr(d_inode(ovl_dentry_upper(dentry)), d_inode(dentry));
+	ovl_copyattr_time(d_inode(ovl_dentry_upper(dentry)), d_inode(dentry));
 
 	ovl_dentry_version_inc(dentry, impurity);
 }

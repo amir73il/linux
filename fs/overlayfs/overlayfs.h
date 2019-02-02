@@ -377,14 +377,24 @@ static inline void ovl_copyattr(struct inode *from, struct inode *to)
 	to->i_gid = from->i_gid;
 	to->i_mode = from->i_mode;
 	to->i_atime = from->i_atime;
+}
+
+static inline void ovl_copyattr_time(struct inode *from, struct inode *to)
+{
+	ovl_copyattr(from, to);
 	to->i_mtime = from->i_mtime;
 	to->i_ctime = from->i_ctime;
 }
 
 static inline void ovl_copyattr_size(struct inode *from, struct inode *to)
 {
-	ovl_copyattr(from, to);
+	ovl_copyattr_time(from, to);
 	i_size_write(to, i_size_read(from));
+}
+
+static inline void ovl_copy_ctime(struct inode *from, struct inode *to)
+{
+	to->i_ctime = from->i_ctime;
 }
 
 static inline void ovl_copyflags(struct inode *from, struct inode *to)
