@@ -148,6 +148,7 @@ static int ovl_file_maybe_copy_up(const struct file *file, bool allow_meta)
 		copy_up_flags = OVL_COPY_UP_DATA;
 	}
 
+	/* TODO: FADV_DONTNEED for upper inode pages*/
 	return ovl_maybe_copy_up(file_dentry(file), copy_up_flags);
 }
 
@@ -378,11 +379,18 @@ static ssize_t ovl_real_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 static ssize_t ovl_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 {
 	struct file *file = iocb->ki_filp;
+	ssize_t ret;
+
+	//pr_info("ovl_real_iter(%p/%lli)...\n", file_inode(file), iocb->ki_pos);
 
 	if (ovl_should_use_filemap(file))
-		return generic_file_read_iter(iocb, iter);
+		ret = generic_file_read_iter(iocb, iter);
+	else
+		ret = ovl_real_read_iter(iocb, iter);
 
-	return ovl_real_read_iter(iocb, iter);
+	//pr_info("ovl_real_iter(%p/%lli) = %li\n", file_inode(file), iocb->ki_pos, ret);
+
+	return ret;
 }
 
 static ssize_t ovl_real_write_iter(struct kiocb *iocb, struct iov_iter *iter)
@@ -504,8 +512,10 @@ static vm_fault_t ovl_fault(struct vm_fault *vmf)
 		if (err)
 			goto out_err;
 
+		/* TODO: FADV_DONTNEED for upper inode pages*/
 		return ret;
 	}
+
 	return filemap_fault(vmf);
 
 out_err:
@@ -849,26 +859,41 @@ const struct file_operations ovl_file_operations = {
 
 static int ovl_real_readpage(struct file *realfile, struct page *page)
 {
+	struct inode *inode = page->mapping->host;
 	struct bio_vec bvec = {
 		.bv_page = page,
 		.bv_len = PAGE_SIZE,
 		.bv_offset = 0,
 	};
 	loff_t pos = page->index << PAGE_SHIFT;
+	size_t len = PAGE_SIZE;
+	loff_t size = i_size_read(inode);
 	struct iov_iter iter;
-	ssize_t ret;
+	ssize_t ret = 0;
 	rwf_t flags = 0;
 
-	if (realfile->f_mapping->a_ops &&
-	    realfile->f_mapping->a_ops->direct_IO) {
+	if (pos >= size) {
+		/* Post EOF */
+		len = 0;
+	} else if (size < pos + PAGE_SIZE) {
+		/* Can't do direct I/O for tail pages */
+		len = size - pos;
+	} else if (realfile->f_mapping->a_ops &&
+		   realfile->f_mapping->a_ops->direct_IO) {
 		flags |= RWF_DIRECT;
 	}
 
-	iov_iter_bvec(&iter, READ, &bvec, 1, PAGE_SIZE);
+	//pr_info("ovl_real_readpage(%p/%lli)...\n", inode, pos);
 
-	ret = vfs_iter_read(realfile, &iter, &pos, flags);
+	if (len > 0) {
+		iov_iter_bvec(&iter, READ, &bvec, 1, len);
+		ret = vfs_iter_read(realfile, &iter, &pos, flags);
+	}
 	if (ret >= 0 && ret < PAGE_SIZE)
 		zero_user_segment(page, ret, PAGE_SIZE);
+
+	/* TODO: FADV_DONTNEED for tail pages*/
+	//pr_info("ovl_real_readpage(%p/%lli) = %li\n", inode, pos, ret);
 
 	return ret < 0 ? ret : 0;
 }
