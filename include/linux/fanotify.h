@@ -36,11 +36,11 @@
 				 FAN_MARK_FLUSH)
 
 /*
- * Events that can be reported with data type FSNOTIFY_EVENT_PATH.
+ * Events that can be reported with data type FSNOTIFY_EVENT_FILE.
  * Note that FAN_MODIFY can also be reported with data type
  * FSNOTIFY_EVENT_INODE.
  */
-#define FANOTIFY_PATH_EVENTS	(FAN_ACCESS | FAN_MODIFY | \
+#define FANOTIFY_FILE_EVENTS	(FAN_ACCESS | FAN_MODIFY | \
 				 FAN_CLOSE | FAN_OPEN | FAN_OPEN_EXEC)
 
 /*
@@ -54,7 +54,7 @@
 				 FAN_ATTRIB | FAN_MOVE_SELF | FAN_DELETE_SELF)
 
 /* Events that user can request to be notified on */
-#define FANOTIFY_EVENTS		(FANOTIFY_PATH_EVENTS | \
+#define FANOTIFY_EVENTS		(FANOTIFY_FILE_EVENTS | \
 				 FANOTIFY_INODE_EVENTS)
 
 /* Events that require a permission response from user */

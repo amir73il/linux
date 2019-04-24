@@ -65,11 +65,11 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 	if (S_ISDIR(inode->i_mode))
 		mask |= FS_ISDIR;
 
-	ret = fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
+	ret = fsnotify_parent(path->dentry, mask, file, FSNOTIFY_EVENT_FILE);
 	if (ret)
 		return ret;
 
-	return fsnotify(inode, mask, path, FSNOTIFY_EVENT_PATH, NULL, 0);
+	return fsnotify(inode, mask, file, FSNOTIFY_EVENT_FILE, NULL, 0);
 }
 
 /* Simple call site for access decisions */

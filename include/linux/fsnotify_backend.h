@@ -211,10 +211,10 @@ struct fsnotify_group {
 	};
 };
 
-/* When calling fsnotify tell it if the data is a path or inode */
+/* When calling fsnotify tell it if the data is a file, dentry or inode */
 enum fsnotify_data_type {
 	FSNOTIFY_EVENT_NONE,
-	FSNOTIFY_EVENT_PATH,
+	FSNOTIFY_EVENT_FILE,
 	FSNOTIFY_EVENT_INODE,
 	FSNOTIFY_EVENT_DENTRY,
 };
@@ -227,8 +227,8 @@ static inline const struct inode *fsnotify_data_inode(const void *data,
 		return data;
 	case FSNOTIFY_EVENT_DENTRY:
 		return d_inode(data);
-	case FSNOTIFY_EVENT_PATH:
-		return d_inode(((const struct path *)data)->dentry);
+	case FSNOTIFY_EVENT_FILE:
+		return file_inode((const struct file *)data);
 	default:
 		return NULL;
 	}
@@ -241,8 +241,8 @@ static inline struct dentry *fsnotify_data_dentry(const void *data,
 	case FSNOTIFY_EVENT_DENTRY:
 		/* Non const is needed for dget() */
 		return (struct dentry *)data;
-	case FSNOTIFY_EVENT_PATH:
-		return ((const struct path *)data)->dentry;
+	case FSNOTIFY_EVENT_FILE:
+		return ((const struct file *)data)->f_path.dentry;
 	default:
 		return NULL;
 	}
@@ -252,8 +252,8 @@ static inline const struct path *fsnotify_data_path(const void *data,
 						    int data_type)
 {
 	switch (data_type) {
-	case FSNOTIFY_EVENT_PATH:
-		return data;
+	case FSNOTIFY_EVENT_FILE:
+		return &((const struct file *)data)->f_path;
 	default:
 		return NULL;
 	}
