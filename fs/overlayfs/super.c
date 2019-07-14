@@ -213,6 +213,7 @@ static void ovl_free_fs(struct ovl_fs *ofs)
 {
 	unsigned i;
 
+	ovl_drop_active(ofs);
 	iput(ofs->workbasedir_trap);
 	iput(ofs->indexdir_trap);
 	iput(ofs->workdir_trap);
@@ -220,11 +221,7 @@ static void ovl_free_fs(struct ovl_fs *ofs)
 	dput(ofs->whiteout);
 	dput(ofs->indexdir);
 	dput(ofs->workdir);
-	if (ofs->workdir_locked)
-		ovl_inuse_unlock(ofs->workbasedir);
 	dput(ofs->workbasedir);
-	if (ofs->upperdir_locked)
-		ovl_inuse_unlock(ofs->upper_mnt->mnt_root);
 	mntput(ofs->upper_mnt);
 	for (i = 1; i < ofs->numlayer; i++) {
 		iput(ofs->layers[i].trap);
@@ -239,8 +236,6 @@ static void ovl_free_fs(struct ovl_fs *ofs)
 	kfree(ofs->config.upperdir);
 	kfree(ofs->config.workdir);
 	kfree(ofs->config.redirect_mode);
-	if (ofs->creator_cred)
-		put_cred(ofs->creator_cred);
 	kfree(ofs);
 }
 
@@ -1781,6 +1776,8 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	ofs = kzalloc(sizeof(struct ovl_fs), GFP_KERNEL);
 	if (!ofs)
 		goto out;
+
+	atomic_set(&ofs->active, 1);
 
 	ofs->creator_cred = cred = prepare_creds();
 	if (!cred)

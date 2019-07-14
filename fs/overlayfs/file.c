@@ -672,6 +672,33 @@ static long ovl_ioctl_set_fsxflags(struct file *file, unsigned int cmd,
 				   ovl_fsxflags_to_fsflags(fa.fsx_xflags));
 }
 
+static int ovl_ioctl_shutdown(struct super_block *sb, unsigned long arg)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	__u32 flags;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (get_user(flags, (__u32 __user *)arg))
+		return -EFAULT;
+
+	if (flags != OVL_SHUTDOWN_FLAGS_NOSYNC)
+		return -EINVAL;
+
+	down_write(&sb->s_umount);
+
+	if (!ofs->goingdown) {
+		pr_info("overlayfs: shutdown requested\n");
+		ofs->goingdown = true;
+		ovl_drop_active(ofs);
+	}
+
+	up_write(&sb->s_umount);
+
+	return 0;
+}
+
 long ovl_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	long ret;
@@ -688,6 +715,10 @@ long ovl_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	case FS_IOC_FSSETXATTR:
 		ret = ovl_ioctl_set_fsxflags(file, cmd, arg);
+		break;
+
+	case OVL_IOC_SHUTDOWN:
+		ret = ovl_ioctl_shutdown(file_inode(file)->i_sb, arg);
 		break;
 
 	default:
@@ -707,6 +738,9 @@ long ovl_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	case FS_IOC32_SETFLAGS:
 		cmd = FS_IOC_SETFLAGS;
+		break;
+
+	case OVL_IOC_SHUTDOWN:
 		break;
 
 	default:

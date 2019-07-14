@@ -31,6 +31,14 @@ enum ovl_path_type {
 #define OVL_XATTR_UPPER OVL_XATTR_PREFIX "upper"
 #define OVL_XATTR_METACOPY OVL_XATTR_PREFIX "metacopy"
 
+/*
+ * Should be same as XFS_IOC_GOINGDOWN.
+ * We only support the NOSYNC flag.
+ */
+#define OVL_IOC_SHUTDOWN		_IOR('X', 125, __u32)
+#define OVL_SHUTDOWN_FLAGS_NOSYNC	0x2
+
+
 enum ovl_inode_flag {
 	/* Pure upper dir that may contain non pure upper entries */
 	OVL_IMPURE,
@@ -226,6 +234,7 @@ static inline bool ovl_open_flags_need_copy_up(int flags)
 }
 
 /* util.c */
+void ovl_drop_active(struct ovl_fs *ofs);
 int ovl_want_write(struct dentry *dentry);
 void ovl_drop_write(struct dentry *dentry);
 struct dentry *ovl_workdir(struct dentry *dentry);
@@ -349,7 +358,6 @@ static inline void ovl_inode_unlock(struct inode *inode)
 {
 	mutex_unlock(&OVL_I(inode)->lock);
 }
-
 
 /* namei.c */
 int ovl_check_fb_len(struct ovl_fb *fb, int fb_len);

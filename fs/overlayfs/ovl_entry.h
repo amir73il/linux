@@ -80,6 +80,13 @@ struct ovl_fs {
 	atomic_long_t last_ino;
 	/* Whiteout dentry cache */
 	struct dentry *whiteout;
+	/*
+	 * Number of users currently accessing underlying layers (+1)
+	 * When zero, access to underlying layers is denied.
+	 */
+	atomic_t active;
+	/* Filesystem will shutdown when the last active reference drops */
+	bool goingdown;
 };
 
 static inline struct ovl_fs *OVL_FS(struct super_block *sb)

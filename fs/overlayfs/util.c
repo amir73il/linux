@@ -15,16 +15,58 @@
 #include <linux/ratelimit.h>
 #include "overlayfs.h"
 
+static bool ovl_get_active(struct ovl_fs *ofs)
+{
+	if (!atomic_inc_not_zero(&ofs->active))
+		return false;
+
+	/*
+	 * Not handing out any more active references when filesystem is
+	 * going down. The atomic ops on ofs->active serve as memory barriers
+	 * for the ofs->goingdown test.
+	 */
+	if (!ofs->goingdown)
+		return true;
+
+	ovl_drop_active(ofs);
+	return false;
+}
+
+void ovl_drop_active(struct ovl_fs *ofs)
+{
+	if (atomic_dec_and_test(&ofs->active)) {
+		/*
+		 * No users will ever access underlying layers from this
+		 * instance, so we can release exclusive inuse locks.
+		 */
+		if (ofs->workdir_locked)
+			ovl_inuse_unlock(ofs->workbasedir);
+		if (ofs->upperdir_locked)
+			ovl_inuse_unlock(ofs->upper_mnt->mnt_root);
+		/* "revoke" credentials to access underlying layers */
+		put_cred(ofs->creator_cred);
+		ofs->creator_cred = NULL;
+		if (ofs->goingdown)
+			pr_info("overlayfs: filesystem is shutdown\n");
+	}
+}
+
 int ovl_want_write(struct dentry *dentry)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+
+	if (!ovl_get_active(ofs))
+		return -EIO;
+
 	return mnt_want_write(ofs->upper_mnt);
 }
 
 void ovl_drop_write(struct dentry *dentry)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+
 	mnt_drop_write(ofs->upper_mnt);
+	ovl_drop_active(ofs);
 }
 
 struct dentry *ovl_workdir(struct dentry *dentry)
@@ -37,6 +79,12 @@ int ovl_override_creds(struct super_block *sb, const struct cred **old_cred)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;
 
+	if (!ovl_get_active(ofs))
+		return -EIO;
+
+	if (WARN_ON_ONCE(!ofs->creator_cred))
+		return -EIO;
+
 	*old_cred = override_creds(ofs->creator_cred);
 	return 0;
 }
@@ -44,6 +92,7 @@ int ovl_override_creds(struct super_block *sb, const struct cred **old_cred)
 void ovl_revert_creds(struct super_block *sb, const struct cred *old_cred)
 {
 	revert_creds(old_cred);
+	ovl_drop_active(sb->s_fs_info);
 }
 
 /*
