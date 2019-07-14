@@ -77,9 +77,11 @@ int ovl_setattr(struct dentry *dentry, struct iattr *attr)
 		attr->ia_valid &= ~ATTR_OPEN;
 
 		inode_lock(upperdentry->d_inode);
-		old_cred = ovl_override_creds(dentry->d_sb);
-		err = notify_change(upperdentry, attr, NULL);
-		revert_creds(old_cred);
+		err = ovl_override_creds(dentry->d_sb, &old_cred);
+		if (!err) {
+			err = notify_change(upperdentry, attr, NULL);
+			ovl_revert_creds(dentry->d_sb, old_cred);
+		}
 		if (!err)
 			ovl_copyattr(upperdentry->d_inode, dentry->d_inode);
 		inode_unlock(upperdentry->d_inode);
@@ -168,7 +170,10 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 	metacopy_blocks = ovl_is_metacopy_dentry(dentry);
 
 	type = ovl_path_real(dentry, &realpath);
-	old_cred = ovl_override_creds(dentry->d_sb);
+	err = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (err)
+		return err;
+
 	err = vfs_getattr(&realpath, stat, request_mask, flags);
 	if (err)
 		goto out;
@@ -271,7 +276,7 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 		stat->nlink = dentry->d_inode->i_nlink;
 
 out:
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 
 	return err;
 }
@@ -297,7 +302,10 @@ int ovl_permission(struct inode *inode, int mask)
 	if (err)
 		return err;
 
-	old_cred = ovl_override_creds(inode->i_sb);
+	err = ovl_override_creds(inode->i_sb, &old_cred);
+	if (err)
+		return err;
+
 	if (!upperinode &&
 	    !special_file(realinode->i_mode) && mask & MAY_WRITE) {
 		mask &= ~(MAY_WRITE | MAY_APPEND);
@@ -305,7 +313,7 @@ int ovl_permission(struct inode *inode, int mask)
 		mask |= MAY_READ;
 	}
 	err = inode_permission(realinode, mask);
-	revert_creds(old_cred);
+	ovl_revert_creds(inode->i_sb, old_cred);
 
 	return err;
 }
@@ -316,13 +324,17 @@ static const char *ovl_get_link(struct dentry *dentry,
 {
 	const struct cred *old_cred;
 	const char *p;
+	int err;
 
 	if (!dentry)
 		return ERR_PTR(-ECHILD);
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	err = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (err)
+		return ERR_PTR(err);
+
 	p = vfs_get_link(ovl_dentry_real(dentry), done);
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 	return p;
 }
 
@@ -358,14 +370,17 @@ int ovl_xattr_set(struct dentry *dentry, struct inode *inode, const char *name,
 		realdentry = ovl_dentry_upper(dentry);
 	}
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	err = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (err)
+		goto out_drop_write;
+
 	if (value)
 		err = vfs_setxattr(realdentry, name, value, size, flags);
 	else {
 		WARN_ON(flags != XATTR_REPLACE);
 		err = vfs_removexattr(realdentry, name);
 	}
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 
 	/* copy c/mtime */
 	ovl_copyattr(d_inode(realdentry), inode);
@@ -384,9 +399,12 @@ int ovl_xattr_get(struct dentry *dentry, struct inode *inode, const char *name,
 	struct dentry *realdentry =
 		ovl_i_dentry_upper(inode) ?: ovl_dentry_lower(dentry);
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	res = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (res)
+		return res;
+
 	res = vfs_getxattr(realdentry, name, value, size);
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 	return res;
 }
 
@@ -409,9 +427,13 @@ ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size)
 	char *s;
 	const struct cred *old_cred;
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	res = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (res)
+		return res;
+
 	res = vfs_listxattr(realdentry, list, size);
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
+
 	if (res <= 0 || size == 0)
 		return res;
 
@@ -444,9 +466,11 @@ struct posix_acl *ovl_get_acl(struct inode *inode, int type)
 	if (!IS_ENABLED(CONFIG_FS_POSIX_ACL) || !IS_POSIXACL(realinode))
 		return NULL;
 
-	old_cred = ovl_override_creds(inode->i_sb);
+	if (ovl_override_creds(inode->i_sb, &old_cred))
+		return NULL;
+
 	acl = get_acl(realinode, type);
-	revert_creds(old_cred);
+	ovl_revert_creds(inode->i_sb, old_cred);
 
 	return acl;
 }
@@ -478,13 +502,15 @@ static int ovl_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 	if (!realinode->i_op->fiemap)
 		return -EOPNOTSUPP;
 
-	old_cred = ovl_override_creds(inode->i_sb);
+	err = ovl_override_creds(inode->i_sb, &old_cred);
+	if (err)
+		return err;
 
 	if (fieinfo->fi_flags & FIEMAP_FLAG_SYNC)
 		filemap_write_and_wait(realinode->i_mapping);
 
 	err = realinode->i_op->fiemap(realinode, fieinfo, start, len);
-	revert_creds(old_cred);
+	ovl_revert_creds(inode->i_sb, old_cred);
 
 	return err;
 }

@@ -827,7 +827,10 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	if (dentry->d_name.len > ofs->namelen)
 		return ERR_PTR(-ENAMETOOLONG);
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	err = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (err)
+		return ERR_PTR(err);
+
 	upperdir = ovl_dentry_upper(dentry->d_parent);
 	if (upperdir) {
 		err = ovl_lookup_layer(upperdir, &d, &upperdentry);
@@ -1068,7 +1071,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	ovl_dentry_update_reval(dentry, upperdentry,
 			DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
 
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 	if (origin_path) {
 		dput(origin_path->dentry);
 		kfree(origin_path);
@@ -1095,7 +1098,7 @@ out_put_upper:
 	kfree(upperredirect);
 out:
 	kfree(d.redirect);
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 	return ERR_PTR(err);
 }
 
@@ -1119,7 +1122,9 @@ bool ovl_lower_positive(struct dentry *dentry)
 	if (!ovl_dentry_upper(dentry))
 		return true;
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	if (ovl_override_creds(dentry->d_sb, &old_cred))
+		return false;
+
 	/* Positive upper -> have to look up lower to see whether it exists */
 	for (i = 0; !done && !positive && i < poe->numlower; i++) {
 		struct dentry *this;
@@ -1147,7 +1152,7 @@ bool ovl_lower_positive(struct dentry *dentry)
 			dput(this);
 		}
 	}
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 
 	return positive;
 }

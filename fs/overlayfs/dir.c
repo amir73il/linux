@@ -571,7 +571,9 @@ static int ovl_create_or_link(struct dentry *dentry, struct inode *inode,
 	if (err)
 		return err;
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	err = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (err)
+		return err;
 
 	/*
 	 * When linking a file with copy up origin into a new parent, mark the
@@ -606,7 +608,7 @@ static int ovl_create_or_link(struct dentry *dentry, struct inode *inode,
 			err = ovl_create_over_whiteout(dentry, inode, attr);
 	}
 out_revert_creds:
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 	return err;
 }
 
@@ -680,9 +682,12 @@ static int ovl_set_link_redirect(struct dentry *dentry)
 	const struct cred *old_cred;
 	int err;
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	err = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (err)
+		return err;
+
 	err = ovl_set_redirect(dentry, false);
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 
 	return err;
 }
@@ -896,12 +901,15 @@ static int ovl_do_remove(struct dentry *dentry, bool is_dir)
 	if (err)
 		goto out_drop_write;
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	err = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (err)
+		goto out_drop_write;
+
 	if (!lower_positive)
 		err = ovl_remove_upper(dentry, is_dir, &list);
 	else
 		err = ovl_remove_and_whiteout(dentry, &list);
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 	if (!err) {
 		if (is_dir)
 			clear_nlink(dentry->d_inode);
@@ -1146,7 +1154,9 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 		update_nlink = true;
 	}
 
-	old_cred = ovl_override_creds(old->d_sb);
+	err = ovl_override_creds(old->d_sb, &old_cred);
+	if (err)
+		goto out_drop_write;
 
 	if (!list_empty(&list)) {
 		opaquedir = ovl_clear_empty(new, &list);
@@ -1271,7 +1281,7 @@ out_dput_old:
 out_unlock:
 	unlock_rename(new_upperdir, old_upperdir);
 out_revert_creds:
-	revert_creds(old_cred);
+	ovl_revert_creds(old->d_sb, old_cred);
 	if (update_nlink)
 		ovl_nlink_end(new);
 out_drop_write:

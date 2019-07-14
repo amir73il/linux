@@ -33,11 +33,17 @@ struct dentry *ovl_workdir(struct dentry *dentry)
 	return ofs->workdir;
 }
 
-const struct cred *ovl_override_creds(struct super_block *sb)
+int ovl_override_creds(struct super_block *sb, const struct cred **old_cred)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;
 
-	return override_creds(ofs->creator_cred);
+	*old_cred = override_creds(ofs->creator_cred);
+	return 0;
+}
+
+void ovl_revert_creds(struct super_block *sb, const struct cred *old_cred)
+{
+	revert_creds(old_cred);
 }
 
 /*
@@ -768,7 +774,10 @@ int ovl_nlink_start(struct dentry *dentry)
 	if (d_is_dir(dentry) || !ovl_test_flag(OVL_INDEX, inode))
 		goto out;
 
-	old_cred = ovl_override_creds(dentry->d_sb);
+	err = ovl_override_creds(dentry->d_sb, &old_cred);
+	if (err)
+		goto out;
+
 	/*
 	 * The overlay inode nlink should be incremented/decremented IFF the
 	 * upper operation succeeds, along with nlink change of upper inode.
@@ -776,7 +785,7 @@ int ovl_nlink_start(struct dentry *dentry)
 	 * value relative to the upper inode nlink in an upper inode xattr.
 	 */
 	err = ovl_set_nlink_upper(dentry);
-	revert_creds(old_cred);
+	ovl_revert_creds(dentry->d_sb, old_cred);
 
 out:
 	if (err)
@@ -791,10 +800,13 @@ void ovl_nlink_end(struct dentry *dentry)
 
 	if (ovl_test_flag(OVL_INDEX, inode) && inode->i_nlink == 0) {
 		const struct cred *old_cred;
+		int err;
 
-		old_cred = ovl_override_creds(dentry->d_sb);
-		ovl_cleanup_index(dentry);
-		revert_creds(old_cred);
+		err = ovl_override_creds(dentry->d_sb, &old_cred);
+		if (!err) {
+			ovl_cleanup_index(dentry);
+			ovl_revert_creds(dentry->d_sb, old_cred);
+		}
 	}
 
 	ovl_inode_unlock(inode);
