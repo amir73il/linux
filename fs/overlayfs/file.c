@@ -535,12 +535,28 @@ static long ovl_real_ioctl(struct file *file, unsigned int cmd,
 	return ret;
 }
 
+static unsigned int ovl_iflags_to_fsflags(unsigned int iflags)
+{
+	unsigned int flags = 0;
+
+	if (iflags & S_SYNC)
+		flags |= FS_SYNC_FL;
+	if (iflags & S_APPEND)
+		flags |= FS_APPEND_FL;
+	if (iflags & S_IMMUTABLE)
+		flags |= FS_IMMUTABLE_FL;
+	if (iflags & S_NOATIME)
+		flags |= FS_NOATIME_FL;
+
+	return flags;
+}
+
 static long ovl_ioctl_set_flags(struct file *file, unsigned int cmd,
-				unsigned long arg, unsigned int iflags)
+				unsigned long arg, unsigned int flags)
 {
 	long ret;
 	struct inode *inode = file_inode(file);
-	unsigned int old_iflags;
+	unsigned int oldflags;
 
 	if (!inode_owner_or_capable(inode))
 		return -EACCES;
@@ -552,10 +568,9 @@ static long ovl_ioctl_set_flags(struct file *file, unsigned int cmd,
 	inode_lock(inode);
 
 	/* Check the capability before cred override */
-	ret = -EPERM;
-	old_iflags = READ_ONCE(inode->i_flags);
-	if (((iflags ^ old_iflags) & (S_APPEND | S_IMMUTABLE)) &&
-	    !capable(CAP_LINUX_IMMUTABLE))
+	oldflags = ovl_iflags_to_fsflags(READ_ONCE(inode->i_flags));
+	ret = vfs_ioc_setflags_prepare(inode, oldflags, flags);
+	if (ret)
 		goto unlock;
 
 	ret = ovl_maybe_copy_up(file_dentry(file), O_WRONLY);
@@ -574,22 +589,6 @@ unlock:
 
 }
 
-static unsigned int ovl_fsflags_to_iflags(unsigned int flags)
-{
-	unsigned int iflags = 0;
-
-	if (flags & FS_SYNC_FL)
-		iflags |= S_SYNC;
-	if (flags & FS_APPEND_FL)
-		iflags |= S_APPEND;
-	if (flags & FS_IMMUTABLE_FL)
-		iflags |= S_IMMUTABLE;
-	if (flags & FS_NOATIME_FL)
-		iflags |= S_NOATIME;
-
-	return iflags;
-}
-
 static long ovl_ioctl_set_fsflags(struct file *file, unsigned int cmd,
 				  unsigned long arg)
 {
@@ -598,24 +597,23 @@ static long ovl_ioctl_set_fsflags(struct file *file, unsigned int cmd,
 	if (get_user(flags, (int __user *) arg))
 		return -EFAULT;
 
-	return ovl_ioctl_set_flags(file, cmd, arg,
-				   ovl_fsflags_to_iflags(flags));
+	return ovl_ioctl_set_flags(file, cmd, arg, flags);
 }
 
-static unsigned int ovl_fsxflags_to_iflags(unsigned int xflags)
+static unsigned int ovl_fsxflags_to_fsflags(unsigned int xflags)
 {
-	unsigned int iflags = 0;
+	unsigned int flags = 0;
 
 	if (xflags & FS_XFLAG_SYNC)
-		iflags |= S_SYNC;
+		flags |= FS_SYNC_FL;
 	if (xflags & FS_XFLAG_APPEND)
-		iflags |= S_APPEND;
+		flags |= FS_APPEND_FL;
 	if (xflags & FS_XFLAG_IMMUTABLE)
-		iflags |= S_IMMUTABLE;
+		flags |= FS_IMMUTABLE_FL;
 	if (xflags & FS_XFLAG_NOATIME)
-		iflags |= S_NOATIME;
+		flags |= FS_NOATIME_FL;
 
-	return iflags;
+	return flags;
 }
 
 static long ovl_ioctl_set_fsxflags(struct file *file, unsigned int cmd,
@@ -628,7 +626,7 @@ static long ovl_ioctl_set_fsxflags(struct file *file, unsigned int cmd,
 		return -EFAULT;
 
 	return ovl_ioctl_set_flags(file, cmd, arg,
-				   ovl_fsxflags_to_iflags(fa.fsx_xflags));
+				   ovl_fsxflags_to_fsflags(fa.fsx_xflags));
 }
 
 long ovl_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
