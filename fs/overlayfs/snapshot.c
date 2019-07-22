@@ -163,6 +163,7 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 	const struct qstr *name = &dentry->d_name;
 	struct dentry *snapdir = NULL;
 	struct dentry *snap = NULL;
+	const struct cred *old_cred = NULL;
 	int err;
 
 	if (!snapmnt || !ovl_snapshot_need_cow(dentry, snapid))
@@ -188,6 +189,8 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 		ovl_snapshot_set_nocow(dentry, snapid);
 		goto out_unlock;
 	}
+
+	old_cred = ovl_override_creds(dentry->d_sb);
 
 	/* Find dir or non-dir parent by index in snapshot */
 	snapdir = ovl_snapshot_lookup_dir(snapmnt->mnt_sb, dir);
@@ -234,6 +237,8 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 
 out_unlock:
 	dput(snapdir);
+	if (old_cred)
+		revert_creds(old_cred);
 	ovl_inode_unlock(d_inode(dir));
 out:
 	mntput(snapmnt);
