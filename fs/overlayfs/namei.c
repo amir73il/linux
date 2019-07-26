@@ -242,7 +242,7 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 		if (!d->metacopy || d->last)
 			goto out;
 	} else {
-		if (ovl_lookup_trap_inode(d->sb, this)) {
+		if (ovl_check_traps(d->sb, d->sb->s_fs_info, this)) {
 			/* Caught in a trap of overlapping layers */
 			err = -ELOOP;
 			goto out_err;

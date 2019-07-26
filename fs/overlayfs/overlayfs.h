@@ -430,3 +430,14 @@ int ovl_set_origin(struct dentry *dentry, struct dentry *lower,
 
 /* export.c */
 extern const struct export_operations ovl_export_operations;
+
+/* super.c */
+bool ovl_check_traps(struct super_block *sb, struct ovl_fs *ofs,
+		     struct dentry *dir);
+
+extern struct file_system_type ovl_fs_type;
+
+static inline bool ovl_is_overlay_fs(struct super_block *sb)
+{
+       return sb->s_type == &ovl_fs_type;
+}

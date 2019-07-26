@@ -986,11 +986,51 @@ static const struct xattr_handler *ovl_xattr_handlers[] = {
 	NULL
 };
 
-static int ovl_setup_trap(struct super_block *sb, struct dentry *dir,
-			  struct inode **ptrap, const char *name)
+/*
+ * Check if this dir has a trap setup in lower nested overlayfs instances.
+ */
+static bool ovl_check_nested_traps(struct super_block *sb, struct ovl_fs *ofs,
+				   struct dentry *dir)
+{
+	int i;
+
+	if (sb->s_stack_depth == 1)
+		return false;
+
+	for (i = 0; i < ofs->numlowerfs; i++) {
+		if (ovl_is_overlay_fs(ofs->lower_fs[i].sb) &&
+		    ovl_lookup_trap_inode(ofs->lower_fs[i].sb, dir))
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * Check if this dir has a trap setup in this instance or
+ * in lower nested overlayfs instances.
+ */
+bool ovl_check_traps(struct super_block *sb, struct ovl_fs *ofs,
+		     struct dentry *dir)
+{
+	if (ovl_lookup_trap_inode(sb, dir))
+		return true;
+
+	return ovl_check_nested_traps(sb, ofs, dir);
+}
+
+static int ovl_setup_trap(struct super_block *sb, struct ovl_fs *ofs,
+			  struct dentry *dir, struct inode **ptrap,
+			  const char *name)
 {
 	struct inode *trap;
 	int err;
+
+	/* Conflicting nested layer roots? */
+	if (ovl_check_nested_traps(sb, ofs, dir)) {
+		pr_err("overlayfs: conflicting %s path (nested)\n", name);
+		return -ELOOP;
+	}
 
 	trap = ovl_get_trap_inode(sb, dir);
 	err = PTR_ERR_OR_ZERO(trap);
@@ -1044,7 +1084,7 @@ static int ovl_get_upper(struct super_block *sb, struct ovl_fs *ofs,
 	if (err)
 		goto out;
 
-	err = ovl_setup_trap(sb, upperpath->dentry, &ofs->upperdir_trap,
+	err = ovl_setup_trap(sb, ofs, upperpath->dentry, &ofs->upperdir_trap,
 			     "upperdir");
 	if (err)
 		goto out;
@@ -1089,7 +1129,8 @@ static int ovl_make_workdir(struct super_block *sb, struct ovl_fs *ofs,
 	if (!ofs->workdir)
 		goto out;
 
-	err = ovl_setup_trap(sb, ofs->workdir, &ofs->workdir_trap, "workdir");
+	err = ovl_setup_trap(sb, ofs, ofs->workdir, &ofs->workdir_trap,
+			     "workdir");
 	if (err)
 		goto out;
 
@@ -1183,7 +1224,7 @@ static int ovl_get_workdir(struct super_block *sb, struct ovl_fs *ofs,
 			goto out;
 	}
 
-	err = ovl_setup_trap(sb, ofs->workbasedir, &ofs->workbasedir_trap,
+	err = ovl_setup_trap(sb, ofs, ofs->workbasedir, &ofs->workbasedir_trap,
 			     "workdir");
 	if (err)
 		goto out;
@@ -1216,8 +1257,8 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 
 	ofs->indexdir = ovl_workdir_create(ofs, OVL_INDEXDIR_NAME, true);
 	if (ofs->indexdir) {
-		err = ovl_setup_trap(sb, ofs->indexdir, &ofs->indexdir_trap,
-				     "indexdir");
+		err = ovl_setup_trap(sb, ofs, ofs->indexdir,
+				     &ofs->indexdir_trap, "indexdir");
 		if (err)
 			goto out;
 
@@ -1334,7 +1375,8 @@ static int ovl_get_lower_layers(struct super_block *sb, struct ovl_fs *ofs,
 		if (err < 0)
 			goto out;
 
-		err = ovl_setup_trap(sb, stack[i].dentry, &trap, "lowerdir");
+		err = ovl_setup_trap(sb, ofs, stack[i].dentry, &trap,
+				     "lowerdir");
 		if (err)
 			goto out;
 
@@ -1488,6 +1530,7 @@ out_err:
 /*
  * Check if this layer root is a descendant of:
  * - another layer of this overlayfs instance
+ * - another layer of nested overlayfs instances
  * - upper/work dir of any overlayfs instance
  */
 static int ovl_check_layer(struct super_block *sb, struct ovl_fs *ofs,
@@ -1499,11 +1542,16 @@ static int ovl_check_layer(struct super_block *sb, struct ovl_fs *ofs,
 	if (!dentry)
 		return 0;
 
+	if (ovl_check_nested_traps(sb, ofs, dentry)) {
+		pr_err("overlayfs: overlapping %s path (nested)\n", name);
+		return -ELOOP;
+	}
+
 	parent = dget_parent(next);
 
 	/* Walk back ancestors to root (inclusive) looking for traps */
 	while (!err && parent != next) {
-		if (ovl_lookup_trap_inode(sb, parent)) {
+		if (ovl_check_traps(sb, ofs, parent)) {
 			err = -ELOOP;
 			pr_err("overlayfs: overlapping %s path\n", name);
 		} else if (ovl_is_inuse(parent)) {
@@ -1712,7 +1760,7 @@ static struct dentry *ovl_mount(struct file_system_type *fs_type, int flags,
 	return mount_nodev(fs_type, flags, raw_data, ovl_fill_super);
 }
 
-static struct file_system_type ovl_fs_type = {
+struct file_system_type ovl_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "overlay",
 	.mount		= ovl_mount,
