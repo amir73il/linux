@@ -2422,7 +2422,7 @@ xfs_attr3_leaf_getvalue(
 		return -ERANGE;
 	}
 	args->valuelen = args->rmtvaluelen;
-	return 0;
+	return xfs_attr_rmtval_get(args);
 }
 
 /*========================================================================
