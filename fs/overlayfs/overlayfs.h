@@ -463,7 +463,7 @@ int ovl_set_origin(struct dentry *dentry, struct dentry *lower,
 extern const struct export_operations ovl_export_operations;
 
 struct dentry *ovl_lookup_real(struct super_block *sb, struct dentry *real,
-			       struct ovl_layer *layer);
+			       struct ovl_layer *layer, bool warn);
 
 
 /* super.c */

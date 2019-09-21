@@ -139,7 +139,8 @@ static struct dentry *ovl_snapshot_lookup_dir(struct super_block *snapsb,
 		return ERR_PTR(-ENOENT);
 
 	/* Find a snapshot overlay dentry whose lower is our upper */
-	return ovl_lookup_real(snapsb, upper, OVL_FS(snapsb)->lower_layers);
+	return ovl_lookup_real(snapsb, upper, OVL_FS(snapsb)->lower_layers,
+			       false);
 }
 
 /*
@@ -437,7 +438,7 @@ static struct dentry *ovl_snapshot_lookup_real(struct super_block *sb,
 	 * If real dentry is connected and hashed, get a connected overlay
 	 * dentry whose real dentry is @real.
 	 */
-	return ovl_lookup_real(sb, real, &upper_layer);
+	return ovl_lookup_real(sb, real, &upper_layer, true);
 }
 
 static struct dentry *ovl_snapshot_fh_to_dentry(struct super_block *sb,
