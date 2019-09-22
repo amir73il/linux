@@ -18,7 +18,13 @@
 int ovl_want_write(struct dentry *dentry)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
-	int err = ovl_snapshot_want_write(dentry);
+	/*
+	 * When ovl_want_write() is called before instantiating a negative
+	 * dentry to a directory, caller (i.e. mkdir/rename) is responsible
+	 * to call ovl_snapshot_want_write() explicitly with new_is_dir true,
+	 * before the call to ovl_want_write().
+	 */
+	int err = ovl_snapshot_want_write(dentry, d_is_dir(dentry));
 
 	if (err)
 		return err;

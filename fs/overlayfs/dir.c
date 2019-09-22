@@ -622,6 +622,14 @@ static int ovl_create_object(struct dentry *dentry, int mode, dev_t rdev,
 		.link = link,
 	};
 
+	/*
+	 * Keep before ovl_want_write() because cow to snapshot
+	 * aquires and releases sb_writers of upper/lower
+	 */
+	err = ovl_snapshot_want_write(dentry, (mode & S_IFDIR));
+	if (err)
+		goto out;
+
 	err = ovl_want_write(dentry);
 	if (err)
 		goto out;
@@ -697,7 +705,7 @@ int ovl_link(struct dentry *old, struct inode *newdir, struct dentry *new)
 	 * Keep before ovl_want_write() because cow to snapshot
 	 * aquires and releases sb_writers of upper/lower
 	 */
-	err = ovl_snapshot_want_write(new);
+	err = ovl_snapshot_want_write(new, false);
 	if (err)
 		goto out;
 
@@ -1133,12 +1141,23 @@ int ovl_rename(struct inode *olddir, struct dentry *old, struct inode *newdir,
 	}
 
 	/*
+	 * Snapshot need to be notified before a dentry changes from positive
+	 * to negative and vice versa for copy up or whiteout respectively.
+	 * Metacopy snapshot also needs to be notified before a dir dentry
+	 * exchanges with a non-dir dentry for meta copy up of file.
+	 *
 	 * Keep before ovl_want_write() because cow to snapshot
-	 * aquires and releases sb_writers of upper/lower
+	 * aquires and releases sb_writers of upper/lower.
 	 */
-	err = ovl_snapshot_want_write(new);
+	err = ovl_snapshot_want_write(new, is_dir);
 	if (err)
 		goto out;
+
+	if (!overwrite) {
+		err = ovl_snapshot_want_write(old, new_is_dir);
+		if (err)
+			goto out;
+	}
 
 	err = ovl_want_write(old);
 	if (err)
