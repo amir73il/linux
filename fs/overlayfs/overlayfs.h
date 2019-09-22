@@ -559,7 +559,7 @@ extern const struct inode_operations ovl_snapshot_inode_operations;
 int ovl_snapshot_fs_register(void);
 void ovl_snapshot_fs_unregister(void);
 int ovl_snapshot_open(struct dentry *dentry, unsigned int flags);
-int ovl_snapshot_modify(struct dentry *dentry);
+int ovl_snapshot_modify(struct dentry *dentry, bool new_is_dir);
 
 static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)
 {
@@ -575,12 +575,13 @@ static inline int ovl_snapshot_maybe_copy_up(struct dentry *dentry,
 	return ovl_snapshot_open(dentry, flags);
 }
 
-static inline int ovl_snapshot_want_write(struct dentry *dentry)
+static inline int ovl_snapshot_want_write(struct dentry *dentry,
+					  bool new_is_dir)
 {
 	if (!ovl_is_snapshot_fs_type(dentry->d_sb))
 		return 0;
 
-	return ovl_snapshot_modify(dentry);
+	return ovl_snapshot_modify(dentry, new_is_dir);
 }
 
 static inline void ovl_snapshot_drop_write(struct dentry *dentry) { }
@@ -589,7 +590,11 @@ static inline void ovl_snapshot_drop_write(struct dentry *dentry) { }
 
 static inline int ovl_snapshot_fs_register(void) { return 0; }
 static inline void ovl_snapshot_fs_unregister(void) { }
-static inline int ovl_snapshot_want_write(struct dentry *dentry) { return 0; }
+static inline int ovl_snapshot_want_write(struct dentry *dentry,
+					  bool new_is_dir)
+{
+	return 0;
+}
 static inline void ovl_snapshot_drop_write(struct dentry *dentry) { }
 
 static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)

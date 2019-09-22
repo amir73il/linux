@@ -605,6 +605,7 @@ static int ovl_snapshot_copy_up(struct dentry *dentry)
 	struct inode *inode = d_inode(dentry);
 	struct dentry *snap = NULL;
 	bool disconnected = dentry->d_flags & DCACHE_DISCONNECTED;
+	int flags = O_WRONLY;
 	int err = -ENOENT;
 
 	if (WARN_ON(!inode))
@@ -639,7 +640,16 @@ static int ovl_snapshot_copy_up(struct dentry *dentry)
 	err = ovl_want_write(snap);
 	if (err)
 		goto bug;
-	err = ovl_copy_up_with_data(snap);
+
+	/*
+	 * Before a directory is renamed, we usually cover the target with a
+	 * whiteout. When directory is exchanged with a file in a metacopy
+	 * snapshot, we cover the target with an empty file instead.
+	 */
+	if (OVL_FS(dentry->d_sb)->config.metacopy)
+		flags |= O_TRUNC;
+
+	err = ovl_copy_up_flags(snap, flags);
 	ovl_drop_write(snap);
 	if (err)
 		goto bug;
@@ -657,7 +667,7 @@ bug:
 }
 
 /* Explicitly whiteout a negative snapshot fs dentry before create */
-static int ovl_snapshot_whiteout(struct dentry *dentry)
+static int ovl_snapshot_whiteout(struct dentry *dentry, bool new_is_dir)
 {
 	struct dentry *snap = ovl_snapshot_dentry(dentry);
 	struct dentry *parent = NULL;
@@ -688,6 +698,11 @@ static int ovl_snapshot_whiteout(struct dentry *dentry)
 	if (err)
 		goto out_drop_write;
 
+	if (!new_is_dir && OVL_FS(dentry->d_sb)->config.metacopy) {
+		/* Only whiteout directories in snapshot */
+		goto done;
+	}
+
 	upperdir = ovl_dentry_upper(parent);
 	udir = upperdir->d_inode;
 	old_cred = ovl_override_creds(snap->d_sb);
@@ -714,11 +729,16 @@ static int ovl_snapshot_whiteout(struct dentry *dentry)
 
 	/*
 	 * Setting a negative snapshot dentry opaque to signify that
-	 * lower is going to be positive and set dedntry flags to suppress
-	 * copy to snapshot of future object and possibly its children.
+	 * lower is going to be positive.
 	 */
 	ovl_dentry_set_opaque(snap);
 	ovl_dir_modified(parent, true);
+
+done:
+	/*
+	 * set dentry flags to suppress copy to snapshot of future object
+	 * and possibly its children.
+	 */
 	ovl_snapshot_set_nocow(dentry);
 	ovl_snapshot_set_children_nocow(dentry);
 
@@ -737,12 +757,13 @@ out:
 	return err;
 }
 
-static int ovl_snapshot_copy_up_meta(struct dentry *dentry)
+static int ovl_snapshot_copy_up_meta(struct dentry *dentry, bool new_is_dir)
 {
 	struct dentry *parent;
 	int err;
 
-	if (d_is_dir(dentry) || !OVL_FS(dentry->d_sb)->config.metacopy)
+	if (d_is_dir(dentry) || new_is_dir ||
+	    !OVL_FS(dentry->d_sb)->config.metacopy)
 		return ovl_snapshot_copy_up(dentry);
 
 	/* Only copy directory skeleton to snapshot */
@@ -761,13 +782,13 @@ int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 	if (snapmnt && ovl_open_flags_need_copy_up(flags) &&
 	    !special_file(d_inode(dentry)->i_mode) &&
 	    ovl_snapshot_need_cow(dentry))
-		err = ovl_snapshot_copy_up_meta(dentry);
+		err = ovl_snapshot_copy_up_meta(dentry, false);
 
 	mntput(snapmnt);
 	return err;
 }
 
-int ovl_snapshot_modify(struct dentry *dentry)
+int ovl_snapshot_modify(struct dentry *dentry, bool new_is_dir)
 {
 	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
 	int err = 0;
@@ -775,9 +796,9 @@ int ovl_snapshot_modify(struct dentry *dentry)
 	if (snapmnt && ovl_snapshot_need_cow(dentry)) {
 		/* Negative dentry may need to be explicitly whited out */
 		if (d_is_negative(dentry))
-			err = ovl_snapshot_whiteout(dentry);
+			err = ovl_snapshot_whiteout(dentry, new_is_dir);
 		else
-			err = ovl_snapshot_copy_up_meta(dentry);
+			err = ovl_snapshot_copy_up_meta(dentry, new_is_dir);
 	}
 
 	mntput(snapmnt);
