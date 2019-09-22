@@ -1063,7 +1063,10 @@ static int ovl_setup_trap(struct super_block *sb, struct dentry *dir,
  */
 static int ovl_report_in_use(struct ovl_fs *ofs, const char *name)
 {
-	if (ofs->config.index) {
+	if (ofs->config.redirect_origin) {
+		/* Avoid "lowerdir in-use" warning from overlay snapshot mounts */
+		return 0;
+	} else if (ofs->config.index) {
 		pr_err("%s is in-use as upperdir/workdir of another mount, mount with '-o index=off' to override exclusive upperdir protection.\n",
 		       name);
 		return -EBUSY;
@@ -1125,7 +1128,10 @@ static int ovl_get_upper(struct super_block *sb, struct ovl_fs *ofs,
 	if (upper_mnt->mnt_sb->s_flags & SB_NOSEC)
 		sb->s_flags |= SB_NOSEC;
 
-	if (ovl_inuse_trylock(ovl_upper_mnt(ofs)->mnt_root)) {
+	if (ofs->config.redirect_origin) {
+		/* Avoid "lowerdir in-use" warning from overlay snapshot mounts */
+		return 0;
+	} else if (ovl_inuse_trylock(ovl_upper_mnt(ofs)->mnt_root)) {
 		ofs->upperdir_locked = true;
 	} else {
 		err = ovl_report_in_use(ofs, "upperdir");
