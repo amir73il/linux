@@ -781,7 +781,7 @@ static struct dentry *ovl_lower_fh_to_d(struct super_block *sb,
 	}
 	if (index) {
 		err = ovl_verify_origin(index, origin.dentry, false,
-					ovl_export_nested(sb));
+					ovl_export_nested(sb), false);
 		if (err)
 			goto out_err;
 	}

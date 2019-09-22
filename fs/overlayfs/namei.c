@@ -404,9 +404,13 @@ static int ovl_check_origin(struct ovl_fs *ofs, struct dentry *upperdentry,
 
 		/* Set opaque xattr if origin fh is stale */
 		err = ovl_do_setxattr(upperdentry, OVL_XATTR_OPAQUE, "y", 1, 0);
-		pr_warn_ratelimited("overlayfs: implicit opaque dir (%pd2) %s(err=%i)\n",
-				    upperdentry, err ? "" : "set explicit ",
-				    err);
+		if (err) {
+			pr_warn_ratelimited("overlayfs: implicit opaque dir (%pd2) (err=%i)\n",
+					    upperdentry, err);
+		} else {
+			pr_debug("overlayfs: implicit opaque dir (%pd2) set explicit\n",
+				 upperdentry);
+		}
 
 		mnt_drop_write(ofs->upper_mnt);
 		return err;
@@ -441,10 +445,14 @@ static int ovl_check_origin(struct ovl_fs *ofs, struct dentry *upperdentry,
 				mnt_drop_write(ofs->upper_mnt);
 			}
 		}
-		pr_warn_ratelimited("overlayfs: implicit redirect dir (%pd2 -> %s) %s(idx=%d, err=%i)\n",
-				    upperdentry, redirect,
-				    err ? "" : "set explicit ",
-				    origin->layer->idx, err);
+		if (err) {
+			pr_warn_ratelimited("overlayfs: implicit redirect dir (%pd2 -> %s) (idx=%d, err=%i)\n",
+					    upperdentry, redirect,
+					    origin->layer->idx, err);
+		} else {
+			pr_debug("overlayfs: implicit redirect dir (%pd2 -> %s) set explicit (idx=%d)\n",
+				 upperdentry, redirect, origin->layer->idx);
+		}
 		kfree(d->redirect);
 		d->redirect = redirect;
 	}
@@ -485,10 +493,13 @@ static int ovl_verify_fh(struct dentry *dentry, const char *name,
  * If @set is true and there is no stored file handle, encode @real and store
  * file handle in xattr @name.
  *
+ * If @test is true, do not warn on mismatch.
+ *
  * Return 0 on match, -ESTALE on mismatch, -ENODATA on no xattr, < 0 on error.
  */
 int ovl_verify_set_fh(struct dentry *dentry, const char *name,
-		      struct dentry *real, bool is_upper, bool set, bool nested)
+		      struct dentry *real, bool is_upper, bool set, bool nested,
+		      bool test)
 {
 	struct inode *inode;
 	struct ovl_fh *fh;
@@ -504,7 +515,9 @@ int ovl_verify_set_fh(struct dentry *dentry, const char *name,
 	err = ovl_verify_fh(dentry, name, fh);
 	if (set && err == -ENODATA)
 		err = ovl_do_setxattr(dentry, name, fh, fh->len, 0);
-	if (err)
+	else if (test && err == -ESTALE)
+		goto out;
+	else if (err)
 		goto fail;
 
 out:
@@ -1044,7 +1057,8 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		    ((d.is_dir && ovl_verify_lower(dentry->d_sb)) ||
 		     (!d.is_dir && ofs->config.index && origin_path))) {
 			err = ovl_verify_origin(upperdentry, this, false,
-					ovl_export_nested(dentry->d_sb));
+						ovl_export_nested(dentry->d_sb),
+						ofs->config.redirect_origin);
 			if (err) {
 				dput(this);
 				if (d.is_dir)
