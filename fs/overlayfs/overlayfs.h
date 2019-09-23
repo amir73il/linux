@@ -499,7 +499,8 @@ extern const struct inode_operations ovl_snapshot_inode_operations;
 int ovl_snapshot_fs_register(void);
 void ovl_snapshot_fs_unregister(void);
 int ovl_snapshot_open(struct dentry *dentry, unsigned int flags);
-int ovl_snapshot_modify(struct dentry *dentry);
+int ovl_snapshot_pre_modify(struct dentry *dentry);
+void ovl_snapshot_post_modify(struct dentry *dentry);
 
 static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)
 {
@@ -520,10 +521,16 @@ static inline int ovl_snapshot_want_write(struct dentry *dentry)
 	if (!ovl_is_snapshot_fs_type(dentry->d_sb))
 		return 0;
 
-	return ovl_snapshot_modify(dentry);
+	return ovl_snapshot_pre_modify(dentry);
 }
 
-static inline void ovl_snapshot_drop_write(struct dentry *dentry) { }
+static inline void ovl_snapshot_drop_write(struct dentry *dentry)
+{
+	if (!ovl_is_snapshot_fs_type(dentry->d_sb))
+		return;
+
+	ovl_snapshot_post_modify(dentry);
+}
 
 #define FMODE_WRITE_SHARED	((__force fmode_t)0x40000000)
 

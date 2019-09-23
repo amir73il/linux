@@ -115,22 +115,30 @@ bug:
 	return dentry;
 }
 
-static bool ovl_dentry_is_dead(struct dentry *d)
+static bool ovl_dentry_is_valid(struct dentry *d, bool under)
 {
-	return unlikely(!d->d_inode || IS_DEADDIR(d->d_inode));
+	/*
+	 * Negative or dead dir in lower stack is never valid.
+	 * An unhashed dentry is not valid as upper most in stack.
+	 */
+	return likely(d->d_inode && !IS_DEADDIR(d->d_inode) &&
+		      (under || !d_unhashed(d)));
 }
 
 static int ovl_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
+	bool under = ovl_dentry_has_upper_alias(dentry);
 	unsigned int i;
 	int ret = 1;
 
 	for (i = 0; i < oe->numlower; i++) {
 		struct dentry *d = oe->lowerstack[i].dentry;
 
-		if (ovl_dentry_is_dead(d))
+		if (!ovl_dentry_is_valid(d, under))
 			return 0;
+
+		under = true;
 
 		if (d->d_flags & DCACHE_OP_REVALIDATE) {
 			ret = d->d_op->d_revalidate(d, flags);
@@ -144,14 +152,17 @@ static int ovl_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 static int ovl_dentry_weak_revalidate(struct dentry *dentry, unsigned int flags)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
+	bool under = ovl_dentry_has_upper_alias(dentry);
 	unsigned int i;
 	int ret = 1;
 
 	for (i = 0; i < oe->numlower; i++) {
 		struct dentry *d = oe->lowerstack[i].dentry;
 
-		if (ovl_dentry_is_dead(d))
+		if (!ovl_dentry_is_valid(d, under))
 			return 0;
+
+		under = true;
 
 		if (d->d_flags & DCACHE_OP_WEAK_REVALIDATE) {
 			ret = d->d_op->d_weak_revalidate(d, flags);

@@ -1021,7 +1021,7 @@ int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 	return err;
 }
 
-int ovl_snapshot_modify(struct dentry *dentry)
+int ovl_snapshot_pre_modify(struct dentry *dentry)
 {
 	unsigned long snapid;
 	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry, &snapid);
@@ -1037,6 +1037,21 @@ int ovl_snapshot_modify(struct dentry *dentry)
 
 	mntput(snapmnt);
 	return err;
+}
+
+void ovl_snapshot_post_modify(struct dentry *dentry)
+{
+	/*
+	 * We may have just dropped this dentry, because it was deleted or
+	 * renamed over - then snapshot still thinks it has a lower dentry.
+	 * Reset the cow flags in this case to revalidate snapshot dentry.
+	 */
+	if (d_unhashed(dentry)) {
+		ovl_snapshot_reset_id(dentry, 0);
+		pr_debug("ovl_snapshot_d_drop(%pd4): is_dir=%d, negative=%d, unhashed=%d\n",
+			 dentry, d_is_dir(dentry), d_is_negative(dentry),
+			 d_unhashed(dentry));
+	}
 }
 
 int ovl_snapshot_get_write_shared_access(struct file *file)
