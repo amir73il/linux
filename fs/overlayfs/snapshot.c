@@ -40,6 +40,11 @@ static void ovl_snapshot_set_flag(int nr, struct dentry *dentry)
 	set_bit(nr, &OVL_E(dentry)->snapflags);
 }
 
+static void ovl_snapshot_clear_flag(int nr, struct dentry *dentry)
+{
+	clear_bit(nr, &OVL_E(dentry)->snapflags);
+}
+
 static struct vfsmount *ovl_snapshot_mntget(struct dentry *dentry)
 {
 	return mntget(OVL_FS(dentry->d_sb)->snap_mnt);
@@ -58,6 +63,11 @@ static bool ovl_snapshot_children_need_cow(struct dentry *dentry)
 static void ovl_snapshot_set_nocow(struct dentry *dentry)
 {
 	ovl_snapshot_set_flag(OVL_SNAP_NOCOW, dentry);
+}
+
+static void ovl_snapshot_clear_nocow(struct dentry *dentry)
+{
+	ovl_snapshot_clear_flag(OVL_SNAP_NOCOW, dentry);
 }
 
 static void ovl_snapshot_set_children_nocow(struct dentry *dentry)
@@ -118,8 +128,14 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 		goto out_unlock;
 	}
 
+	/*
+	 * dentry may be nagative in pre create hook and may be unhashed
+	 * in post delete hook. In both cases, find the snapshot dentry and
+	 * return it to the caller without setting NOCOW flags.
+	 */
 	if (OVL_FS(dentry->d_sb)->config.metacopy && !is_dir &&
-	    !d_is_negative(dentry) && !ovl_snapshot_need_cow(parent)) {
+	    !d_is_negative(dentry) && !d_unhashed(dentry) &&
+	    !ovl_snapshot_need_cow(parent)) {
 		/* Only copy directory skeleton to snapshot */
 		ovl_snapshot_set_nocow(dentry);
 		goto out_unlock;
@@ -793,7 +809,7 @@ int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 	return err;
 }
 
-int ovl_snapshot_modify(struct dentry *dentry, bool new_is_dir)
+int ovl_snapshot_pre_modify(struct dentry *dentry, bool new_is_dir)
 {
 	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
 	int err = 0;
@@ -808,4 +824,31 @@ int ovl_snapshot_modify(struct dentry *dentry, bool new_is_dir)
 
 	mntput(snapmnt);
 	return err;
+}
+
+void ovl_snapshot_post_modify(struct dentry *dentry)
+{
+	struct dentry *snap;
+
+	/*
+	 * We may have just dropped this dentry, because it was deleted or
+	 * renamed over, but snapshot may still think it has a lower dentry.
+	 * With metacopy snapshot, the file wasn't copied to snapshot before it
+	 * was deleted, so we need to make sure that snapshot lookup of the same
+	 * path as this one won't end up finding the stale snapshot dentry.
+	 * Find and drop that snapshot dentry.
+	 */
+	if (d_unhashed(dentry) && !d_is_dir(dentry)) {
+		ovl_snapshot_clear_nocow(dentry);
+		snap = ovl_snapshot_dentry(dentry);
+		pr_debug("ovl_snapshot: d_unhashed(%pd4), negative=%d\n",
+			 dentry, d_is_negative(dentry));
+		if (!IS_ERR_OR_NULL(snap)) {
+			pr_debug("ovl_snapshot: d_drop(%pd4), is_dir=%d, negative=%d, unhashed=%d\n",
+				 snap, d_is_dir(snap), d_is_negative(snap),
+				 d_unhashed(snap));
+			d_drop(snap);
+			dput(snap);
+		}
+	}
 }
