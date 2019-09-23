@@ -36,8 +36,12 @@ void ovl_drop_write(struct dentry *dentry)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 
-	ovl_snapshot_drop_write(dentry);
 	mnt_drop_write(ofs->upper_mnt);
+	/*
+	 * Keep after ovl_drop_write() because snapshot lookup aquires
+	 * dir inode mutex, which is ordered outside sb_writers.
+	 */
+	ovl_snapshot_drop_write(dentry);
 }
 
 struct dentry *ovl_workdir(struct dentry *dentry)
