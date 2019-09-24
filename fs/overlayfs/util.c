@@ -18,10 +18,14 @@
 #include <linux/ratelimit.h>
 #include "overlayfs.h"
 
-int ovl_want_write(struct dentry *dentry)
+/*
+ * When instantiating a negative dentry, caller (i.e. mkdir/rename) is
+ * responsible to call ovl_want_write_new() directly.
+ */
+int ovl_want_write_new(struct dentry *dentry, int new_is_dir)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
-	int err = ovl_snapshot_want_write(dentry);
+	int err = ovl_snapshot_want_write(dentry, new_is_dir);
 
 	if (err)
 		return err;

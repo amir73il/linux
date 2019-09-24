@@ -213,8 +213,14 @@ static inline bool ovl_open_flags_need_copy_up(int flags)
 }
 
 /* util.c */
-int ovl_want_write(struct dentry *dentry);
+int ovl_want_write_new(struct dentry *dentry, int new_is_dir);
 void ovl_drop_write(struct dentry *dentry);
+
+static inline int ovl_want_write(struct dentry *dentry)
+{
+	return ovl_want_write_new(dentry, d_is_dir(dentry));
+}
+
 struct dentry *ovl_workdir(struct dentry *dentry);
 const struct cred *ovl_override_creds(struct super_block *sb);
 struct super_block *ovl_same_sb(struct super_block *sb);
@@ -499,7 +505,7 @@ extern const struct inode_operations ovl_snapshot_inode_operations;
 int ovl_snapshot_fs_register(void);
 void ovl_snapshot_fs_unregister(void);
 int ovl_snapshot_open(struct dentry *dentry, unsigned int flags);
-int ovl_snapshot_pre_modify(struct dentry *dentry);
+int ovl_snapshot_pre_modify(struct dentry *dentry, bool new_is_dir);
 void ovl_snapshot_post_modify(struct dentry *dentry);
 
 static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)
@@ -516,12 +522,13 @@ static inline int ovl_snapshot_maybe_copy_up(struct dentry *dentry,
 	return ovl_snapshot_open(dentry, flags);
 }
 
-static inline int ovl_snapshot_want_write(struct dentry *dentry)
+static inline int ovl_snapshot_want_write(struct dentry *dentry,
+					  bool new_is_dir)
 {
 	if (!ovl_is_snapshot_fs_type(dentry->d_sb))
 		return 0;
 
-	return ovl_snapshot_pre_modify(dentry);
+	return ovl_snapshot_pre_modify(dentry, new_is_dir);
 }
 
 static inline void ovl_snapshot_drop_write(struct dentry *dentry)
@@ -574,7 +581,11 @@ static inline void ovl_snapshot_put_write_access(struct file *file)
 
 static inline int ovl_snapshot_fs_register(void) { return 0; }
 static inline void ovl_snapshot_fs_unregister(void) { }
-static inline int ovl_snapshot_want_write(struct dentry *dentry) { return 0; }
+static inline int ovl_snapshot_want_write(struct dentry *dentry,
+					  bool new_is_dir)
+{
+	return 0;
+}
 static inline void ovl_snapshot_drop_write(struct dentry *dentry) { }
 static inline int ovl_snapshot_get_write_access(struct file *file)
 {
