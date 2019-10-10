@@ -607,13 +607,18 @@ static int fanotify_remove_mark(struct fsnotify_group *group,
 {
 	struct fsnotify_mark *fsn_mark = NULL;
 	__u32 removed;
-	int destroy_mark;
+	int destroy_mark = 0;
+	int err = 0;
 
 	mutex_lock(&group->mark_mutex);
 	fsn_mark = fsnotify_find_mark(connp, group);
 	if (!fsn_mark) {
 		mutex_unlock(&group->mark_mutex);
 		return -ENOENT;
+	} else if (fsn_mark->flags & FSNOTIFY_MARK_FLAG_CONST) {
+		/* const mark cannot be modified */
+		err = -EROFS;
+		goto out_unlock;
 	}
 
 	removed = fanotify_mark_remove_from_mask(fsn_mark, mask, flags,
@@ -622,13 +627,15 @@ static int fanotify_remove_mark(struct fsnotify_group *group,
 		fsnotify_recalc_mask(fsn_mark->connector);
 	if (destroy_mark)
 		fsnotify_detach_mark(fsn_mark);
+
+out_unlock:
 	mutex_unlock(&group->mark_mutex);
 	if (destroy_mark)
 		fsnotify_free_mark(fsn_mark);
 
 	/* matches the fsnotify_find_mark() */
 	fsnotify_put_mark(fsn_mark);
-	return 0;
+	return err;
 }
 
 static int fanotify_remove_vfsmount_mark(struct fsnotify_group *group,
@@ -707,6 +714,7 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 {
 	struct fsnotify_mark *fsn_mark;
 	__u32 added;
+	int err = 0;
 
 	mutex_lock(&group->mark_mutex);
 	fsn_mark = fsnotify_find_mark(connp, group);
@@ -716,14 +724,21 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 			mutex_unlock(&group->mark_mutex);
 			return PTR_ERR(fsn_mark);
 		}
+	} else if (fsn_mark->flags & FSNOTIFY_MARK_FLAG_CONST) {
+		/* const mark cannot be modified */
+		err = -EROFS;
+		goto out_unlock;
 	}
+
 	added = fanotify_mark_add_to_mask(fsn_mark, mask, flags);
 	if (added & ~fsnotify_conn_mask(fsn_mark->connector))
 		fsnotify_recalc_mask(fsn_mark->connector);
+
+out_unlock:
 	mutex_unlock(&group->mark_mutex);
 
 	fsnotify_put_mark(fsn_mark);
-	return 0;
+	return err;
 }
 
 static int fanotify_add_vfsmount_mark(struct fsnotify_group *group,
