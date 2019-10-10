@@ -344,6 +344,7 @@ struct fsnotify_mark {
 #define FSNOTIFY_MARK_FLAG_ALIVE		0x02
 #define FSNOTIFY_MARK_FLAG_ATTACHED		0x04
 #define FSNOTIFY_MARK_FLAG_CONST		0x08
+#define FSNOTIFY_MARK_FLAG_IMPLICIT		0x10
 	unsigned int flags;		/* flags [mark->lock] */
 };
 

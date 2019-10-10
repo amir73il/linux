@@ -705,7 +705,8 @@ struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
 
 	hlist_for_each_entry(mark, &conn->list, obj_list) {
 		if (mark->group == group &&
-		    (mark->flags & FSNOTIFY_MARK_FLAG_ATTACHED)) {
+		    (mark->flags & FSNOTIFY_MARK_FLAG_ATTACHED) &&
+		    !(mark->flags & FSNOTIFY_MARK_FLAG_IMPLICIT)) {
 			fsnotify_get_mark(mark);
 			spin_unlock(&conn->lock);
 			return mark;
