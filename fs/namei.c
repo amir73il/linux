@@ -4391,6 +4391,7 @@ int vfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	bool new_is_dir = false;
 	unsigned max_links = new_dir->i_sb->s_max_links;
 	struct name_snapshot old_name;
+	bool old_subtree;
 
 	if (source == target)
 		return 0;
@@ -4438,6 +4439,7 @@ int vfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 		return error;
 
 	take_dentry_name_snapshot(&old_name, old_dentry);
+	old_subtree = fsnotify_dentry_watches_subtree(old_dentry);
 	dget(new_dentry);
 	if (!is_dir || (flags & RENAME_EXCHANGE))
 		lock_two_nondirectories(source, target);
@@ -4492,10 +4494,11 @@ out:
 		inode_unlock(target);
 	dput(new_dentry);
 	if (!error) {
-		fsnotify_move(old_dir, new_dir, &old_name.name, is_dir,
+		fsnotify_move(old_dir, new_dir, &old_name.name, old_subtree, is_dir,
 			      !(flags & RENAME_EXCHANGE) ? target : NULL, old_dentry);
 		if (flags & RENAME_EXCHANGE) {
 			fsnotify_move(new_dir, old_dir, &old_dentry->d_name,
+				      fsnotify_dentry_watches_subtree(old_dentry),
 				      new_is_dir, NULL, new_dentry);
 		}
 	}

@@ -177,6 +177,9 @@ struct dentry_operations {
 
 #define DCACHE_REFERENCED		0x00000040 /* Recently used, don't discard. */
 
+#define DCACHE_FSNOTIFY_SUBTREE_WATCHED	0x00000080
+     /* Ancestor inode is watched recursively by some fsnotify listener */
+
 #define DCACHE_CANT_MOUNT		0x00000100
 #define DCACHE_GENOCIDE			0x00000200
 #define DCACHE_SHRINK_LIST		0x00000400
@@ -261,6 +264,9 @@ extern void d_prune_aliases(struct inode *);
 
 /* test whether we have any submounts in a subdir tree */
 extern int path_has_submounts(const struct path *);
+
+/* recursive update of subtree watched flags */
+extern void update_watched_subtree(struct dentry *);
 
 /*
  * This adds the entry to the hash queues.

@@ -102,7 +102,7 @@ static inline void fsnotify_link_count(struct inode *inode)
  * fsnotify_move - file old_name at old_dir was moved to new_name at new_dir
  */
 static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
-				 const struct qstr *old_name,
+				 const struct qstr *old_name, bool old_subtree,
 				 int isdir, struct inode *target,
 				 struct dentry *moved)
 {
@@ -115,6 +115,8 @@ static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
 
 	if (old_dir == new_dir)
 		old_dir_mask |= FS_DN_RENAME;
+	else if (old_subtree != fsnotify_dentry_watches_subtree(moved))
+		update_watched_subtree(moved);
 
 	if (isdir) {
 		old_dir_mask |= FS_ISDIR;

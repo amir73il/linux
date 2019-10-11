@@ -48,16 +48,18 @@
 #define FS_ACCESS_PERM		0x00020000	/* access event in a permissions hook */
 #define FS_OPEN_EXEC_PERM	0x00040000	/* open/exec event in a permission hook */
 
+#define FS_EVENT_ON_SUBTREE	0x01000000	/* kernel recursive watch */
+
 #define FS_EXCL_UNLINK		0x04000000	/* do not send events if object is unlinked */
+/* This inode cares about things that happen to its children.  Always set for
+ * dnotify and inotify. */
+#define FS_EVENT_ON_CHILD	0x08000000
+
 #define FS_ISDIR		0x40000000	/* event occurred against dir */
 #define FS_IN_ONESHOT		0x80000000	/* only send event once */
 
 #define FS_DN_RENAME		0x10000000	/* file renamed */
 #define FS_DN_MULTISHOT		0x20000000	/* dnotify multishot */
-
-/* This inode cares about things that happen to its children.  Always set for
- * dnotify and inotify. */
-#define FS_EVENT_ON_CHILD	0x08000000
 
 #define FS_MOVE			(FS_MOVED_FROM | FS_MOVED_TO)
 
@@ -371,6 +373,12 @@ static inline int fsnotify_inode_watches_children(struct inode *inode)
 	return inode->i_fsnotify_mask & FS_EVENTS_POSS_ON_CHILD;
 }
 
+static inline bool fsnotify_dentry_watches_subtree(struct dentry *dentry)
+{
+	return (dentry->d_flags & DCACHE_FSNOTIFY_SUBTREE_WATCHED) ||
+		(dentry->d_inode->i_fsnotify_mask & FS_EVENT_ON_SUBTREE);
+}
+
 /*
  * Update the dentry with a flag indicating the interest of its parent to receive
  * filesystem events when those events happens to this dentry->d_inode.
@@ -390,6 +398,15 @@ static inline void fsnotify_update_flags(struct dentry *dentry)
 		dentry->d_flags |= DCACHE_FSNOTIFY_PARENT_WATCHED;
 	else
 		dentry->d_flags &= ~DCACHE_FSNOTIFY_PARENT_WATCHED;
+
+	/*
+	 * Propagate DCACHE_FSNOTIFY_SUBTREE_WATCHED to dcache subtree.
+	 * Recursive watches will be added to subtree dir inodes lazily.
+	 */
+	if (fsnotify_dentry_watches_subtree(dentry->d_parent))
+		dentry->d_flags |= DCACHE_FSNOTIFY_SUBTREE_WATCHED;
+	else
+		dentry->d_flags &= ~DCACHE_FSNOTIFY_SUBTREE_WATCHED;
 }
 
 /* called from fsnotify listeners, such as fanotify or dnotify */

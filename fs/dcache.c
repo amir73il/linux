@@ -3089,6 +3089,24 @@ bool is_subdir(struct dentry *new_dentry, struct dentry *old_dentry)
 }
 EXPORT_SYMBOL(is_subdir);
 
+static enum d_walk_ret d_update_watched(void *data, struct dentry *dentry)
+{
+	struct dentry *root = data;
+	if (dentry == root || d_unhashed(dentry) || !dentry->d_inode ||
+	    !d_is_dir(dentry))
+		return D_WALK_SKIP;
+
+	fsnotify_update_flags(dentry);
+	return D_WALK_CONTINUE;
+}
+
+/* Caller must hold s_vfs_rename_mutex */
+void update_watched_subtree(struct dentry *root)
+{
+	d_walk(root, root, d_update_watched);
+}
+EXPORT_SYMBOL(update_watched_subtree);
+
 static enum d_walk_ret d_genocide_kill(void *data, struct dentry *dentry)
 {
 	struct dentry *root = data;

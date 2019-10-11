@@ -837,6 +837,7 @@ struct dentry *debugfs_rename(struct dentry *old_dir, struct dentry *old_dentry,
 	int error;
 	struct dentry *dentry = NULL, *trap;
 	struct name_snapshot old_name;
+	bool old_subtree;
 
 	if (IS_ERR(old_dir))
 		return old_dir;
@@ -859,6 +860,7 @@ struct dentry *debugfs_rename(struct dentry *old_dir, struct dentry *old_dentry,
 		goto exit;
 
 	take_dentry_name_snapshot(&old_name, old_dentry);
+	old_subtree = fsnotify_dentry_watches_subtree(old_dentry);
 
 	error = simple_rename(d_inode(old_dir), old_dentry, d_inode(new_dir),
 			      dentry, 0);
@@ -868,7 +870,7 @@ struct dentry *debugfs_rename(struct dentry *old_dir, struct dentry *old_dentry,
 	}
 	d_move(old_dentry, dentry);
 	fsnotify_move(d_inode(old_dir), d_inode(new_dir), &old_name.name,
-		d_is_dir(old_dentry),
+		old_subtree, d_is_dir(old_dentry),
 		NULL, old_dentry);
 	release_dentry_name_snapshot(&old_name);
 	unlock_rename(new_dir, old_dir);
