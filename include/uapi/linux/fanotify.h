@@ -25,6 +25,9 @@
 #define FAN_ACCESS_PERM		0x00020000	/* File accessed in perm check */
 #define FAN_OPEN_EXEC_PERM	0x00040000	/* File open/exec in perm check */
 
+#define FAN_LINK_SELF		0x00100000	/* Self was linked/created */
+#define FAN_UNLINK_SELF		0x00200000	/* Self was unlinked/removed */
+
 #define FAN_ONDIR		0x40000000	/* event occurred against dir */
 
 #define FAN_EVENT_ON_CHILD	0x08000000	/* interested in child events */
@@ -32,6 +35,8 @@
 /* helper events */
 #define FAN_CLOSE		(FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE) /* close */
 #define FAN_MOVE		(FAN_MOVED_FROM | FAN_MOVED_TO) /* moves */
+#define FAN_LINK		FAN_CREATE /* conforms to FAN_LINK_SELF */
+#define FAN_UNLINK		FAN_DELETE /* confroms to FAN_UNLINK_SELF */
 
 /* flags used for fanotify_init() */
 #define FAN_CLOEXEC		0x00000001
