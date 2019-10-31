@@ -273,7 +273,11 @@ static ssize_t copy_event_to_user(struct fsnotify_group *group,
 	metadata.vers = FANOTIFY_METADATA_VERSION;
 	metadata.reserved = 0;
 	metadata.mask = event->mask & FANOTIFY_OUTGOING_EVENTS;
-	metadata.pid = pid_vnr(event->pid);
+
+	if (fanotify_event_has_pid(event))
+		metadata.pid = pid_vnr(event->pid);
+	else if (FAN_GROUP_FLAG(group, FAN_REPORT_OPID))
+		metadata.pid = fanotify_event_opid(event);
 
 	if (fanotify_event_has_path(event)) {
 		fd = create_fd(group, event, &f);
@@ -799,6 +803,15 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	    (flags & FANOTIFY_CLASS_BITS) != FAN_CLASS_NOTIF)
 		return -EINVAL;
 
+
+	/*
+	 * Can either report operation id or thread id on event->pid and opid is
+	 * only relevant to dirent events, which require reporting fid.
+	 */
+	if ((flags & FAN_REPORT_OPID) &&
+	    ((flags & FAN_REPORT_TID) || !(flags & FAN_REPORT_FID)))
+		return -EINVAL;
+
 	user = get_current_user();
 	if (atomic_read(&user->fanotify_listeners) > FANOTIFY_DEFAULT_MAX_LISTENERS) {
 		free_uid(user);
@@ -824,7 +837,7 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	group->memcg = get_mem_cgroup_from_mm(current->mm);
 
 	oevent = fanotify_alloc_event(group, NULL, FS_Q_OVERFLOW, NULL,
-				      FSNOTIFY_EVENT_NONE, NULL);
+				      FSNOTIFY_EVENT_NONE, NULL, 0);
 	if (unlikely(!oevent)) {
 		fd = -ENOMEM;
 		goto out_destroy_group;
@@ -1134,7 +1147,7 @@ COMPAT_SYSCALL_DEFINE6(fanotify_mark,
  */
 static int __init fanotify_user_setup(void)
 {
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 8);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 9);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 9);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,

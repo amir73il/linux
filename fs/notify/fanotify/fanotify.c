@@ -26,6 +26,9 @@ static bool should_merge(struct fsnotify_event *old_fsn,
 	old = FANOTIFY_E(old_fsn);
 	new = FANOTIFY_E(new_fsn);
 
+	/* We are comparing either member of the union */
+	BUILD_BUG_ON(sizeof(old->pid) != sizeof(old->opid));
+
 	if (old_fsn->inode != new_fsn->inode || old->pid != new->pid ||
 	    old->fh_type != new->fh_type || old->fh_len != new->fh_len)
 		return false;
@@ -279,7 +282,7 @@ static struct inode *fanotify_fid_inode(struct inode *to_tell, u32 event_mask,
 struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 					    struct inode *inode, u32 mask,
 					    const void *data, int data_type,
-					    __kernel_fsid_t *fsid)
+					    __kernel_fsid_t *fsid, u32 cookie)
 {
 	struct fanotify_event *event = NULL;
 	gfp_t gfp = GFP_KERNEL_ACCOUNT;
@@ -316,7 +319,9 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 init: __maybe_unused
 	fsnotify_init_event(&event->fse, inode);
 	event->mask = mask;
-	if (FAN_GROUP_FLAG(group, FAN_REPORT_TID))
+	if (FAN_GROUP_FLAG(group, FAN_REPORT_OPID))
+		event->opid = fanotify_cookie_opid(cookie);
+	else if (FAN_GROUP_FLAG(group, FAN_REPORT_TID))
 		event->pid = get_pid(task_pid(current));
 	else
 		event->pid = get_pid(task_tgid(current));
@@ -429,7 +434,7 @@ static int fanotify_handle_event(struct fsnotify_group *group,
 	}
 
 	event = fanotify_alloc_event(group, inode, mask, data, data_type,
-				     &fsid);
+				     &fsid, cookie);
 	ret = -ENOMEM;
 	if (unlikely(!event)) {
 		/*
@@ -479,7 +484,10 @@ static void fanotify_free_event(struct fsnotify_event *fsn_event)
 		path_put(&event->path);
 	else if (fanotify_event_has_ext_fh(event))
 		kfree(event->fid.ext_fh);
-	put_pid(event->pid);
+
+	if (fanotify_event_has_pid(event))
+		put_pid(event->pid);
+
 	if (fanotify_is_perm_event(event->mask)) {
 		kmem_cache_free(fanotify_perm_event_cachep,
 				FANOTIFY_PE(fsn_event));

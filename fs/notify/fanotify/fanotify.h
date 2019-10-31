@@ -83,8 +83,33 @@ struct fanotify_event {
 		 */
 		struct fanotify_fid fid;
 	};
-	struct pid *pid;
+	union {
+		struct pid *pid;
+		/*
+		 * With FAN_REPORT_OPID, event->pid is an operation id and not
+		 * the actor process pid. Match union member size to *pid above,
+		 * so that comparison of pid values in should_merge() is still
+		 * valid. LSB set indicates a non pointer opid value.
+		 */
+#define FANOTIFY_FLAG_OPID 1UL
+		unsigned long opid;
+	};
 };
+
+static inline bool fanotify_event_has_pid(struct fanotify_event *event)
+{
+	return event->pid && !(event->opid & FANOTIFY_FLAG_OPID);
+}
+
+static inline unsigned long fanotify_cookie_opid(u32 cookie)
+{
+	return (((unsigned long)cookie) << 1) | FANOTIFY_FLAG_OPID;
+}
+
+static inline s32 fanotify_event_opid(struct fanotify_event *event)
+{
+	return (s32)(event->opid >> 1);
+}
 
 static inline bool fanotify_event_has_path(struct fanotify_event *event)
 {
@@ -142,4 +167,4 @@ static inline struct fanotify_event *FANOTIFY_E(struct fsnotify_event *fse)
 struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 					    struct inode *inode, u32 mask,
 					    const void *data, int data_type,
-					    __kernel_fsid_t *fsid);
+					    __kernel_fsid_t *fsid, u32 cookie);
