@@ -550,7 +550,10 @@ static int ovl_snapshot_fill_super(struct super_block *sb, void *data,
 	sb->s_op = &ovl_snapshot_super_operations;
 	sb->s_xattr = ovl_xattr_handlers;
 	sb->s_fs_info = ofs;
-	sb->s_flags |= MS_POSIXACL | MS_NOREMOTELOCK;
+	sb->s_flags |= SB_NOREMOTELOCK;
+#ifdef CONFIG_OVERLAY_FS_POSIX_ACL
+	sb->s_flags |= SB_POSIXACL;
+#endif
 
 	err = -ENOMEM;
 	root_dentry = d_make_root(ovl_new_inode(sb, S_IFDIR, 0));
