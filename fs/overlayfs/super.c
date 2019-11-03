@@ -1027,7 +1027,7 @@ static const struct xattr_handler ovl_other_xattr_handler = {
 };
 
 static const struct xattr_handler *ovl_xattr_handlers[] = {
-#ifdef CONFIG_FS_POSIX_ACL
+#ifdef CONFIG_OVERLAY_FS_POSIX_ACL
 	&ovl_posix_acl_access_xattr_handler,
 	&ovl_posix_acl_default_xattr_handler,
 #endif
@@ -1894,7 +1894,9 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_magic = OVERLAYFS_SUPER_MAGIC;
 	sb->s_xattr = ovl_xattr_handlers;
 	sb->s_fs_info = ofs;
+#ifdef CONFIG_OVERLAY_FS_POSIX_ACL
 	sb->s_flags |= SB_POSIXACL;
+#endif
 	sb->s_iflags |= SB_I_SKIP_SYNC;
 
 	err = -ENOMEM;

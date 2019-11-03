@@ -11,6 +11,17 @@ config OVERLAY_FS
 
 	  For more information see Documentation/filesystems/overlayfs.txt
 
+config OVERLAY_FS_POSIX_ACL
+	bool "Overlayfs:  POSIX Access Control Lists"
+	default y
+	depends on OVERLAY_FS
+	select FS_POSIX_ACL
+	help
+	  Posix Access Control Lists (ACLs) support permissions for users and
+	  groups beyond the owner/group/world scheme.
+
+	  If unsure, say Y.
+
 config OVERLAY_FS_REDIRECT_DIR
 	bool "Overlayfs: turn on redirect directory feature by default"
 	depends on OVERLAY_FS
