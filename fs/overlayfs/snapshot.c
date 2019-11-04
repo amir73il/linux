@@ -666,6 +666,8 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 
 	ofs->snap = snap;
 	atomic_set(&ofs->writable_map_count, 0);
+	/* No need to set/get any overlay xattr for snaphsot fs */
+	ofs->noxattr = true;
 
 	err = -ENOMEM;
 	oe = ovl_alloc_entry(0);
