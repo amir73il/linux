@@ -231,6 +231,9 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 			d->stop = true;
 			goto put_and_out;
 		}
+		if (OVL_FS(d->sb)->noxattr)
+			goto out;
+
 		err = ovl_check_metacopy_xattr(this);
 		if (err < 0)
 			goto out_err;
@@ -248,7 +251,7 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 
 		if (last_element)
 			d->is_dir = true;
-		if (d->last)
+		if (d->last || OVL_FS(d->sb)->noxattr)
 			goto out;
 
 		if (ovl_is_opaquedir(this)) {
@@ -370,9 +373,13 @@ invalid:
 static int ovl_check_origin(struct ovl_fs *ofs, struct dentry *upperdentry,
 			    struct ovl_path **stackp, unsigned int *ctrp)
 {
-	struct ovl_fh *fh = ovl_get_fh(upperdentry, OVL_XATTR_ORIGIN);
+	struct ovl_fh *fh;
 	int err;
 
+	if (ofs->noxattr)
+		return 0;
+
+	fh = ovl_get_fh(upperdentry, OVL_XATTR_ORIGIN);
 	if (IS_ERR_OR_NULL(fh))
 		return PTR_ERR(fh);
 
