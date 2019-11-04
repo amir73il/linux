@@ -954,6 +954,7 @@ struct inode *ovl_get_inode(struct super_block *sb,
 	bool bylower = ovl_hash_bylower(sb, upperdentry, lowerdentry,
 					oip->index);
 	int fsid = bylower ? lowerpath->layer->fsid : 0;
+	bool noxattr = OVL_FS(sb)->noxattr;
 	bool is_dir;
 	unsigned long ino = 0;
 	int err = oip->newinode ? -EEXIST : -ENOMEM;
@@ -1009,7 +1010,7 @@ struct inode *ovl_get_inode(struct super_block *sb,
 	ovl_fill_inode(inode, realinode->i_mode, realinode->i_rdev);
 	ovl_inode_init(inode, oip, ino, fsid);
 
-	if (upperdentry && ovl_is_impuredir(upperdentry))
+	if (!noxattr && upperdentry && ovl_is_impuredir(upperdentry))
 		ovl_set_flag(OVL_IMPURE, inode);
 
 	if (oip->index)
@@ -1021,7 +1022,7 @@ struct inode *ovl_get_inode(struct super_block *sb,
 		ovl_set_flag(OVL_CONST_INO, inode);
 
 	/* Check for non-merge dir that may have whiteouts */
-	if (is_dir) {
+	if (!noxattr && is_dir) {
 		if (((upperdentry && lowerdentry) || oip->numlower > 1) ||
 		    ovl_check_origin_xattr(upperdentry ?: lowerdentry)) {
 			ovl_set_flag(OVL_WHITEOUTS, inode);
