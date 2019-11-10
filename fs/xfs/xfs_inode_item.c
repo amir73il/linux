@@ -18,6 +18,7 @@
 #include "xfs_buf_item.h"
 #include "xfs_log.h"
 #include "xfs_error.h"
+#include "xfs_timestamp.h"
 
 #include <linux/iversion.h>
 
@@ -303,6 +304,7 @@ xfs_inode_to_log_dinode(
 {
 	struct xfs_icdinode	*from = &ip->i_d;
 	struct inode		*inode = VFS_I(ip);
+	struct xfs_sb		*sbp = &ip->i_mount->m_sb;
 
 	to->di_magic = XFS_DINODE_MAGIC;
 
@@ -315,12 +317,9 @@ xfs_inode_to_log_dinode(
 
 	memset(to->di_pad, 0, sizeof(to->di_pad));
 	memset(to->di_pad3, 0, sizeof(to->di_pad3));
-	to->di_atime.t_sec = inode->i_atime.tv_sec;
-	to->di_atime.t_nsec = inode->i_atime.tv_nsec;
-	to->di_mtime.t_sec = inode->i_mtime.tv_sec;
-	to->di_mtime.t_nsec = inode->i_mtime.tv_nsec;
-	to->di_ctime.t_sec = inode->i_ctime.tv_sec;
-	to->di_ctime.t_nsec = inode->i_ctime.tv_nsec;
+	xfs_timestamp_ic_encode(sbp, &inode->i_atime, &to->di_atime);
+	xfs_timestamp_ic_encode(sbp, &inode->i_mtime, &to->di_mtime);
+	xfs_timestamp_ic_encode(sbp, &inode->i_ctime, &to->di_ctime);
 	to->di_nlink = inode->i_nlink;
 	to->di_gen = inode->i_generation;
 	to->di_mode = inode->i_mode;
@@ -342,7 +341,7 @@ xfs_inode_to_log_dinode(
 	if (from->di_version == 3) {
 		to->di_changecount = inode_peek_iversion(inode);
 		to->di_crtime.t_sec = from->di_crtime.t_sec;
-		to->di_crtime.t_nsec = from->di_crtime.t_nsec;
+		to->di_crtime.t_nsec_epoch = from->di_crtime.t_nsec_epoch;
 		to->di_flags2 = from->di_flags2;
 		to->di_cowextsize = from->di_cowextsize;
 		to->di_ino = ip->i_ino;

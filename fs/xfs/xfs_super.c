@@ -35,6 +35,7 @@
 #include "xfs_refcount_item.h"
 #include "xfs_bmap_item.h"
 #include "xfs_reflink.h"
+#include "xfs_timestamp.h"
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -1438,8 +1439,8 @@ xfs_fc_fill_super(
 	sb->s_maxbytes = xfs_max_file_offset(sb->s_blocksize_bits);
 	sb->s_max_links = XFS_MAXLINK;
 	sb->s_time_gran = 1;
-	sb->s_time_min = S32_MIN;
-	sb->s_time_max = S32_MAX;
+	sb->s_time_min = XFS_TIMESTAMP_SEC_MIN;
+	sb->s_time_max = XFS_TIMESTAMP_SEC_MAX(&mp->m_sb);
 	sb->s_iflags |= SB_I_CGROUPWB;
 
 	set_posix_acl_flag(sb);

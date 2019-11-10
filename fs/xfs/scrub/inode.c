@@ -17,6 +17,7 @@
 #include "xfs_reflink.h"
 #include "xfs_rmap.h"
 #include "xfs_bmap_util.h"
+#include "xfs_timestamp.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
@@ -293,11 +294,9 @@ xchk_dinode(
 	}
 
 	/* di_[amc]time.nsec */
-	if (be32_to_cpu(dip->di_atime.t_nsec) >= NSEC_PER_SEC)
-		xchk_ino_set_corrupt(sc, ino);
-	if (be32_to_cpu(dip->di_mtime.t_nsec) >= NSEC_PER_SEC)
-		xchk_ino_set_corrupt(sc, ino);
-	if (be32_to_cpu(dip->di_ctime.t_nsec) >= NSEC_PER_SEC)
+	if (!xfs_timestamp_is_valid(&mp->m_sb, &dip->di_atime) ||
+	    !xfs_timestamp_is_valid(&mp->m_sb, &dip->di_mtime) ||
+	    !xfs_timestamp_is_valid(&mp->m_sb, &dip->di_ctime))
 		xchk_ino_set_corrupt(sc, ino);
 
 	/*
@@ -403,7 +402,7 @@ xchk_dinode(
 	}
 
 	if (dip->di_version >= 3) {
-		if (be32_to_cpu(dip->di_crtime.t_nsec) >= NSEC_PER_SEC)
+		if (!xfs_timestamp_is_valid(&mp->m_sb, &dip->di_crtime))
 			xchk_ino_set_corrupt(sc, ino);
 		xchk_inode_flags2(sc, dip, ino, mode, flags, flags2);
 		xchk_inode_cowextsize(sc, dip, ino, mode, flags,

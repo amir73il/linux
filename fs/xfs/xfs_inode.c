@@ -35,6 +35,7 @@
 #include "xfs_log.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_reflink.h"
+#include "xfs_timestamp.h"
 
 kmem_zone_t *xfs_inode_zone;
 
@@ -851,8 +852,7 @@ xfs_ialloc(
 		inode_set_iversion(inode, 1);
 		ip->i_d.di_flags2 = 0;
 		ip->i_d.di_cowextsize = 0;
-		ip->i_d.di_crtime.t_sec = (int32_t)tv.tv_sec;
-		ip->i_d.di_crtime.t_nsec = (int32_t)tv.tv_nsec;
+		xfs_timestamp_ic_encode(&mp->m_sb, &tv, &ip->i_d.di_crtime);
 	}
 
 

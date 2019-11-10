@@ -21,6 +21,7 @@
 #include "xfs_dir2.h"
 #include "xfs_iomap.h"
 #include "xfs_error.h"
+#include "xfs_timestamp.h"
 
 #include <linux/xattr.h>
 #include <linux/posix_acl.h>
@@ -556,8 +557,8 @@ xfs_vn_getattr(
 	if (ip->i_d.di_version == 3) {
 		if (request_mask & STATX_BTIME) {
 			stat->result_mask |= STATX_BTIME;
-			stat->btime.tv_sec = ip->i_d.di_crtime.t_sec;
-			stat->btime.tv_nsec = ip->i_d.di_crtime.t_nsec;
+			xfs_timestamp_ic_decode(&mp->m_sb, &stat->btime,
+						&ip->i_d.di_crtime);
 		}
 	}
 

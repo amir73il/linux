@@ -19,6 +19,7 @@
 #include "xfs_error.h"
 #include "xfs_icache.h"
 #include "xfs_health.h"
+#include "xfs_timestamp.h"
 
 /*
  * Bulk Stat
@@ -98,7 +99,7 @@ xfs_bulkstat_one_int(
 	buf->bs_ctime = inode->i_ctime.tv_sec;
 	buf->bs_ctime_nsec = inode->i_ctime.tv_nsec;
 	buf->bs_btime = dic->di_crtime.t_sec;
-	buf->bs_btime_nsec = dic->di_crtime.t_nsec;
+	buf->bs_btime_nsec = XFS_TIMESTAMP_NSEC(dic->di_crtime.t_nsec_epoch);
 	buf->bs_gen = inode->i_generation;
 	buf->bs_mode = inode->i_mode;
 
