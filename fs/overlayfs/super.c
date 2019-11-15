@@ -329,6 +329,17 @@ static inline int ovl_xino_def(void)
 	return ovl_xino_auto_def ? OVL_XINO_AUTO : OVL_XINO_OFF;
 }
 
+static const char * const ovl_nfs_export_mode_str[] = {
+	"off",
+	"on",
+	"nested",
+};
+
+static inline int ovl_nfs_export_mode_def(void)
+{
+	return ovl_nfs_export_def ? OVL_NFS_EXPORT_ON : OVL_NFS_EXPORT_OFF;
+}
+
 /**
  * ovl_show_options
  *
@@ -351,9 +362,9 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 		seq_printf(m, ",redirect_dir=%s", ofs->config.redirect_mode);
 	if (ofs->config.index != ovl_index_def)
 		seq_printf(m, ",index=%s", ofs->config.index ? "on" : "off");
-	if (ofs->config.nfs_export != ovl_nfs_export_def)
-		seq_printf(m, ",nfs_export=%s", ofs->config.nfs_export ?
-						"on" : "off");
+	if (ofs->config.nfs_export != ovl_nfs_export_mode_def())
+		seq_printf(m, ",nfs_export=%s",
+			   ovl_nfs_export_mode_str[ofs->config.nfs_export]);
 	if (ofs->config.xino != ovl_xino_def() && !ovl_same_fs(sb))
 		seq_printf(m, ",xino=%s", ovl_xino_str[ofs->config.xino]);
 	if (ofs->config.metacopy != ovl_metacopy_def)
@@ -403,6 +414,7 @@ enum {
 	OPT_INDEX_OFF,
 	OPT_NFS_EXPORT_ON,
 	OPT_NFS_EXPORT_OFF,
+	OPT_NFS_EXPORT_NESTED,
 	OPT_XINO_ON,
 	OPT_XINO_OFF,
 	OPT_XINO_AUTO,
@@ -421,6 +433,7 @@ static const match_table_t ovl_tokens = {
 	{OPT_INDEX_OFF,			"index=off"},
 	{OPT_NFS_EXPORT_ON,		"nfs_export=on"},
 	{OPT_NFS_EXPORT_OFF,		"nfs_export=off"},
+	{OPT_NFS_EXPORT_NESTED,		"nfs_export=nested"},
 	{OPT_XINO_ON,			"xino=on"},
 	{OPT_XINO_OFF,			"xino=off"},
 	{OPT_XINO_AUTO,			"xino=auto"},
@@ -539,12 +552,17 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 			break;
 
 		case OPT_NFS_EXPORT_ON:
-			config->nfs_export = true;
+			config->nfs_export = OVL_NFS_EXPORT_ON;
 			nfs_export_opt = true;
 			break;
 
 		case OPT_NFS_EXPORT_OFF:
-			config->nfs_export = false;
+			config->nfs_export = OVL_NFS_EXPORT_OFF;
+			nfs_export_opt = true;
+			break;
+
+		case OPT_NFS_EXPORT_NESTED:
+			config->nfs_export = OVL_NFS_EXPORT_NESTED;
 			nfs_export_opt = true;
 			break;
 
@@ -849,7 +867,7 @@ static int ovl_lower_dir(const char *name, struct path *path,
 	 * The inodes index feature and NFS export need to encode and decode
 	 * file handles, so they require that all layers support them.
 	 */
-	fh_type = ovl_can_decode_fh(path->dentry->d_sb);
+	fh_type = ovl_can_decode_real_fh(path->dentry->d_sb);
 	if ((ofs->config.nfs_export ||
 	     (ofs->config.index && ofs->config.upperdir)) && !fh_type) {
 		ofs->config.index = false;
@@ -1276,7 +1294,7 @@ static int ovl_make_workdir(struct super_block *sb, struct ovl_fs *ofs,
 	}
 
 	/* Check if upper/work fs supports file handles */
-	fh_type = ovl_can_decode_fh(ofs->workdir->d_sb);
+	fh_type = ovl_can_decode_real_fh(ofs->workdir->d_sb);
 	if (ofs->config.index && !fh_type) {
 		ofs->config.index = false;
 		pr_warn("upper fs does not support file handles, falling back to index=off.\n");
@@ -1344,6 +1362,7 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 {
 	struct vfsmount *mnt = ofs->upper_mnt;
 	int err;
+	bool nested = ofs->config.nfs_export == OVL_NFS_EXPORT_NESTED;
 
 	err = mnt_want_write(mnt);
 	if (err)
@@ -1351,7 +1370,7 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 
 	/* Verify lower root is upper root origin */
 	err = ovl_verify_origin(upperpath->dentry, oe->lowerstack[0].dentry,
-				true);
+				true, nested);
 	if (err) {
 		pr_err("failed to verify upper root origin\n");
 		goto out;
@@ -1374,7 +1393,8 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 		 */
 		if (ovl_check_origin_xattr(ofs->indexdir)) {
 			err = ovl_verify_set_fh(ofs->indexdir, OVL_XATTR_ORIGIN,
-						upperpath->dentry, true, false);
+						upperpath->dentry, true, false,
+						false);
 			if (err)
 				pr_err("failed to verify index dir 'origin' xattr\n");
 		}
@@ -1571,6 +1591,12 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 	if (ofs->xino_mode > 0) {
 		pr_info("\"xino\" feature enabled using %d upper inode bits.\n",
 			ofs->xino_mode);
+	}
+
+	if (ofs->config.nfs_export == OVL_NFS_EXPORT_NESTED &&
+	    (numlower > 1 || !ovl_is_overlay_fs(stack[0].mnt->mnt_sb))) {
+		pr_warn("nfs_export=nested requires single overlayfs lowerdir, falling back to nfs_export=off.\n");
+		ofs->config.nfs_export = false;
 	}
 
 	err = 0;
@@ -1790,7 +1816,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	ofs->share_whiteout = true;
 
 	ofs->config.index = ovl_index_def;
-	ofs->config.nfs_export = ovl_nfs_export_def;
+	ofs->config.nfs_export = ovl_nfs_export_mode_def();
 	ofs->config.xino = ovl_xino_def();
 	ofs->config.metacopy = ovl_metacopy_def;
 	err = ovl_parse_opt((char *) data, &ofs->config);
@@ -1926,7 +1952,7 @@ static struct dentry *ovl_mount(struct file_system_type *fs_type, int flags,
 	return mount_nodev(fs_type, flags, raw_data, ovl_fill_super);
 }
 
-static struct file_system_type ovl_fs_type = {
+struct file_system_type ovl_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "overlay",
 	.mount		= ovl_mount,
