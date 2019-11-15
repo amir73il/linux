@@ -198,11 +198,13 @@ struct dentry *ovl_dentry_lower(struct dentry *dentry)
 	return oe->numlower ? oe->lowerstack[0].dentry : NULL;
 }
 
-struct ovl_layer *ovl_layer_lower(struct dentry *dentry)
+/* Either top most lower layer or upper layer for pure upper */
+struct ovl_layer *ovl_dentry_layer(struct dentry *dentry)
 {
+	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 	struct ovl_entry *oe = dentry->d_fsdata;
 
-	return oe->numlower ? oe->lowerstack[0].layer : NULL;
+	return oe->numlower ? oe->lowerstack[0].layer : &ofs->layers[0];
 }
 
 /*

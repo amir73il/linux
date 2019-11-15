@@ -508,7 +508,7 @@ get:
 		ino = stat.ino;
 	} else if (xinobits && !OVL_TYPE_UPPER(type)) {
 		ino = ovl_remap_lower_ino(ino, xinobits,
-					  ovl_layer_lower(this)->fsid,
+					  ovl_dentry_layer(this)->fsid,
 					  p->name, p->len);
 	}
 
@@ -685,15 +685,14 @@ static int ovl_iterate_real(struct file *file, struct dir_context *ctx)
 	int err;
 	struct ovl_dir_file *od = file->private_data;
 	struct dentry *dir = file->f_path.dentry;
-	struct ovl_layer *lower_layer = ovl_layer_lower(dir);
 	struct ovl_readdir_translate rdt = {
 		.ctx.actor = ovl_fill_real,
 		.orig_ctx = ctx,
 		.xinobits = ovl_xino_bits(dir->d_sb),
 	};
 
-	if (rdt.xinobits && lower_layer)
-		rdt.fsid = lower_layer->fsid;
+	if (rdt.xinobits)
+		rdt.fsid = ovl_dentry_layer(dir)->fsid;
 
 	if (OVL_TYPE_MERGE(ovl_path_type(dir->d_parent))) {
 		struct kstat stat;

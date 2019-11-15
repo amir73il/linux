@@ -48,7 +48,7 @@ struct ovl_fs {
 	unsigned int numlower;
 	/* Number of unique lower sb that differ from upper sb */
 	unsigned int numlowerfs;
-	struct ovl_layer *lower_layers;
+	struct ovl_layer *layers;
 	struct ovl_sb *lower_fs;
 	/* workbasedir is the path at workdir= mount option */
 	struct dentry *workbasedir;

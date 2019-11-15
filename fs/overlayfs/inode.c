@@ -170,7 +170,7 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 	 */
 	if (!is_dir || samefs || ovl_xino_bits(dentry->d_sb)) {
 		if (!OVL_TYPE_UPPER(type)) {
-			lower_layer = ovl_layer_lower(dentry);
+			lower_layer = ovl_dentry_layer(dentry);
 		} else if (OVL_TYPE_ORIGIN(type)) {
 			struct kstat lowerstat;
 			u32 lowermask = STATX_INO | STATX_BLOCKS |
@@ -200,7 +200,7 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 			if (ovl_test_flag(OVL_INDEX, d_inode(dentry)) ||
 			    (!ovl_verify_lower(dentry->d_sb) &&
 			     (is_dir || lowerstat.nlink == 1))) {
-				lower_layer = ovl_layer_lower(dentry);
+				lower_layer = ovl_dentry_layer(dentry);
 				/*
 				 * Cannot use origin st_dev;st_ino because
 				 * origin inode content may differ from overlay
