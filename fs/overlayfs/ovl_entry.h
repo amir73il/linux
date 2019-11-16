@@ -75,6 +75,11 @@ struct ovl_fs {
 	unsigned int xino_bits;
 };
 
+static inline struct ovl_fs *OVL_FS(struct super_block *sb)
+{
+	return (struct ovl_fs *)sb->s_fs_info;
+}
+
 /* private information held for every overlayfs dentry */
 struct ovl_entry {
 	union {
