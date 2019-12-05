@@ -230,17 +230,28 @@ xfs_inode_from_disk(
 	to->di_flushiter = be16_to_cpu(from->di_flushiter);
 
 	/*
-	 * Time is signed, so need to convert to signed 32 bit before
-	 * storing in inode timestamp which may be 64 bit. Otherwise
-	 * a time before epoch is converted to a time long after epoch
-	 * on 64 bit systems.
+	 * The supported time range starts at INT_MIN, corresponding to
+	 * year 1902. With the traditional low 32 bits, this ends in
+	 * year 2038, the extra 8 bits extend it by another 255 half epochs
+	 * of 68 years each, up to year 19378.
 	 */
 	inode->i_atime.tv_sec = (int)be32_to_cpu(from->di_atime.t_sec);
+	if (from->di_version == 3 && from->di_atime_hi) {
+		inode->i_atime.tv_sec = be32_to_cpu(from->di_atime.t_sec) +
+					((u64)from->di_atime_hi << 31);
+		pr_debug("atime=%lld", inode->i_atime.tv_sec);
+	}
 	inode->i_atime.tv_nsec = (int)be32_to_cpu(from->di_atime.t_nsec);
 	inode->i_mtime.tv_sec = (int)be32_to_cpu(from->di_mtime.t_sec);
+	if (from->di_version == 3 && from->di_mtime_hi) {
+		inode->i_mtime.tv_sec = be32_to_cpu(from->di_mtime.t_sec) +
+					((u64)from->di_mtime_hi << 31);
+		pr_debug("mtime=%lld", inode->i_mtime.tv_sec);
+	}
 	inode->i_mtime.tv_nsec = (int)be32_to_cpu(from->di_mtime.t_nsec);
 	inode->i_ctime.tv_sec = (int)be32_to_cpu(from->di_ctime.t_sec);
 	inode->i_ctime.tv_nsec = (int)be32_to_cpu(from->di_ctime.t_nsec);
+
 	inode->i_generation = be32_to_cpu(from->di_gen);
 	inode->i_mode = be16_to_cpu(from->di_mode);
 
@@ -291,6 +302,7 @@ xfs_inode_to_disk(
 	to->di_mtime.t_nsec = cpu_to_be32(inode->i_mtime.tv_nsec);
 	to->di_ctime.t_sec = cpu_to_be32(inode->i_ctime.tv_sec);
 	to->di_ctime.t_nsec = cpu_to_be32(inode->i_ctime.tv_nsec);
+
 	to->di_nlink = cpu_to_be32(inode->i_nlink);
 	to->di_gen = cpu_to_be32(inode->i_generation);
 	to->di_mode = cpu_to_be16(inode->i_mode);
@@ -315,6 +327,22 @@ xfs_inode_to_disk(
 		to->di_ino = cpu_to_be64(ip->i_ino);
 		to->di_lsn = cpu_to_be64(lsn);
 		memset(to->di_pad2, 0, sizeof(to->di_pad2));
+		if (inode->i_atime.tv_sec > (s64)S32_MAX) {
+			to->di_atime.t_sec = cpu_to_be32(inode->i_atime.tv_sec & S32_MAX);
+			to->di_atime_hi = inode->i_atime.tv_sec >> 31;
+			pr_debug("atime: tv_sec=%lld, lo=%x, hi=%x",
+					inode->i_atime.tv_sec, to->di_atime.t_sec, to->di_atime_hi);
+		} else {
+			to->di_atime_hi = 0;
+		}
+		if (inode->i_mtime.tv_sec > (s64)S32_MAX) {
+			to->di_mtime.t_sec = cpu_to_be32(inode->i_mtime.tv_sec & S32_MAX);
+			to->di_mtime_hi = inode->i_mtime.tv_sec >> 31;
+			pr_debug("mtime: tv_sec=%lld lo=%x, hi=%x",
+					inode->i_mtime.tv_sec, to->di_mtime.t_sec, to->di_mtime_hi);
+		} else {
+			to->di_mtime_hi = 0;
+		}
 		uuid_copy(&to->di_uuid, &ip->i_mount->m_sb.sb_meta_uuid);
 		to->di_flushiter = 0;
 	} else {
@@ -367,6 +395,8 @@ xfs_log_dinode_to_disk(
 		to->di_ino = cpu_to_be64(from->di_ino);
 		to->di_lsn = cpu_to_be64(from->di_lsn);
 		memcpy(to->di_pad2, from->di_pad2, sizeof(to->di_pad2));
+		to->di_atime_hi = from->di_atime_hi;
+		to->di_mtime_hi = from->di_mtime_hi;
 		uuid_copy(&to->di_uuid, &from->di_uuid);
 		to->di_flushiter = 0;
 	} else {

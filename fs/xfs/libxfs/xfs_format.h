@@ -887,7 +887,9 @@ typedef struct xfs_dinode {
 	__be64		di_lsn;		/* flush sequence */
 	__be64		di_flags2;	/* more random flags */
 	__be32		di_cowextsize;	/* basic cow extent size for file */
-	__u8		di_pad2[12];	/* more padding for future expansion */
+	__u8		di_pad2[10];	/* more padding for future expansion */
+	__u8		di_atime_hi;	/* upper 8 bits of di_atime */
+	__u8		di_mtime_hi;	/* upper 8 bits of di_mtime */
 
 	/* fields only written to during inode creation */
 	xfs_timestamp_t	di_crtime;	/* time created */

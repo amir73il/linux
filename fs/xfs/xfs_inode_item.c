@@ -347,6 +347,22 @@ xfs_inode_to_log_dinode(
 		to->di_ino = ip->i_ino;
 		to->di_lsn = lsn;
 		memset(to->di_pad2, 0, sizeof(to->di_pad2));
+		if (inode->i_atime.tv_sec > (s64)S32_MAX) {
+			to->di_atime.t_sec = inode->i_atime.tv_sec & S32_MAX;
+			to->di_atime_hi = inode->i_atime.tv_sec >> 31;
+			pr_debug("atime: tv_sec=%lld, sec=%u, epoc=%u",
+					inode->i_atime.tv_sec, to->di_atime.t_sec, to->di_atime_hi);
+		} else {
+			to->di_atime_hi = 0;
+		}
+		if (inode->i_mtime.tv_sec > (s64)S32_MAX) {
+			to->di_mtime.t_sec = inode->i_mtime.tv_sec & S32_MAX;
+			to->di_mtime_hi = inode->i_mtime.tv_sec >> 31;
+			pr_debug("mtime: tv_sec=%lld, sec=%u, epoc=%u",
+					inode->i_mtime.tv_sec, to->di_mtime.t_sec, to->di_mtime_hi);
+		} else {
+			to->di_mtime_hi = 0;
+		}
 		uuid_copy(&to->di_uuid, &ip->i_mount->m_sb.sb_meta_uuid);
 		to->di_flushiter = 0;
 	} else {
