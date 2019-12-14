@@ -298,6 +298,22 @@ void take_dentry_name_snapshot(struct name_snapshot *name, struct dentry *dentry
 }
 EXPORT_SYMBOL(take_dentry_name_snapshot);
 
+// NOTE: release_dentry_name_snapshot() will be needed for both copies.
+void clone_name_snapshot(struct name_snapshot *to, const struct name_snapshot *from)
+{
+	to->name = from->name;
+	if (likely(to->name.name == from->inline_name)) {
+		memcpy(to->inline_name, from->inline_name,
+		       to->name.len + 1);
+		to->name.name = to->inline_name;
+	} else {
+		struct external_name *p;
+		p = container_of(to->name.name, struct external_name, name[0]);
+		atomic_inc(&p->u.count);
+	}
+}
+EXPORT_SYMBOL(clone_name_snapshot);
+
 void release_dentry_name_snapshot(struct name_snapshot *name)
 {
 	if (unlikely(name->name.name != name->inline_name)) {

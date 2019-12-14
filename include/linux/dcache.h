@@ -601,6 +601,7 @@ struct name_snapshot {
 	unsigned char inline_name[DNAME_INLINE_LEN];
 };
 void take_dentry_name_snapshot(struct name_snapshot *, struct dentry *);
+void clone_name_snapshot(struct name_snapshot *, const struct name_snapshot *);
 void release_dentry_name_snapshot(struct name_snapshot *);
 
 #endif	/* __LINUX_DCACHE_H */
