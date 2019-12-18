@@ -144,27 +144,47 @@ void __fsnotify_update_child_dentry_flags(struct inode *inode)
 
 /*
  * Notify this dentry's parent about a child's events with child name info
- * if parent is watching.
+ * if parent is watching or if inode/sb/mount are interested in events with
+ * parent and name info.
  *
- * Notify only the child without name info if parent is not watching.
+ * Notify only the child without name info if parent is not watching and
+ * inode/sb/mount are not interested in events with parent and name info.
  */
 int fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 		    int data_type)
 {
+	const struct path *path = fsnotify_data_path(data, data_type);
+	struct mount *mnt = path ? real_mount(path->mnt) : NULL;
 	struct inode *inode = d_inode(dentry);
+	bool parent_watched = dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED;
+	__u32 test_mask = mask & FS_EVENTS_POSS_TO_PARENT;
+	__u32 p_mask, marks_mask = 0;
 	struct dentry *parent = NULL;
 	struct inode *p_inode;
 	int ret = 0;
 
-	if (!(dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED))
+	/* Do inode/sb/mount care about parent and name info on non-dir? */
+	if (!(mask & FS_ISDIR)) {
+		marks_mask |= fsnotify_want_parent(inode->i_fsnotify_mask);
+		marks_mask |= fsnotify_want_parent(inode->i_sb->s_fsnotify_mask);
+		if (mnt)
+			marks_mask |= fsnotify_want_parent(mnt->mnt_fsnotify_mask);
+	}
+
+	if (!(marks_mask & test_mask) && !parent_watched)
 		goto notify_child;
 
+	/* Does parent inode care about events on children? */
 	parent = dget_parent(dentry);
 	p_inode = parent->d_inode;
+	p_mask = fsnotify_inode_watches_children(p_inode);
 
-	if (unlikely(!fsnotify_inode_watches_children(p_inode))) {
+	if (p_mask)
+		marks_mask |= p_mask;
+	else if (unlikely(parent_watched))
 		__fsnotify_update_child_dentry_flags(p_inode);
-	} else if (p_inode->i_fsnotify_mask & mask & ALL_FSNOTIFY_EVENTS) {
+
+	if ((marks_mask & test_mask) && p_inode != inode) {
 		struct name_snapshot name;
 
 		/* When notifying parent, child should be passed as data */
@@ -325,22 +345,18 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 	struct inode *dir = S_ISDIR(to_tell->i_mode) ? to_tell : NULL;
 	struct inode *child = NULL;
 	struct mount *mnt = NULL;
-	__u32 mnt_or_sb_mask = sb->s_fsnotify_mask;
-	__u32 marks_mask = to_tell->i_fsnotify_mask;
+	__u32 marks_mask = to_tell->i_fsnotify_mask | sb->s_fsnotify_mask;
 	int ret = 0;
 	__u32 test_mask = (mask & ALL_FSNOTIFY_EVENTS);
 
 	if (path) {
 		mnt = real_mount(path->mnt);
-		mnt_or_sb_mask |= mnt->mnt_fsnotify_mask;
+		marks_mask |= mnt->mnt_fsnotify_mask;
 	}
 
-	/* An event "on child" is not intended for a mount/sb mark */
 	if (mask & FS_EVENT_ON_CHILD) {
 		child = fsnotify_data_inode(data, data_type);
 		marks_mask |= child->i_fsnotify_mask;
-	} else {
-		marks_mask |= mnt_or_sb_mask;
 	}
 
 	/*
