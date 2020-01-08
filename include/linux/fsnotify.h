@@ -30,30 +30,20 @@ static inline int fsnotify_dirent(struct inode *dir, struct dentry *dentry,
 			&dentry->d_name, 0);
 }
 
-/* Notify this dentry's parent about a child's events. */
-static inline int fsnotify_parent(const struct path *path,
-				  struct dentry *dentry, __u32 mask)
-{
-	if (!dentry)
-		dentry = path->dentry;
-
-	return __fsnotify_parent(path, dentry, mask);
-}
-
 /*
  * Simple wrappers to consolidate calls fsnotify_parent()/fsnotify() when
  * an event is on a path/dentry.
  */
 static inline void fsnotify_dentry(struct dentry *dentry, __u32 mask)
 {
-	fsnotify_parent(NULL, dentry, mask);
+	fsnotify_parent(mask, dentry, FSNOTIFY_EVENT_DENTRY);
 	fsnotify(d_inode(dentry), mask, dentry, FSNOTIFY_EVENT_DENTRY, NULL, 0);
 }
 
 static inline int fsnotify_path(struct inode *inode, const struct path *path,
 				__u32 mask)
 {
-	int ret = fsnotify_parent(path, NULL, mask);
+	int ret = fsnotify_parent(mask, path, FSNOTIFY_EVENT_PATH);
 
 	if (ret)
 		return ret;
