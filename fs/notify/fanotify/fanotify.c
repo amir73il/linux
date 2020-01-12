@@ -265,17 +265,21 @@ out_err:
  * FS_CREATE reports the modified dir inode and not the created inode.
  */
 static struct inode *fanotify_fid_inode(struct inode *to_tell, u32 event_mask,
-					const void *data, int data_type)
+					const void *data, int data_type,
+					struct dentry **pdentry)
 {
 	if (event_mask & ALL_FSNOTIFY_DIRENT_EVENTS)
 		return to_tell;
 	else if (data_type == FSNOTIFY_EVENT_INODE)
 		return (struct inode *)data;
 	else if (data_type == FSNOTIFY_EVENT_DENTRY)
-		return d_inode(data);
+		*pdentry = (struct dentry *)data;
 	else if (data_type == FSNOTIFY_EVENT_PATH)
-		return d_inode(((struct path *)data)->dentry);
-	return NULL;
+		*pdentry = ((struct path *)data)->dentry;
+	else
+		return NULL;
+
+	return d_inode(*pdentry);
 }
 
 struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
@@ -285,7 +289,9 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 {
 	struct fanotify_event *event = NULL;
 	gfp_t gfp = GFP_KERNEL_ACCOUNT;
-	struct inode *id = fanotify_fid_inode(inode, mask, data, data_type);
+	struct dentry *dentry = NULL;
+	struct inode *id = fanotify_fid_inode(inode, mask, data, data_type,
+					      &dentry);
 
 	/*
 	 * For queues with unlimited length lost events are not expected and
@@ -316,7 +322,12 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 	if (!event)
 		goto out;
 init: __maybe_unused
-	fsnotify_init_event(&event->fse, inode);
+	/*
+	 * Use the dentry instead of inode as tag for event queue, so event
+	 * reported on parent is merged with event reported on child when both
+	 * directory and child watches exist.
+	 */
+	fsnotify_init_event(&event->fse, (void *)dentry ?: inode);
 	event->mask = mask;
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_TID))
 		event->pid = get_pid(task_pid(current));
