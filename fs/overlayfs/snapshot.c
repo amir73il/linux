@@ -75,7 +75,8 @@ static struct dentry *ovl_snapshot_lookup_dir(struct super_block *snapsb,
 		return ERR_PTR(-ENOENT);
 
 	/* Find a snapshot overlay dentry whose lower is our upper */
-	return ovl_lookup_real(snapsb, upper, &OVL_FS(snapsb)->layers[1]);
+	return ovl_lookup_real(snapsb, upper, &OVL_FS(snapsb)->layers[1],
+			       false);
 }
 
 /*
