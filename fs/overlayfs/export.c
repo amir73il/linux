@@ -363,7 +363,8 @@ static struct dentry *ovl_dentry_real_at(struct dentry *dentry, int idx)
  */
 static struct dentry *ovl_lookup_real_one(struct dentry *connected,
 					  struct dentry *real,
-					  const struct ovl_layer *layer)
+					  const struct ovl_layer *layer,
+					  bool warn)
 {
 	struct inode *dir = d_inode(connected);
 	struct dentry *this, *parent = NULL;
@@ -411,15 +412,13 @@ out:
 	return this;
 
 fail:
-	pr_warn_ratelimited("failed to lookup one by real (%pd2, layer=%d, connected=%pd2, err=%i)\n",
-			    real, layer->idx, connected, err);
+	if (warn) {
+		pr_warn_ratelimited("failed to lookup one by real (%pd2, layer=%d, connected=%pd2, err=%i)\n",
+				    real, layer->idx, connected, err);
+	}
 	this = ERR_PTR(err);
 	goto out;
 }
-
-static struct dentry *ovl_lookup_real(struct super_block *sb,
-				      struct dentry *real,
-				      const struct ovl_layer *layer);
 
 /*
  * Lookup an indexed or hashed overlay dentry by real inode.
@@ -479,7 +478,11 @@ static struct dentry *ovl_lookup_real_inode(struct super_block *sb,
 
 	if (ovl_dentry_real_at(this, layer->idx) != real) {
 		dput(this);
-		this = ERR_PTR(-EIO);
+		/* This is expected if lower was renamed */
+		if (ovl_is_snapshot(OVL_FS(sb)))
+			this = ERR_PTR(-ESTALE);
+		else
+			this = ERR_PTR(-EIO);
 	}
 
 	return this;
@@ -542,10 +545,10 @@ static struct dentry *ovl_lookup_real_ancestor(struct super_block *sb,
  * If @real is on upper layer, we lookup a child overlay dentry with the same
  * path the real dentry. Otherwise, we need to consult index for lookup.
  */
-static struct dentry *ovl_lookup_real(struct super_block *sb,
-				      struct dentry *real,
-				      const struct ovl_layer *layer)
+struct dentry *ovl_lookup_real(struct super_block *sb, struct dentry *real,
+			       const struct ovl_layer *layer)
 {
+	bool warn = !ovl_is_snapshot(OVL_FS(sb));
 	struct dentry *connected;
 	int err = 0;
 
@@ -600,7 +603,7 @@ static struct dentry *ovl_lookup_real(struct super_block *sb,
 		}
 
 		if (!err) {
-			this = ovl_lookup_real_one(connected, next, layer);
+			this = ovl_lookup_real_one(connected, next, layer, warn);
 			if (IS_ERR(this))
 				err = PTR_ERR(this);
 
@@ -635,8 +638,10 @@ static struct dentry *ovl_lookup_real(struct super_block *sb,
 	return connected;
 
 fail:
-	pr_warn_ratelimited("failed to lookup by real (%pd2, layer=%d, connected=%pd2, err=%i)\n",
-			    real, layer->idx, connected, err);
+	if (warn) {
+		pr_warn_ratelimited("failed to lookup by real (%pd2, layer=%d, connected=%pd2, err=%i)\n",
+				    real, layer->idx, connected, err);
+	}
 	dput(connected);
 	return ERR_PTR(err);
 }
