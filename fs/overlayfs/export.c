@@ -489,6 +489,12 @@ static struct dentry *ovl_lookup_real_inode(struct super_block *sb,
 	if (ovl_dentry_real_at(this, layer->idx) != real) {
 		dput(this);
 		this = ERR_PTR(-EIO);
+		/*
+		 * This is expected from overlay snapshot mounts when lower
+		 * dir is renamed after it was copied up.
+		 */
+		if (ofs->config.redirect_origin)
+			this = ERR_PTR(-ESTALE);
 	}
 
 	return this;
