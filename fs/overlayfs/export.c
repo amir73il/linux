@@ -427,10 +427,6 @@ fail:
 	goto out;
 }
 
-static struct dentry *ovl_lookup_real(struct super_block *sb,
-				      struct dentry *real,
-				      const struct ovl_layer *layer);
-
 /*
  * Lookup an indexed or hashed overlay dentry by real inode.
  */
@@ -552,9 +548,8 @@ static struct dentry *ovl_lookup_real_ancestor(struct super_block *sb,
  * If @real is on upper layer, we lookup a child overlay dentry with the same
  * path the real dentry. Otherwise, we need to consult index for lookup.
  */
-static struct dentry *ovl_lookup_real(struct super_block *sb,
-				      struct dentry *real,
-				      const struct ovl_layer *layer)
+struct dentry *ovl_lookup_real(struct super_block *sb, struct dentry *real,
+			       const struct ovl_layer *layer)
 {
 	struct dentry *connected;
 	int err = 0;
