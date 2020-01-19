@@ -14,9 +14,209 @@
 #include <linux/fs.h>
 #include <linux/module.h>
 #include <linux/mount.h>
+#include <linux/namei.h>
 #include <linux/parser.h>
 #include <linux/seq_file.h>
 #include "overlayfs.h"
+
+
+enum ovl_snapshot_flag {
+	/* No need to copy object to snapshot */
+	OVL_SNAP_NOCOW,
+	/* No need to copy children to snapshot */
+	OVL_SNAP_CHILDREN_NOCOW,
+};
+
+static bool ovl_snapshot_test_flag(int nr, struct dentry *dentry)
+{
+	return test_bit(nr, &OVL_E(dentry)->snapflags);
+}
+
+static void ovl_snapshot_set_flag(int nr, struct dentry *dentry)
+{
+	set_bit(nr, &OVL_E(dentry)->snapflags);
+}
+
+static struct vfsmount *ovl_snapshot_mntget(struct dentry *dentry)
+{
+	return mntget(OVL_FS(dentry->d_sb)->snap_mnt);
+}
+
+static bool ovl_snapshot_need_cow(struct dentry *dentry)
+{
+	return !ovl_snapshot_test_flag(OVL_SNAP_NOCOW, dentry);
+}
+
+static bool ovl_snapshot_children_need_cow(struct dentry *dentry)
+{
+	return !ovl_snapshot_test_flag(OVL_SNAP_CHILDREN_NOCOW, dentry);
+}
+
+static void ovl_snapshot_set_nocow(struct dentry *dentry)
+{
+	ovl_snapshot_set_flag(OVL_SNAP_NOCOW, dentry);
+}
+
+static void ovl_snapshot_set_children_nocow(struct dentry *dentry)
+{
+	ovl_snapshot_set_flag(OVL_SNAP_CHILDREN_NOCOW, dentry);
+}
+
+/* Lookup snapshot overlay directory from a snapshot fs directory */
+static struct dentry *ovl_snapshot_lookup_dir(struct super_block *snapsb,
+					      struct dentry *dentry)
+{
+	struct dentry *upper = ovl_dentry_upper(dentry);
+
+	if (WARN_ON(!upper))
+		return ERR_PTR(-ENOENT);
+
+	/* Find a snapshot overlay dentry whose lower is our upper */
+	return ovl_lookup_real(snapsb, upper, &OVL_FS(snapsb)->layers[1]);
+}
+
+/*
+ * Check if dentry or its children need to be copied to snapshot and cache
+ * the result in dentry flags.
+ *
+ * We lookup directory in snapshot by index and non-directory and negative
+ * dentries by name relative to snapshot's parent directory.
+ *
+ * Returns the found snapshot overlay dentry.
+ * Returns error is failed to lookup snapshot overlay dentry.
+ * Returns NULL if dentry doesn't need to be copied to snapshot.
+ */
+static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
+					     struct dentry *dentry)
+{
+	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
+	bool is_dir = d_is_dir(dentry);
+	struct dentry *dir = is_dir ? dentry : parent;
+	const struct qstr *name = &dentry->d_name;
+	struct dentry *snapdir = NULL;
+	struct dentry *snap = NULL;
+	const struct cred *old_cred = NULL;
+	int err;
+
+	if (!snapmnt || !ovl_snapshot_need_cow(dentry))
+		goto out;
+
+	err = ovl_inode_lock_interruptible(d_inode(dir));
+	if (err) {
+		snap = ERR_PTR(err);
+		goto out;
+	}
+
+	if (!ovl_snapshot_need_cow(dentry))
+		goto out_unlock;
+
+	if (!is_dir && !ovl_snapshot_children_need_cow(parent)) {
+		ovl_snapshot_set_nocow(dentry);
+		goto out_unlock;
+	}
+
+	old_cred = ovl_override_creds(dentry->d_sb);
+	/* Find dir or non-dir parent by index in snapshot */
+	snapdir = ovl_snapshot_lookup_dir(snapmnt->mnt_sb, dir);
+	if (IS_ERR(snapdir)) {
+		err = PTR_ERR(snapdir);
+		snap = snapdir;
+		snapdir = NULL;
+		/*
+		 * ENOENT - maybe dir is new and whiteout in snapshot.
+		 * ESTALE - maybe dir is new and an old object in snapshot.
+		 * In either case, no need to copy children to snapshot.
+		 */
+		if (err == -ENOENT || err == -ESTALE) {
+			ovl_snapshot_set_nocow(dentry);
+			ovl_snapshot_set_children_nocow(dir);
+			snap = NULL;
+		}
+		goto out_unlock;
+	}
+
+	/*
+	 * Negative dentries are not indexed and non-directory dentries can
+	 * have several aliases (i.e. copied up hardlinks), so we need to look
+	 * them up by name after looking up parent by index.
+	 */
+	if (is_dir) {
+		snap = dget(snapdir);
+	} else {
+		snap = lookup_one_len_unlocked(name->name, snapdir, name->len);
+		if (IS_ERR(snap))
+			goto out_unlock;
+	}
+
+	/*
+	 * Set NOCOW if no need to copy object to snapshot because object is
+	 * whiteout in snapshot or already copied up to snapshot.
+	 */
+	if (ovl_dentry_is_whiteout(snap) ||
+	    (d_inode(snap) && ovl_already_copied_up(snap, O_WRONLY))) {
+		ovl_snapshot_set_nocow(dentry);
+		dput(snap);
+		snap = NULL;
+	}
+
+out_unlock:
+	dput(snapdir);
+	if (old_cred)
+		revert_creds(old_cred);
+	ovl_inode_unlock(d_inode(dir));
+out:
+	mntput(snapmnt);
+	return snap;
+}
+
+/*
+ * Lookup the underlying dentry in the same path as the looked up snapshot fs
+ * dentry and find an overlay snapshot dentry which refers back to the
+ * underlying dentry. Check if dentry has already been copied up or doesn't
+ * need to be copied to snapshot and cache the result in dentry flags.
+ */
+static struct dentry *ovl_snapshot_lookup(struct inode *dir,
+					  struct dentry *dentry,
+					  unsigned int flags)
+{
+	struct dentry *parent = dentry->d_parent;
+	struct dentry *ret;
+	struct dentry *snap;
+
+	if (WARN_ON(!ovl_dentry_upper(parent)))
+		return ERR_PTR(-ENOENT);
+
+	ret = ovl_lookup(dir, dentry, flags);
+	if (IS_ERR(ret))
+		return ret;
+	else if (ret)
+		dentry = ret;
+
+	/* Best effort - will check again before actual write */
+	snap = ovl_snapshot_check_cow(parent, dentry);
+	if (!IS_ERR(snap))
+		dput(snap);
+
+	return ret;
+}
+
+const struct inode_operations ovl_snapshot_inode_operations = {
+	.lookup		= ovl_snapshot_lookup,
+	.mkdir		= ovl_mkdir,
+	.symlink	= ovl_symlink,
+	.unlink		= ovl_unlink,
+	.rmdir		= ovl_rmdir,
+	.rename		= ovl_rename,
+	.link		= ovl_link,
+	.setattr	= ovl_setattr,
+	.create		= ovl_create,
+	.mknod		= ovl_mknod,
+	.permission	= ovl_permission,
+	.getattr	= ovl_getattr,
+	.listxattr	= ovl_listxattr,
+	.get_acl	= ovl_get_acl,
+	.update_time	= ovl_update_time,
+};
 
 static const struct dentry_operations ovl_snapshot_dentry_operations = {
 	.d_release = ovl_dentry_release,
@@ -256,6 +456,7 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 
 	mntput(upperpath.mnt);
 
+	ovl_snapshot_set_nocow(root_dentry);
 	sb->s_root = root_dentry;
 
 	return 0;

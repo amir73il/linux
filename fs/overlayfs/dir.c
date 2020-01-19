@@ -650,19 +650,19 @@ out:
 	return err;
 }
 
-static int ovl_create(struct inode *dir, struct dentry *dentry, umode_t mode,
-		      bool excl)
+int ovl_create(struct inode *dir, struct dentry *dentry, umode_t mode,
+	       bool excl)
 {
 	return ovl_create_object(dentry, (mode & 07777) | S_IFREG, 0, NULL);
 }
 
-static int ovl_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+int ovl_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	return ovl_create_object(dentry, (mode & 07777) | S_IFDIR, 0, NULL);
 }
 
-static int ovl_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
-		     dev_t rdev)
+int ovl_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
+	      dev_t rdev)
 {
 	/* Don't allow creation of "whiteout" on overlay */
 	if (S_ISCHR(mode) && rdev == WHITEOUT_DEV)
@@ -671,8 +671,7 @@ static int ovl_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
 	return ovl_create_object(dentry, mode, rdev, NULL);
 }
 
-static int ovl_symlink(struct inode *dir, struct dentry *dentry,
-		       const char *link)
+int ovl_symlink(struct inode *dir, struct dentry *dentry, const char *link)
 {
 	return ovl_create_object(dentry, S_IFLNK, 0, link);
 }
@@ -689,8 +688,7 @@ static int ovl_set_link_redirect(struct dentry *dentry)
 	return err;
 }
 
-static int ovl_link(struct dentry *old, struct inode *newdir,
-		    struct dentry *new)
+int ovl_link(struct dentry *old, struct inode *newdir, struct dentry *new)
 {
 	int err;
 	struct inode *inode;
@@ -929,12 +927,12 @@ out:
 	return err;
 }
 
-static int ovl_unlink(struct inode *dir, struct dentry *dentry)
+int ovl_unlink(struct inode *dir, struct dentry *dentry)
 {
 	return ovl_do_remove(dentry, false);
 }
 
-static int ovl_rmdir(struct inode *dir, struct dentry *dentry)
+int ovl_rmdir(struct inode *dir, struct dentry *dentry)
 {
 	return ovl_do_remove(dentry, true);
 }
@@ -1069,9 +1067,8 @@ static int ovl_set_redirect(struct dentry *dentry, bool samedir)
 	return err;
 }
 
-static int ovl_rename(struct inode *olddir, struct dentry *old,
-		      struct inode *newdir, struct dentry *new,
-		      unsigned int flags)
+int ovl_rename(struct inode *olddir, struct dentry *old, struct inode *newdir,
+	       struct dentry *new, unsigned int flags)
 {
 	int err;
 	struct dentry *old_upperdir;
