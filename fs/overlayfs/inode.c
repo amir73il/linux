@@ -660,7 +660,10 @@ static void ovl_fill_inode(struct inode *inode, umode_t mode, dev_t rdev)
 		break;
 
 	case S_IFDIR:
-		inode->i_op = &ovl_dir_inode_operations;
+		if (ovl_is_snapshot_fs_type(inode->i_sb))
+			inode->i_op = &ovl_snapshot_inode_operations;
+		else
+			inode->i_op = &ovl_dir_inode_operations;
 		inode->i_fop = &ovl_dir_operations;
 		break;
 

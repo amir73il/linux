@@ -98,6 +98,12 @@ struct ovl_entry {
 	union {
 		struct {
 			unsigned long flags;
+			/*
+			 * For snapshot fs dentries. We could squash this field
+			 * with flags above, but so far it fits inside union,
+			 * so easier to keep them apart.
+			 */
+			unsigned long snapflags;
 		};
 		struct rcu_head rcu;
 	};

@@ -477,6 +477,17 @@ struct dentry *ovl_create_real(struct inode *dir, struct dentry *newdentry,
 int ovl_cleanup(struct inode *dir, struct dentry *dentry);
 struct dentry *ovl_lookup_temp(struct dentry *workdir);
 struct dentry *ovl_create_temp(struct dentry *workdir, struct ovl_cattr *attr);
+int ovl_create(struct inode *dir, struct dentry *dentry, umode_t mode,
+	       bool excl);
+int ovl_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
+int ovl_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
+	      dev_t rdev);
+int ovl_symlink(struct inode *dir, struct dentry *dentry, const char *link);
+int ovl_link(struct dentry *old, struct inode *newdir, struct dentry *new);
+int ovl_unlink(struct inode *dir, struct dentry *dentry);
+int ovl_rmdir(struct inode *dir, struct dentry *dentry);
+int ovl_rename(struct inode *olddir, struct dentry *old, struct inode *newdir,
+	       struct dentry *new, unsigned int flags);
 
 /* file.c */
 extern const struct file_operations ovl_file_operations;
@@ -496,6 +507,10 @@ int ovl_set_origin(struct dentry *dentry, struct dentry *lower,
 
 /* export.c */
 extern const struct export_operations ovl_export_operations;
+
+struct dentry *ovl_lookup_real(struct super_block *sb, struct dentry *real,
+			       const struct ovl_layer *layer);
+
 
 /* super.c */
 extern const struct xattr_handler *ovl_xattr_handlers[];
@@ -526,6 +541,8 @@ struct dentry *ovl_get_root(struct super_block *sb, struct dentry *upperdentry,
 #ifdef CONFIG_OVERLAY_FS_SNAPSHOT
 /* snapshot.c */
 extern struct file_system_type ovl_snapshot_fs_type;
+extern const struct inode_operations ovl_snapshot_inode_operations;
+
 int ovl_snapshot_fs_register(void);
 void ovl_snapshot_fs_unregister(void);
 
@@ -535,6 +552,8 @@ static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)
 }
 
 #else
+#define ovl_snapshot_inode_operations ovl_dir_inode_operations
+
 static inline int ovl_snapshot_fs_register(void) { return 0; }
 static inline void ovl_snapshot_fs_unregister(void) { }
 
