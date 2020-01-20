@@ -1009,13 +1009,19 @@ static int ovl_snapshot_copy_up_meta(struct dentry *dentry, bool new_is_dir)
 int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 {
 	unsigned long snapid;
-	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry, &snapid);
+	struct vfsmount *snapmnt;
 	int err = 0;
 
+	/* Prevent copy to snapshot if fs is frozen */
+	sb_start_intwrite(dentry->d_sb);
+
+	snapmnt = ovl_snapshot_mntget(dentry, &snapid);
 	if (snapmnt && ovl_open_flags_need_copy_up(flags) &&
 	    !special_file(d_inode(dentry)->i_mode) &&
 	    ovl_snapshot_need_cow(dentry, snapid))
 		err = ovl_snapshot_copy_up_meta(dentry, false);
+
+	sb_end_intwrite(dentry->d_sb);
 
 	mntput(snapmnt);
 	return err;
@@ -1024,9 +1030,13 @@ int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 int ovl_snapshot_pre_modify(struct dentry *dentry, bool new_is_dir)
 {
 	unsigned long snapid;
-	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry, &snapid);
+	struct vfsmount *snapmnt;
 	int err = 0;
 
+	/* Prevent copy to snapshot if fs is frozen */
+	sb_start_intwrite(dentry->d_sb);
+
+	snapmnt = ovl_snapshot_mntget(dentry, &snapid);
 	if (snapmnt && ovl_snapshot_need_cow(dentry, snapid)) {
 		/* Negative dentry may need to be explicitly whited out */
 		if (d_is_negative(dentry))
@@ -1034,6 +1044,8 @@ int ovl_snapshot_pre_modify(struct dentry *dentry, bool new_is_dir)
 		else
 			err = ovl_snapshot_copy_up_meta(dentry, new_is_dir);
 	}
+
+	sb_end_intwrite(dentry->d_sb);
 
 	mntput(snapmnt);
 	return err;
