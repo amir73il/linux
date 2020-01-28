@@ -216,6 +216,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 	struct vfsmount **mounts;
 	unsigned i;
 
+	mntput(ofs->snap_mnt);
 	iput(ofs->workbasedir_trap);
 	iput(ofs->indexdir_trap);
 	iput(ofs->workdir_trap);
@@ -240,6 +241,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 		free_anon_bdev(ofs->fs[i].pseudo_dev);
 	kfree(ofs->fs);
 
+	kfree(ofs->config.snapshot);
 	kfree(ofs->config.lowerdir);
 	kfree(ofs->config.upperdir);
 	kfree(ofs->config.workdir);
@@ -757,7 +759,7 @@ out_err:
 	goto out_unlock;
 }
 
-static void ovl_unescape(char *s)
+void ovl_unescape(char *s)
 {
 	char *d = s;
 
@@ -770,7 +772,7 @@ static void ovl_unescape(char *s)
 	}
 }
 
-static int ovl_mount_dir_noesc(const char *name, struct path *path)
+int ovl_mount_dir_noesc(const char *name, struct path *path)
 {
 	int err = -EINVAL;
 
