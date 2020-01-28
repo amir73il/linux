@@ -211,6 +211,23 @@ void ovl_destroy_inode(struct inode *inode)
 		iput(oi->lowerdata);
 }
 
+void ovl_free_config(struct ovl_config *config)
+{
+	kfree(config->snapshot);
+	kfree(config->lowerdir);
+	kfree(config->upperdir);
+	kfree(config->workdir);
+	kfree(config->redirect_mode);
+}
+
+void ovl_snap_free(struct ovl_snap *snap)
+{
+	if (snap) {
+		mntput(snap->mnt);
+		kfree(snap);
+	}
+}
+
 void ovl_free_fs(struct ovl_fs *ofs)
 {
 	unsigned i;
@@ -228,10 +245,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 	if (ofs->upperdir_locked)
 		ovl_inuse_unlock(ofs->upper_mnt->mnt_root);
 	mntput(ofs->upper_mnt);
-	if (ofs->snap) {
-		mntput(ofs->snap->mnt);
-		kfree(ofs->snap);
-	}
+	ovl_snap_free(ofs->snap);
 	for (i = 1; i < ofs->numlayer; i++) {
 		iput(ofs->layers[i].trap);
 		mntput(ofs->layers[i].mnt);
@@ -241,11 +255,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 		free_anon_bdev(ofs->fs[i].pseudo_dev);
 	kfree(ofs->fs);
 
-	kfree(ofs->config.snapshot);
-	kfree(ofs->config.lowerdir);
-	kfree(ofs->config.upperdir);
-	kfree(ofs->config.workdir);
-	kfree(ofs->config.redirect_mode);
+	ovl_free_config(&ofs->config);
 	if (ofs->creator_cred)
 		put_cred(ofs->creator_cred);
 	kfree(ofs);
