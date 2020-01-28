@@ -89,6 +89,8 @@ struct ovl_fs {
 	atomic_long_t last_ino;
 	/* Whiteout dentry cache */
 	struct dentry *whiteout;
+	/* Number of files writably mapped upper fs files */
+	atomic_t writable_map_count;
 };
 
 static inline struct ovl_fs *OVL_FS(struct super_block *sb)

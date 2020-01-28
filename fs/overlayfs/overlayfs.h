@@ -595,6 +595,43 @@ static inline void ovl_snapshot_drop_write(struct dentry *dentry)
 	ovl_snapshot_post_modify(dentry);
 }
 
+#define FMODE_WRITE_SHARED	((__force fmode_t)0x40000000)
+
+int ovl_snapshot_get_write_shared_access(struct file *file);
+void ovl_snapshot_put_write_shared_access(struct file *file);
+
+static inline int ovl_snapshot_get_write_access(struct file *file)
+{
+	int err = 0;
+
+	if (!ovl_is_snapshot_fs_type(file_inode(file)->i_sb) ||
+	    (file->f_mode & FMODE_WRITE_SHARED))
+		return 0;
+
+	spin_lock(&file->f_lock);
+	if (!(file->f_mode & FMODE_WRITE_SHARED))
+		err = ovl_snapshot_get_write_shared_access(file);
+	if (!err)
+		file->f_mode |= FMODE_WRITE_SHARED;
+	spin_unlock(&file->f_lock);
+
+	return err;
+}
+
+static inline void ovl_snapshot_put_write_access(struct file *file)
+{
+	struct dentry *dentry = file->f_path.dentry;
+
+	if (!ovl_is_snapshot_fs_type(dentry->d_sb) ||
+	    !(file->f_mode & FMODE_WRITE_SHARED))
+		return;
+
+	spin_lock(&file->f_lock);
+	if (file->f_mode & FMODE_WRITE_SHARED)
+		ovl_snapshot_put_write_shared_access(file);
+	file->f_mode &= ~FMODE_WRITE_SHARED;
+	spin_unlock(&file->f_lock);
+}
 #else
 #define ovl_snapshot_inode_operations ovl_dir_inode_operations
 
@@ -606,6 +643,11 @@ static inline int ovl_snapshot_want_write(struct dentry *dentry,
 	return 0;
 }
 static inline void ovl_snapshot_drop_write(struct dentry *dentry) { }
+static inline int ovl_snapshot_get_write_access(struct file *file)
+{
+	return 0;
+}
+static inline void ovl_snapshot_put_write_access(struct file *file) { }
 
 static inline bool ovl_is_snapshot_fs_type(struct super_block *sb)
 {
