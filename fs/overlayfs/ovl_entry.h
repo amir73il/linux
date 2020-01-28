@@ -6,6 +6,7 @@
  */
 
 struct ovl_config {
+	char *snapshot;
 	char *lowerdir;
 	char *upperdir;
 	char *workdir;
@@ -48,6 +49,7 @@ struct ovl_path {
 /* private information held for overlayfs's superblock */
 struct ovl_fs {
 	struct vfsmount *upper_mnt;
+	struct vfsmount *snap_mnt;
 	unsigned int numlayer;
 	/* Number of unique fs among layers including upper fs */
 	unsigned int numfs;
@@ -85,7 +87,7 @@ struct ovl_fs {
 
 static inline struct ovl_fs *OVL_FS(struct super_block *sb)
 {
-	return (struct ovl_fs *)sb->s_fs_info;
+	return (struct ovl_fs *) sb->s_fs_info;
 }
 
 /* private information held for every overlayfs dentry */
