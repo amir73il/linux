@@ -25,7 +25,12 @@ static const struct dentry_operations ovl_snapshot_dentry_operations = {
 
 static int ovl_snapshot_show_options(struct seq_file *m, struct dentry *dentry)
 {
-	seq_puts(m, ",nosnapshot");
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+
+	if (ofs->config.snapshot)
+		seq_show_option(m, "snapshot", ofs->config.snapshot);
+	else
+		seq_puts(m, ",nosnapshot");
 
 	return 0;
 }
@@ -48,11 +53,13 @@ static const struct super_operations ovl_snapshot_super_operations = {
 };
 
 enum {
+	OPT_SNAPSHOT,
 	OPT_NOSNAPSHOT,
 	OPT_ERR,
 };
 
 static const match_table_t ovl_snapshot_tokens = {
+	{OPT_SNAPSHOT,		"snapshot=%s"},
 	{OPT_NOSNAPSHOT,	"nosnapshot"},
 	{OPT_ERR,		NULL}
 };
@@ -70,7 +77,16 @@ static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config)
 
 		token = match_token(p, ovl_snapshot_tokens, args);
 		switch (token) {
+		case OPT_SNAPSHOT:
+			kfree(config->snapshot);
+			config->snapshot = match_strdup(&args[0]);
+			if (!config->snapshot)
+				return -ENOMEM;
+			break;
+
 		case OPT_NOSNAPSHOT:
+			kfree(config->snapshot);
+			config->snapshot = NULL;
 			break;
 
 		default:
@@ -82,11 +98,72 @@ static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config)
 	return 0;
 }
 
+static struct vfsmount *ovl_get_snapshot(struct ovl_fs *ofs)
+{
+	struct super_block *snapsb;
+	struct path snappath = { };
+	struct vfsmount *snapmnt;
+	char *tmp = NULL;
+	int err;
+
+	err = -ENOMEM;
+	tmp = kstrdup(ofs->config.snapshot, GFP_KERNEL);
+	if (!tmp)
+		goto out_err;
+
+	ovl_unescape(tmp);
+	err = ovl_mount_dir_noesc(ofs->config.snapshot, &snappath);
+	if (err)
+		goto out_err;
+
+	/*
+	 * The path passed in snapshot=<snappath> needs to be the root of a
+	 * non-nested overlayfs with a single lower layer that matches the
+	 * snapshot mount upper path.
+	 */
+	snapsb = snappath.mnt->mnt_sb;
+	err = -EINVAL;
+	if (!ovl_is_overlay_fs(snapsb) || snappath.dentry != snapsb->s_root) {
+		pr_err("snapshot='%s' is not an overlayfs root\n",
+		       tmp);
+		goto out_err;
+	}
+
+	if (snapsb->s_stack_depth > 1) {
+		pr_err("snapshot='%s' is a nested overlayfs\n", tmp);
+		goto out_err;
+	}
+
+	if (OVL_FS(snapsb)->numlayer != 2 ||
+	    ovl_upper_mnt(ofs)->mnt_root !=
+	    OVL_FS(snapsb)->layers[1].mnt->mnt_root) {
+		pr_err("upperdir and snapshot's lowerdir mismatch\n");
+		goto out_err;
+	}
+
+	snapmnt = clone_private_mount(&snappath);
+	err = PTR_ERR(snapmnt);
+	if (IS_ERR(snapmnt)) {
+		pr_err("failed to clone snapshot path\n");
+		goto out_err;
+	}
+
+out:
+	path_put(&snappath);
+	kfree(tmp);
+	return snapmnt;
+
+out_err:
+	snapmnt = ERR_PTR(err);
+	goto out;
+}
+
 static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 				   char *opt)
 {
 	struct path upperpath = { };
 	struct dentry *root_dentry;
+	struct vfsmount *snapmnt;
 	struct ovl_entry *oe = NULL;
 	struct ovl_layer *upper_layer;
 	struct ovl_fs *ofs;
@@ -128,11 +205,29 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 	sb->s_time_gran = upper_layer->mnt->mnt_sb->s_time_gran;
 	sb->s_stack_depth = upper_layer->mnt->mnt_sb->s_stack_depth;
 
+	/*
+	 * Snapshot mount may be remounted later with underlying
+	 * snapshot overlay. We must leave room in stack below us
+	 * for that overlay, even if snapshot= mount option is not
+	 * provided on the initial mount.
+	 */
+	if (!sb->s_stack_depth)
+		sb->s_stack_depth++;
+
 	err = -EINVAL;
 	sb->s_stack_depth++;
 	if (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {
 		pr_err("snapshot fs maximum stacking depth exceeded\n");
 		goto out_err;
+	}
+
+	if (ofs->config.snapshot) {
+		snapmnt = ovl_get_snapshot(ofs);
+		err = PTR_ERR(snapmnt);
+		if (IS_ERR(snapmnt))
+			goto out_err;
+
+		ofs->snap_mnt = snapmnt;
 	}
 
 	/* No need to set/get any overlay xattr for snaphsot fs */
