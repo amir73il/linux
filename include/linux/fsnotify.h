@@ -27,16 +27,23 @@
  * the child is interested and not the parent.
  */
 static inline void fsnotify_name(struct inode *dir, __u32 mask,
-				 struct inode *child,
+				 struct dentry *child,
 				 const struct qstr *name, u32 cookie)
 {
-	fsnotify(mask, child, FSNOTIFY_EVENT_INODE, dir, name, NULL, cookie);
+	fsnotify(mask, child, FSNOTIFY_EVENT_DENTRY, dir, name, NULL, cookie);
 }
 
 static inline void fsnotify_dirent(struct inode *dir, struct dentry *dentry,
 				   __u32 mask)
 {
-	fsnotify_name(dir, mask, d_inode(dentry), &dentry->d_name, 0);
+	fsnotify_name(dir, mask, dentry, &dentry->d_name, 0);
+}
+
+/* Notify this dentry (and not its parent) about self events. */
+static inline void fsnotify_dentry_self(struct dentry *dentry, __u32 mask)
+{
+	fsnotify(mask, dentry, FSNOTIFY_EVENT_DENTRY, NULL, NULL,
+		 d_inode(dentry), 0);
 }
 
 static inline void fsnotify_inode(struct inode *inode, __u32 mask)
@@ -77,7 +84,7 @@ notify_child:
  */
 static inline void fsnotify_dentry(struct dentry *dentry, __u32 mask)
 {
-	fsnotify_parent(dentry, mask, d_inode(dentry), FSNOTIFY_EVENT_INODE);
+	fsnotify_parent(dentry, mask, dentry, FSNOTIFY_EVENT_DENTRY);
 }
 
 static inline int fsnotify_file(struct file *file, __u32 mask)
@@ -131,10 +138,10 @@ static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
 				 int isdir, struct inode *target,
 				 struct dentry *moved)
 {
-	struct inode *source = moved->d_inode;
 	u32 fs_cookie = fsnotify_get_cookie();
 	__u32 old_dir_mask = FS_MOVED_FROM;
 	__u32 new_dir_mask = FS_MOVED_TO;
+	__u32 self_mask = FS_MOVE_SELF;
 	const struct qstr *new_name = &moved->d_name;
 
 	if (old_dir == new_dir)
@@ -143,14 +150,15 @@ static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
 	if (isdir) {
 		old_dir_mask |= FS_ISDIR;
 		new_dir_mask |= FS_ISDIR;
+		self_mask |= FS_ISDIR;
 	}
 
-	fsnotify_name(old_dir, old_dir_mask, source, old_name, fs_cookie);
-	fsnotify_name(new_dir, new_dir_mask, source, new_name, fs_cookie);
+	fsnotify_name(old_dir, old_dir_mask, moved, old_name, fs_cookie);
+	fsnotify_name(new_dir, new_dir_mask, moved, new_name, fs_cookie);
 
 	if (target)
 		fsnotify_link_count(target);
-	fsnotify_inode(source, FS_MOVE_SELF);
+	fsnotify_dentry_self(moved, self_mask);
 	audit_inode_child(new_dir, moved, AUDIT_TYPE_CHILD_CREATE);
 }
 
@@ -191,8 +199,6 @@ static inline void fsnotify_create(struct inode *inode, struct dentry *dentry)
 
 /*
  * fsnotify_link - new hardlink in 'inode' directory
- * Note: We have to pass also the linked inode ptr as some filesystems leave
- *   new_dentry->d_inode NULL and instantiate inode pointer later
  */
 static inline void fsnotify_link(struct inode *dir, struct inode *inode,
 				 struct dentry *new_dentry)
@@ -200,7 +206,19 @@ static inline void fsnotify_link(struct inode *dir, struct inode *inode,
 	fsnotify_link_count(inode);
 	audit_inode_child(dir, new_dentry, AUDIT_TYPE_CHILD_CREATE);
 
-	fsnotify_name(dir, FS_CREATE, inode, &new_dentry->d_name, 0);
+	/*
+	 * We may have to pass the linked inode ptr instead of the dentry
+	 * as some filesystems leave new_dentry->d_inode NULL and instantiate
+	 * inode pointer later. In that case, we pass the inode instead of the
+	 * dentry to backends.
+	 */
+	if (unlikely(inode != d_inode(new_dentry))) {
+		fsnotify(FS_CREATE, inode, FSNOTIFY_EVENT_INODE, dir,
+			 &new_dentry->d_name, NULL, 0);
+		return;
+	}
+
+	fsnotify_name(dir, FS_CREATE, new_dentry, &new_dentry->d_name, 0);
 }
 
 /*
