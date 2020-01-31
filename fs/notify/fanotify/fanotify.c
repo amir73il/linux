@@ -282,6 +282,7 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 	gfp_t gfp = GFP_KERNEL_ACCOUNT;
 	struct inode *id = fanotify_fid_inode(inode, mask, data, data_type);
 	const struct path *path = fsnotify_data_path(data, data_type);
+	struct dentry *dentry = fsnotify_data_dentry(data, data_type);
 
 	/*
 	 * For queues with unlimited length lost events are not expected and
@@ -312,7 +313,12 @@ struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 	if (!event)
 		goto out;
 init: __maybe_unused
-	fsnotify_init_event(&event->fse, inode);
+	/*
+	 * Use the dentry instead of inode as tag for event queue, so event
+	 * reported on parent is merged with event reported on child when both
+	 * directory and child watches exist.
+	 */
+	fsnotify_init_event(&event->fse, (void *)dentry ?: inode);
 	event->mask = mask;
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_TID))
 		event->pid = get_pid(task_pid(current));
