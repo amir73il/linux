@@ -6,6 +6,7 @@
 #include <linux/path.h>
 #include <linux/fcntl.h>
 #include <linux/errno.h>
+#include <linux/err.h>
 
 enum { MAX_NESTED_LINKS = 8 };
 
@@ -65,8 +66,14 @@ extern int follow_down_one(struct path *);
 extern int follow_down(struct path *);
 extern int follow_up(struct path *);
 
-extern struct dentry *lock_rename(struct dentry *, struct dentry *);
+extern struct dentry *lock_rename_xmnt(struct dentry *, struct dentry **,
+				       struct dentry *, struct dentry **);
 extern void unlock_rename(struct dentry *, struct dentry *);
+
+static inline struct dentry *lock_rename(struct dentry *p1, struct dentry *p2)
+{
+	return lock_rename_xmnt(p1, NULL, p2, NULL);
+}
 
 extern void nd_jump_link(struct path *path);
 
