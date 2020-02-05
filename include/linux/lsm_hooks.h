@@ -315,6 +315,20 @@
  *	@new_dir contains the inode structure for parent of the new link.
  *	@new_dentry contains the dentry structure of the new link.
  *	Return 0 if permission is granted.
+ * @inode_rename_xmnt:
+ *	Check for permission to rename a file or directory across a bind mount.
+ *	One or two crossed bind mount root are provided in the hook arguments,
+ *	but there can be more crossed mount points and the hook is not called
+ *	for every crossed mount point, so the module needs to walk ancestors to
+ *	find them.
+ *	Called with sb->s_vfs_rename_mutex locked, so ancestry is stable.
+ *	@old_parent contains the dentry structure for parent of the old link.
+ *	@old_xmnt contains the dentry structure for a crossed mount point root,
+ *	which is an ancestor of the old link or NULL if no such dentry exists.
+ *	@new_parent contains the dentry structure for parent of the new link.
+ *	@new_xmnt contains the dentry structure for a crossed mount point root,
+ *	which is an ancestor of the new link or NULL if no such dentry exists.
+ *	Return 0 if permission is granted.
  * @path_rename:
  *	Check for permission to rename a file or directory.
  *	@old_dir contains the path structure for parent of the old link.
@@ -1567,6 +1581,10 @@ union security_list_options {
 	int (*inode_rename)(struct inode *old_dir, struct dentry *old_dentry,
 				struct inode *new_dir,
 				struct dentry *new_dentry);
+	int (*inode_rename_xmnt)(struct dentry *old_parent,
+				 struct dentry *old_xmnt,
+				 struct dentry *new_parent,
+				 struct dentry *new_xmnt);
 	int (*inode_readlink)(struct dentry *dentry);
 	int (*inode_follow_link)(struct dentry *dentry, struct inode *inode,
 				 bool rcu);
@@ -1892,6 +1910,7 @@ struct security_hook_heads {
 	struct hlist_head inode_rmdir;
 	struct hlist_head inode_mknod;
 	struct hlist_head inode_rename;
+	struct hlist_head inode_rename_xmnt;
 	struct hlist_head inode_readlink;
 	struct hlist_head inode_follow_link;
 	struct hlist_head inode_permission;

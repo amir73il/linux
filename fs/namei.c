@@ -2934,12 +2934,12 @@ static inline int may_create(struct inode *dir, struct dentry *child)
  * Returns the ancestor dentry of p2 which is a child of p1, if p1 is
  * an ancestor of p2, else NULL.
  *
- * @m1 is the closest mount point ancestor of p1. If it turns out to also be an
- * ancestor of p2, then we can stop searching for p1 in ancestry.
+ * @pm1 is the closest mount point ancestor of p1. If it turns out to also be an
+ * ancestor of p2, then we set it to NULL and stop searching for p1 in ancestry.
  * If not NULL, @pm2 pointed value is set to the closest mount point ancestor
  * of p2, including p2 itself.
  */
-static struct dentry *d_ancestor_xmnt(struct dentry *p1, struct dentry *m1,
+static struct dentry *d_ancestor_xmnt(struct dentry *p1, struct dentry **pm1,
 				      struct dentry *p2, struct dentry **pm2)
 {
 	struct dentry *p;
@@ -2951,18 +2951,31 @@ static struct dentry *d_ancestor_xmnt(struct dentry *p1, struct dentry *m1,
 			break;
 		}
 		/* Stop walk on a common ancestor mount point */
-		if (p == m1)
+		if (p == *pm1) {
+			/* A common ancestor is not a crossed mount point */
+			*pm1 = NULL;
 			break;
-		if (p->d_parent == p1)
+		}
+		if (p->d_parent == p1) {
+			/* An ancestor of p1 is not a crossed mount point */
+			*pm1 = NULL;
 			return p;
+		}
 	}
 	return NULL;
 }
 
 /*
  * p1 and p2 should be directories on the same fs.
+ *
+ * Checks if the intended rename is about to cross over any mount points.
+ * @pxmnt1 is set to the closest crossed mount point ancestor of @p1 and
+ * @pxmnt2 is set to the closest crossed mount point ancestor of @p2.
+ * If there is no crossed mount point which is an ancestor of @p1 or @p2
+ * then the corresponding output arg is set to NULL.
  */
-struct dentry *lock_rename(struct dentry *p1, struct dentry *p2)
+struct dentry *lock_rename_xmnt(struct dentry *p1, struct dentry **pxmnt1,
+				struct dentry *p2, struct dentry **pxmnt2)
 {
 	struct dentry *p;
 	struct dentry *d1 = p1, *d2 = p2;
@@ -2981,18 +2994,18 @@ again:
 	 * On first iteration, stop at the closet mount point ancestors of p1
 	 * and of p2 if they exist.
 	 */
-	p = d_ancestor_xmnt(p2, m2, d1, pm1);
+	p = d_ancestor_xmnt(p2, &m2, d1, pm1);
 	if (p) {
 		inode_lock_nested(p2->d_inode, I_MUTEX_PARENT);
 		inode_lock_nested(p1->d_inode, I_MUTEX_CHILD);
-		return p;
+		goto out;
 	}
 
-	p = d_ancestor_xmnt(p1, m1, d2, pm2);
+	p = d_ancestor_xmnt(p1, &m1, d2, pm2);
 	if (p) {
 		inode_lock_nested(p1->d_inode, I_MUTEX_PARENT);
 		inode_lock_nested(p2->d_inode, I_MUTEX_CHILD);
-		return p;
+		goto out;
 	}
 
 	/*
@@ -3001,7 +3014,9 @@ again:
 	 * first and second iterations will stop if they find a common mount
 	 * point ancestor.
 	 */
-	if (pm1 && m1 != m2) {
+	if (m1 == m2) {
+		m1 = m2 = NULL;
+	} else if (pm1) {
 		d1 = m1;
 		d2 = m2;
 		pm1 = pm2 = NULL;
@@ -3010,9 +3025,15 @@ again:
 
 	inode_lock_nested(p1->d_inode, I_MUTEX_PARENT);
 	inode_lock_nested(p2->d_inode, I_MUTEX_PARENT2);
-	return NULL;
+
+out:
+	if (pxmnt1)
+		*pxmnt1 = m1;
+	if (pxmnt2)
+		*pxmnt2 = m2;
+	return p;
 }
-EXPORT_SYMBOL(lock_rename);
+EXPORT_SYMBOL(lock_rename_xmnt);
 
 void unlock_rename(struct dentry *p1, struct dentry *p2)
 {
@@ -4645,6 +4666,8 @@ static int do_renameat2(int olddfd, const char __user *oldname, int newdfd,
 			const char __user *newname, unsigned int flags)
 {
 	struct dentry *old_dentry, *new_dentry;
+	struct dentry *old_parent, *new_parent;
+	struct dentry *old_xmnt, *new_xmnt;
 	struct dentry *trap;
 	struct path old_path, new_path;
 	struct qstr old_last, new_last;
@@ -4701,8 +4724,10 @@ retry:
 	if (error)
 		goto exit2;
 
+	old_parent = old_path.dentry;
+	new_parent = new_path.dentry;
 retry_deleg:
-	trap = lock_rename(new_path.dentry, old_path.dentry);
+	trap = lock_rename_xmnt(new_parent, &new_xmnt, old_parent, &old_xmnt);
 
 	old_dentry = __lookup_hash(&old_last, old_path.dentry, lookup_flags);
 	error = PTR_ERR(old_dentry);
@@ -4752,15 +4777,22 @@ retry_deleg:
 				     &new_path, new_dentry, flags);
 	if (error)
 		goto exit5;
-	error = vfs_rename(old_path.dentry->d_inode, old_dentry,
-			   new_path.dentry->d_inode, new_dentry,
-			   &delegated_inode, flags);
+
+	if (old_xmnt || new_xmnt) {
+		error = security_inode_rename_xmnt(old_parent, old_xmnt,
+						   new_parent, new_xmnt);
+		if (error)
+			goto exit5;
+	}
+
+	error = vfs_rename(old_parent->d_inode, old_dentry, new_parent->d_inode,
+			   new_dentry, &delegated_inode, flags);
 exit5:
 	dput(new_dentry);
 exit4:
 	dput(old_dentry);
 exit3:
-	unlock_rename(new_path.dentry, old_path.dentry);
+	unlock_rename(new_parent, old_parent);
 	if (delegated_inode) {
 		error = break_deleg_wait(&delegated_inode);
 		if (!error)

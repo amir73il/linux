@@ -335,6 +335,10 @@ int security_inode_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
 int security_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
 			  struct inode *new_dir, struct dentry *new_dentry,
 			  unsigned int flags);
+int security_inode_rename_xmnt(struct dentry *old_parent,
+			       struct dentry *old_xmnt,
+			       struct dentry *new_parent,
+			       struct dentry *new_xmnt);
 int security_inode_readlink(struct dentry *dentry);
 int security_inode_follow_link(struct dentry *dentry, struct inode *inode,
 			       bool rcu);
@@ -783,6 +787,14 @@ static inline int security_inode_rename(struct inode *old_dir,
 					 struct inode *new_dir,
 					 struct dentry *new_dentry,
 					 unsigned int flags)
+{
+	return 0;
+}
+
+static inline int security_inode_rename_xmnt(struct dentry *old_parent,
+					     struct dentry *new_parent,
+					     struct dentry *old_xmnt,
+					     struct dentry *new_xmnt)
 {
 	return 0;
 }
