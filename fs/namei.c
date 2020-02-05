@@ -2795,12 +2795,48 @@ static inline int may_create(struct inode *dir, struct dentry *child)
 	return inode_permission(dir, MAY_WRITE | MAY_EXEC);
 }
 
+/**
+ * d_ancestor_xmnt - search for an ancestor and crossed mount points
+ * @p1: ancestor dentry
+ * @p2: child dentry (or NULL for noop)
+ *
+ * Returns the ancestor dentry of p2 which is a child of p1, if p1 is
+ * an ancestor of p2, else NULL.
+ *
+ * @m1 is the closest mount point ancestor of p1. If it turns out to also be an
+ * ancestor of p2, then we can stop searching for p1 in ancestry.
+ * If not NULL, @pm2 pointed value is set to the closest mount point ancestor
+ * of p2, including p2 itself.
+ */
+static struct dentry *d_ancestor_xmnt(struct dentry *p1, struct dentry *m1,
+				      struct dentry *p2, struct dentry **pm2)
+{
+	struct dentry *p;
+
+	for (p = p2; p && !IS_ROOT(p); p = p->d_parent) {
+		/* If requested, stop walk on an ancestor mount point */
+		if (pm2 && d_mountpoint(p)) {
+			*pm2 = p;
+			break;
+		}
+		/* Stop walk on a common ancestor mount point */
+		if (p == m1)
+			break;
+		if (p->d_parent == p1)
+			return p;
+	}
+	return NULL;
+}
+
 /*
  * p1 and p2 should be directories on the same fs.
  */
 struct dentry *lock_rename(struct dentry *p1, struct dentry *p2)
 {
 	struct dentry *p;
+	struct dentry *d1 = p1, *d2 = p2;
+	struct dentry *m1 = NULL, *m2 = NULL;
+	struct dentry **pm1 = &m1, **pm2 = &m2;
 
 	if (p1 == p2) {
 		inode_lock_nested(p1->d_inode, I_MUTEX_PARENT);
@@ -2809,18 +2845,36 @@ struct dentry *lock_rename(struct dentry *p1, struct dentry *p2)
 
 	mutex_lock(&p1->d_sb->s_vfs_rename_mutex);
 
-	p = d_ancestor(p2, p1);
+again:
+	/*
+	 * On first iteration, stop at the closet mount point ancestors of p1
+	 * and of p2 if they exist.
+	 */
+	p = d_ancestor_xmnt(p2, m2, d1, pm1);
 	if (p) {
 		inode_lock_nested(p2->d_inode, I_MUTEX_PARENT);
 		inode_lock_nested(p1->d_inode, I_MUTEX_CHILD);
 		return p;
 	}
 
-	p = d_ancestor(p1, p2);
+	p = d_ancestor_xmnt(p1, m1, d2, pm2);
 	if (p) {
 		inode_lock_nested(p1->d_inode, I_MUTEX_PARENT);
 		inode_lock_nested(p2->d_inode, I_MUTEX_CHILD);
 		return p;
+	}
+
+	/*
+	 * On second iteration, if stopped at mount point ancestor, continue
+	 * walk all the way to filesystem root or to the other directory. Both
+	 * first and second iterations will stop if they find a common mount
+	 * point ancestor.
+	 */
+	if (pm1 && m1 != m2) {
+		d1 = m1;
+		d2 = m2;
+		pm1 = pm2 = NULL;
+		goto again;
 	}
 
 	inode_lock_nested(p1->d_inode, I_MUTEX_PARENT);
