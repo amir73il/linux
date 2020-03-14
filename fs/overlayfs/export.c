@@ -662,10 +662,8 @@ fail:
 /*
  * Get an overlay dentry from upper/lower real dentries and index.
  */
-static struct dentry *ovl_get_dentry(struct super_block *sb,
-				     struct dentry *upper,
-				     struct ovl_path *lowerpath,
-				     struct dentry *index)
+struct dentry *ovl_get_dentry(struct super_block *sb, struct dentry *upper,
+			      struct ovl_path *lowerpath, struct dentry *index)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;
 	struct ovl_layer upper_layer = { .mnt = ofs->upper_mnt };

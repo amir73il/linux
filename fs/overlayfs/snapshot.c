@@ -411,36 +411,6 @@ static int ovl_snapshot_acceptable(void *context, struct dentry *dentry)
 	return 1;
 }
 
-static struct dentry *ovl_snapshot_lookup_real(struct super_block *sb,
-					       struct dentry *real)
-{
-	struct ovl_fs *ofs = sb->s_fs_info;
-	struct ovl_layer upper_layer = { .mnt = ofs->upper_mnt };
-	struct dentry *this = NULL;
-	struct inode *inode;
-
-	/* Lookup snapshot fs dentry from real fs inode */
-	inode = ovl_lookup_inode(sb, real, true);
-	if (IS_ERR(inode))
-		return ERR_CAST(inode);
-	if (inode) {
-		this = d_find_any_alias(inode);
-		iput(inode);
-		if (this)
-			return this;
-	}
-
-	/* Decode of disconnected dentries is not implemented */
-	if ((real->d_flags & DCACHE_DISCONNECTED) || d_unhashed(real))
-		return ERR_PTR(-ENOENT);
-
-	/*
-	 * If real dentry is connected and hashed, get a connected overlay
-	 * dentry whose real dentry is @real.
-	 */
-	return ovl_lookup_real(sb, real, &upper_layer, true);
-}
-
 static struct dentry *ovl_snapshot_fh_to_dentry(struct super_block *sb,
 						struct fid *fid,
 						int fh_len, int fh_type)
@@ -455,7 +425,7 @@ static struct dentry *ovl_snapshot_fh_to_dentry(struct super_block *sb,
 	if (IS_ERR_OR_NULL(real))
 		return real;
 
-	this = ovl_snapshot_lookup_real(sb, real);
+	this = ovl_get_dentry(sb, real, NULL, NULL);
 	dput(real);
 
 	return this;
@@ -867,8 +837,11 @@ static int ovl_snapshot_copy_up(struct dentry *dentry)
 	int flags = O_WRONLY;
 	int err = -ENOENT;
 
-	if (WARN_ON(!inode) ||
-	    WARN_ON(disconnected))
+	if (WARN_ON(!inode))
+		goto bug;
+
+	err = -ESTALE;
+	if (disconnected)
 		goto bug;
 
 	/*

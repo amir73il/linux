@@ -470,6 +470,8 @@ extern const struct export_operations ovl_export_operations;
 
 struct dentry *ovl_lookup_real(struct super_block *sb, struct dentry *real,
 			       struct ovl_layer *layer, bool warn);
+struct dentry *ovl_get_dentry(struct super_block *sb, struct dentry *upper,
+			      struct ovl_path *lowerpath, struct dentry *index);
 
 
 /* super.c */
