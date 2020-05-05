@@ -267,11 +267,11 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	 * to user in FAN_REPORT_FID mode for all event types.
 	 */
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_FID)) {
-		/* Do not report FAN_ONDIR without any event */
-		if (!(test_mask & ~FAN_ONDIR))
+		/* Do not report event flags without any event */
+		if (!(test_mask & ~FANOTIFY_EVENT_FLAGS))
 			return 0;
 	} else {
-		user_mask &= ~FAN_ONDIR;
+		user_mask &= ~FANOTIFY_EVENT_FLAGS;
 	}
 
 	return test_mask & user_mask;
