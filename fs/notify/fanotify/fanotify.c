@@ -56,10 +56,7 @@ static bool fanotify_fid_event_equal(struct fanotify_fid_event *ffe1,
 static bool fanotify_name_event_equal(struct fanotify_name_event *fne1,
 				      struct fanotify_name_event *fne2)
 {
-	/*
-	 * Do not merge name events without dir fh.
-	 * FAN_DIR_MODIFY does not encode object fh, so it may be empty.
-	 */
+	/* Do not merge name events without dir fh */
 	if (!fne1->dir_fh.len)
 		return false;
 
@@ -285,8 +282,10 @@ static void fanotify_encode_fh(struct fanotify_fh *fh, struct inode *inode,
 	void *buf = fh->buf;
 	int err;
 
+	fh->type = FILEID_ROOT;
+	fh->len = 0;
 	if (!inode)
-		goto out;
+		return;
 
 	dwords = 0;
 	err = -ENOENT;
@@ -321,7 +320,6 @@ out_err:
 			    type, bytes, err);
 	kfree(ext_buf);
 	*fanotify_fh_ext_buf_ptr(fh) = NULL;
-out:
 	/* Report the event without a file identifier on encode error */
 	fh->type = FILEID_INVALID;
 	fh->len = 0;
