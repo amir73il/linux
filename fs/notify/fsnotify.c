@@ -343,9 +343,9 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 	struct fsnotify_iter_info iter_info = {};
 	struct super_block *sb = to_tell->i_sb;
 	struct inode *dir = S_ISDIR(to_tell->i_mode) ? to_tell : NULL;
-	struct inode *child = NULL;
+	struct inode *child = NULL, *inode = NULL;
 	struct mount *mnt = NULL;
-	__u32 marks_mask = to_tell->i_fsnotify_mask | sb->s_fsnotify_mask;
+	__u32 marks_mask = sb->s_fsnotify_mask;
 	int ret = 0;
 	__u32 test_mask = (mask & ALL_FSNOTIFY_EVENTS);
 
@@ -360,13 +360,23 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 	}
 
 	/*
+	 * If event is "on child" then to_tell is a watching parent.
+	 * An event "on child" may be sent to mount/sb mark with parent/name
+	 * info, but not appropriate for watching parent (e.g. FS_MOVE_SELF).
+	 */
+	if (!child || (mask & FS_EVENTS_POSS_ON_CHILD)) {
+		inode = to_tell;
+		marks_mask |= inode->i_fsnotify_mask;
+	}
+
+	/*
 	 * Optimization: srcu_read_lock() has a memory barrier which can
 	 * be expensive.  It protects walking the *_fsnotify_marks lists.
 	 * However, if we do not walk the lists, we do not have to do
 	 * SRCU because we have no references to any objects and do not
 	 * need SRCU to keep them "alive".
 	 */
-	if (!to_tell->i_fsnotify_marks && !sb->s_fsnotify_marks &&
+	if ((!inode || !inode->i_fsnotify_marks) && !sb->s_fsnotify_marks &&
 	    (!child || !child->i_fsnotify_marks) &&
 	    (!mnt || !mnt->mnt_fsnotify_marks))
 		return 0;
@@ -379,8 +389,9 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 
 	iter_info.srcu_idx = srcu_read_lock(&fsnotify_mark_srcu);
 
-	iter_info.marks[FSNOTIFY_OBJ_TYPE_INODE] =
-		fsnotify_first_mark(&to_tell->i_fsnotify_marks);
+	if (inode)
+		iter_info.marks[FSNOTIFY_OBJ_TYPE_INODE] =
+			fsnotify_first_mark(&inode->i_fsnotify_marks);
 	iter_info.marks[FSNOTIFY_OBJ_TYPE_SB] =
 		fsnotify_first_mark(&sb->s_fsnotify_marks);
 	if (mnt) {

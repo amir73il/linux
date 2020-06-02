@@ -91,7 +91,7 @@
  * It may include events that can be sent to an inode/sb/mount mark, but cannot
  * be sent to a parent watching children.
  */
-#define FS_EVENTS_POSS_TO_PARENT (FS_EVENTS_POSS_ON_CHILD)
+#define FS_EVENTS_POSS_TO_PARENT (FS_EVENTS_POSS_ON_CHILD | FS_MOVE_SELF)
 
 /* Events that can be reported to backends */
 #define ALL_FSNOTIFY_EVENTS (ALL_FSNOTIFY_DIRENT_EVENTS | \
