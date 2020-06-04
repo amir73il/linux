@@ -564,6 +564,24 @@ Note: the mount options index=off,nfs_export=on are conflicting and will
 result in an error.
 
 
+Disable sync
+------------
+
+The 'nosync' mount option allows skipping sync operations for files on the
+upper layer.
+
+**WARNING:** using 'nosync' will cause ***data loss** on a crash.  Do not
+use it unless the data generated inside the overlay filesystem is not
+needed.
+
+This option can be used for example by containers in the following manner:
+
+1) mount overlay with nosync
+2) build the container
+3) umount overlay
+4) sync
+
+
 Testsuite
 ---------
 

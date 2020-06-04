@@ -355,6 +355,9 @@ int ovl_check_fb_len(struct ovl_fb *fb, int fb_len);
 
 static inline int ovl_check_fh_len(struct ovl_fh *fh, int fh_len)
 {
+	if (fh_len < sizeof(struct ovl_fh))
+		return -EINVAL;
+
 	return ovl_check_fb_len(&fh->fb, fh_len - OVL_FH_WIRE_OFFSET);
 }
 
@@ -421,7 +424,7 @@ struct ovl_inode_params {
 	struct inode *newinode;
 	struct dentry *upperdentry;
 	struct ovl_path *lowerpath;
-	struct dentry *index;
+	bool index;
 	unsigned int numlower;
 	char *redirect;
 	struct dentry *lowerdata;
