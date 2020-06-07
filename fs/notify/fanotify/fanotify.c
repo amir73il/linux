@@ -244,8 +244,11 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 		/*
 		 * If the event is for a child and this mark doesn't care about
 		 * events on a child, don't send it!
+		 * The special object type "child" always cares about events on
+		 * a child, because it refers to the child inode itself.
 		 */
 		if (event_mask & FS_EVENT_ON_CHILD &&
+		    type != FSNOTIFY_OBJ_TYPE_CHILD &&
 		    (type != FSNOTIFY_OBJ_TYPE_INODE ||
 		     !(mark->mask & FS_EVENT_ON_CHILD)))
 			continue;
