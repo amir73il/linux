@@ -145,12 +145,14 @@ void __fsnotify_update_child_dentry_flags(struct inode *inode)
 /*
  * Notify this dentry's parent about a child's events with child name info
  * if parent is watching.
- * Notify also the child without name info if child inode is watching.
+ *
+ * Notify only the child without name info if parent is not watching.
  */
 int fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 		    int data_type)
 {
-	struct dentry *parent;
+	struct inode *inode = d_inode(dentry);
+	struct dentry *parent = NULL;
 	struct inode *p_inode;
 	int ret = 0;
 
@@ -165,23 +167,23 @@ int fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 	} else if (p_inode->i_fsnotify_mask & mask & ALL_FSNOTIFY_EVENTS) {
 		struct name_snapshot name;
 
-		/*
-		 * We are notifying a parent, so set a flag in mask to inform
-		 * backend that event has information about a child entry.
-		 */
+		/* When notifying parent, child should be passed as data */
+		WARN_ON_ONCE(inode != fsnotify_data_inode(data, data_type));
+
+		/* Notify both parent and child with child name info */
 		take_dentry_name_snapshot(&name, dentry);
 		ret = fsnotify(p_inode, mask | FS_EVENT_ON_CHILD, data,
 			       data_type, &name.name, 0);
 		release_dentry_name_snapshot(&name);
+	} else {
+notify_child:
+		/* Notify child without child name info */
+		ret = fsnotify(inode, mask, data, data_type, NULL, 0);
 	}
 
 	dput(parent);
 
-	if (ret)
-		return ret;
-
-notify_child:
-	return fsnotify(d_inode(dentry), mask, data, data_type, NULL, 0);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(fsnotify_parent);
 
@@ -321,8 +323,10 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 	struct fsnotify_iter_info iter_info = {};
 	struct super_block *sb = to_tell->i_sb;
 	struct inode *dir = S_ISDIR(to_tell->i_mode) ? to_tell : NULL;
+	struct inode *child = NULL;
 	struct mount *mnt = NULL;
 	__u32 mnt_or_sb_mask = sb->s_fsnotify_mask;
+	__u32 marks_mask = to_tell->i_fsnotify_mask;
 	int ret = 0;
 	__u32 test_mask = (mask & ALL_FSNOTIFY_EVENTS);
 
@@ -330,9 +334,14 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 		mnt = real_mount(path->mnt);
 		mnt_or_sb_mask |= mnt->mnt_fsnotify_mask;
 	}
+
 	/* An event "on child" is not intended for a mount/sb mark */
-	if (mask & FS_EVENT_ON_CHILD)
-		mnt_or_sb_mask = 0;
+	if (mask & FS_EVENT_ON_CHILD) {
+		child = fsnotify_data_inode(data, data_type);
+		marks_mask |= child->i_fsnotify_mask;
+	} else {
+		marks_mask |= mnt_or_sb_mask;
+	}
 
 	/*
 	 * Optimization: srcu_read_lock() has a memory barrier which can
@@ -342,15 +351,14 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 	 * need SRCU to keep them "alive".
 	 */
 	if (!to_tell->i_fsnotify_marks && !sb->s_fsnotify_marks &&
+	    (!child || !child->i_fsnotify_marks) &&
 	    (!mnt || !mnt->mnt_fsnotify_marks))
 		return 0;
 	/*
 	 * if this is a modify event we may need to clear the ignored masks
-	 * otherwise return if neither the inode nor the vfsmount/sb care about
-	 * this type of event.
+	 * otherwise return if none of the marks care about this type of event.
 	 */
-	if (!(mask & FS_MODIFY) &&
-	    !(test_mask & (to_tell->i_fsnotify_mask | mnt_or_sb_mask)))
+	if (!(mask & FS_MODIFY) && !(test_mask & marks_mask))
 		return 0;
 
 	iter_info.srcu_idx = srcu_read_lock(&fsnotify_mark_srcu);
@@ -362,6 +370,10 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 	if (mnt) {
 		iter_info.marks[FSNOTIFY_OBJ_TYPE_VFSMOUNT] =
 			fsnotify_first_mark(&mnt->mnt_fsnotify_marks);
+	}
+	if (child) {
+		iter_info.marks[FSNOTIFY_OBJ_TYPE_CHILD] =
+			fsnotify_first_mark(&child->i_fsnotify_marks);
 	}
 
 	/*
