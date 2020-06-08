@@ -150,27 +150,35 @@ void __fsnotify_update_child_dentry_flags(struct inode *inode)
  * Notify only the child without name info if parent is not watching and
  * inode/sb/mount are not interested in events with parent and name info.
  */
-int fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
-		    int data_type)
+int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
+		      int data_type)
 {
 	const struct path *path = fsnotify_data_path(data, data_type);
 	struct mount *mnt = path ? real_mount(path->mnt) : NULL;
 	struct inode *inode = d_inode(dentry);
 	bool parent_watched = dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED;
-	__u32 test_mask = mask & FS_EVENTS_POSS_TO_PARENT;
-	__u32 p_mask, marks_mask = 0;
-	struct dentry *parent = NULL;
+	__u32 p_mask, test_mask, marks_mask = 0;
+	struct dentry *parent;
 	struct inode *p_inode;
 	int ret = 0;
 
-	/* Do inode/sb/mount care about parent and name info on non-dir? */
-	if (!(mask & FS_ISDIR)) {
+	/*
+	 * Do inode/sb/mount care about parent and name info on non-dir?
+	 * Do they care about any event at all?
+	 */
+	if (!inode->i_fsnotify_marks && !inode->i_sb->s_fsnotify_marks &&
+	    (!mnt || !mnt->mnt_fsnotify_marks)) {
+		if (!parent_watched)
+			return 0;
+	} else if (!(mask & FS_ISDIR)) {
 		marks_mask |= fsnotify_want_parent(inode->i_fsnotify_mask);
 		marks_mask |= fsnotify_want_parent(inode->i_sb->s_fsnotify_mask);
 		if (mnt)
 			marks_mask |= fsnotify_want_parent(mnt->mnt_fsnotify_mask);
 	}
 
+	parent = NULL;
+	test_mask = mask & FS_EVENTS_POSS_TO_PARENT;
 	if (!(marks_mask & test_mask) && !parent_watched)
 		goto notify_child;
 
@@ -205,7 +213,7 @@ notify_child:
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(fsnotify_parent);
+EXPORT_SYMBOL_GPL(__fsnotify_parent);
 
 static int send_to_group(__u32 mask, const void *data, int data_type,
 			 struct inode *dir, const struct qstr *file_name,
@@ -345,29 +353,22 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 	struct inode *dir = S_ISDIR(to_tell->i_mode) ? to_tell : NULL;
 	struct inode *child = NULL, *inode = NULL;
 	struct mount *mnt = NULL;
-	__u32 marks_mask = sb->s_fsnotify_mask;
+	__u32 test_mask, marks_mask;
 	int ret = 0;
-	__u32 test_mask = (mask & ALL_FSNOTIFY_EVENTS);
 
-	if (path) {
+	if (path)
 		mnt = real_mount(path->mnt);
-		marks_mask |= mnt->mnt_fsnotify_mask;
-	}
 
-	if (mask & FS_EVENT_ON_CHILD) {
+	if (mask & FS_EVENT_ON_CHILD)
 		child = fsnotify_data_inode(data, data_type);
-		marks_mask |= child->i_fsnotify_mask;
-	}
 
 	/*
 	 * If event is "on child" then to_tell is a watching parent.
 	 * An event "on child" may be sent to mount/sb mark with parent/name
 	 * info, but not appropriate for watching parent (e.g. FS_MOVE_SELF).
 	 */
-	if (!child || (mask & FS_EVENTS_POSS_ON_CHILD)) {
+	if (!child || (mask & FS_EVENTS_POSS_ON_CHILD))
 		inode = to_tell;
-		marks_mask |= inode->i_fsnotify_mask;
-	}
 
 	/*
 	 * Optimization: srcu_read_lock() has a memory barrier which can
@@ -380,10 +381,20 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_type,
 	    (!child || !child->i_fsnotify_marks) &&
 	    (!mnt || !mnt->mnt_fsnotify_marks))
 		return 0;
+
+	marks_mask = sb->s_fsnotify_mask;
+	if (mnt)
+		marks_mask |= mnt->mnt_fsnotify_mask;
+	if (child)
+		marks_mask |= child->i_fsnotify_mask;
+	if (inode)
+		marks_mask |= inode->i_fsnotify_mask;
+
 	/*
 	 * if this is a modify event we may need to clear the ignored masks
 	 * otherwise return if none of the marks care about this type of event.
 	 */
+	test_mask = mask & ALL_FSNOTIFY_EVENTS;
 	if (!(mask & FS_MODIFY) && !(test_mask & marks_mask))
 		return 0;
 
