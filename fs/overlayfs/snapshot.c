@@ -29,51 +29,101 @@ enum ovl_snapshot_flag {
 	OVL_SNAP_NOCOW,
 	/* No need to copy children to snapshot */
 	OVL_SNAP_CHILDREN_NOCOW,
+	/* Keep last */
+	OVL_SNAP_ID_SHIFT
 };
 
-static bool ovl_snapshot_test_flag(int nr, struct dentry *dentry)
+static unsigned long ovl_snapshot_get_id(struct dentry *dentry)
 {
-	return test_bit(nr, &OVL_E(dentry)->snapflags);
+	return READ_ONCE(OVL_E(dentry)->snapflags) >> OVL_SNAP_ID_SHIFT;
 }
 
-static void ovl_snapshot_set_flag(int nr, struct dentry *dentry)
+static void ovl_snapshot_reset_id(struct dentry *dentry, unsigned long id)
 {
-	set_bit(nr, &OVL_E(dentry)->snapflags);
+	/* Set new snapshot id and reset flags */
+	WRITE_ONCE(OVL_E(dentry)->snapflags, id << OVL_SNAP_ID_SHIFT);
 }
 
-static void ovl_snapshot_clear_flag(int nr, struct dentry *dentry)
+/*
+ * Test dcache snapflag which is relevant for snapshot @id.
+ * If cached snapid differs from @id we have no flags info.
+ */
+static bool ovl_snapshot_test_flag(int nr, struct dentry *dentry,
+				   unsigned long id)
 {
-	clear_bit(nr, &OVL_E(dentry)->snapflags);
+	unsigned long oldid = ovl_snapshot_get_id(dentry);
+
+	if (WARN_ON(nr >= OVL_SNAP_ID_SHIFT) || oldid != id)
+	    return false;
+
+	/*
+	 * To avoid spin_lock and smp_mb, check that the cached flags refer to
+	 * snapshot @id before and after test_bit.
+	 */
+	return test_bit(nr, &OVL_E(dentry)->snapflags) &&
+		ovl_snapshot_get_id(dentry) == id;
 }
 
-static struct vfsmount *ovl_snapshot_mntget(struct dentry *dentry)
+/*
+ * Set dcache snapflag which is relevant for snapshot @id.
+ * Invalidate existing cache of older snapid.
+ * snapshot id 0 means set the flag without checking nor
+ * invalidating cached snapid.
+ */
+static void ovl_snapshot_set_flag(int nr, struct dentry *dentry,
+				  unsigned long id)
 {
-	return mntget(OVL_FS(dentry->d_sb)->snap_mnt);
+	unsigned long oldid;
+
+	spin_lock(&dentry->d_lock);
+
+	oldid = ovl_snapshot_get_id(dentry);
+	/* Reset existing cached flags if cached snapid is older */
+	if (id && oldid < id)
+		ovl_snapshot_reset_id(dentry, id);
+
+	/* Discard set flag request if cached snapid is newer */
+	if (!id || oldid <= id) {
+		smp_mb__before_atomic();
+		set_bit(nr, &OVL_E(dentry)->snapflags);
+	}
+
+	spin_unlock(&dentry->d_lock);
 }
 
-static bool ovl_snapshot_need_cow(struct dentry *dentry)
+static struct vfsmount *ovl_snapshot_mntget(struct dentry *dentry,
+					    unsigned long *snapid)
 {
-	return !ovl_snapshot_test_flag(OVL_SNAP_NOCOW, dentry);
+	struct ovl_snap *snap = OVL_FS(dentry->d_sb)->snap;
+
+	if (WARN_ON(!snap))
+		return NULL;
+
+	*snapid = snap->id;
+
+	return mntget(snap->mnt);
 }
 
-static bool ovl_snapshot_children_need_cow(struct dentry *dentry)
+static bool ovl_snapshot_need_cow(struct dentry *dentry, unsigned long id)
 {
-	return !ovl_snapshot_test_flag(OVL_SNAP_CHILDREN_NOCOW, dentry);
+	return !ovl_snapshot_test_flag(OVL_SNAP_NOCOW, dentry, id);
 }
 
-static void ovl_snapshot_set_nocow(struct dentry *dentry)
+static bool ovl_snapshot_children_need_cow(struct dentry *dentry,
+					   unsigned long id)
 {
-	ovl_snapshot_set_flag(OVL_SNAP_NOCOW, dentry);
+	return !ovl_snapshot_test_flag(OVL_SNAP_CHILDREN_NOCOW, dentry, id);
 }
 
-static void ovl_snapshot_clear_nocow(struct dentry *dentry)
+static void ovl_snapshot_set_nocow(struct dentry *dentry, unsigned long id)
 {
-	ovl_snapshot_clear_flag(OVL_SNAP_NOCOW, dentry);
+	ovl_snapshot_set_flag(OVL_SNAP_NOCOW, dentry, id);
 }
 
-static void ovl_snapshot_set_children_nocow(struct dentry *dentry)
+static void ovl_snapshot_set_children_nocow(struct dentry *dentry,
+					    unsigned long id)
 {
-	ovl_snapshot_set_flag(OVL_SNAP_CHILDREN_NOCOW, dentry);
+	ovl_snapshot_set_flag(OVL_SNAP_CHILDREN_NOCOW, dentry, id);
 }
 
 /* Lookup snapshot overlay directory from a snapshot fs directory */
@@ -103,7 +153,8 @@ static struct dentry *ovl_snapshot_lookup_dir(struct super_block *snapsb,
 static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 					     struct dentry *dentry)
 {
-	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
+	unsigned long snapid;
+	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry, &snapid);
 	bool is_dir = d_is_dir(dentry);
 	struct dentry *dir = is_dir ? dentry : parent;
 	const struct qstr *name = &dentry->d_name;
@@ -112,7 +163,7 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 	const struct cred *old_cred = NULL;
 	int err;
 
-	if (!snapmnt || !ovl_snapshot_need_cow(dentry))
+	if (!snapmnt || !ovl_snapshot_need_cow(dentry, snapid))
 		goto out;
 
 	err = ovl_inode_lock_interruptible(d_inode(dir));
@@ -121,11 +172,11 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 		goto out;
 	}
 
-	if (!ovl_snapshot_need_cow(dentry))
+	if (!ovl_snapshot_need_cow(dentry, snapid))
 		goto out_unlock;
 
-	if (!is_dir && !ovl_snapshot_children_need_cow(parent)) {
-		ovl_snapshot_set_nocow(dentry);
+	if (!is_dir && !ovl_snapshot_children_need_cow(parent, snapid)) {
+		ovl_snapshot_set_nocow(dentry, snapid);
 		goto out_unlock;
 	}
 
@@ -136,9 +187,9 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 	 */
 	if (OVL_FS(dentry->d_sb)->config.metacopy && !is_dir &&
 	    !d_is_negative(dentry) && !d_unhashed(dentry) &&
-	    !ovl_snapshot_need_cow(parent)) {
+	    !ovl_snapshot_need_cow(parent, snapid)) {
 		/* Only copy directory skeleton to snapshot */
-		ovl_snapshot_set_nocow(dentry);
+		ovl_snapshot_set_nocow(dentry, snapid);
 		goto out_unlock;
 	}
 
@@ -155,8 +206,8 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 		 * In either case, no need to copy children to snapshot.
 		 */
 		if (err == -ENOENT || err == -ESTALE) {
-			ovl_snapshot_set_nocow(dentry);
-			ovl_snapshot_set_children_nocow(dir);
+			ovl_snapshot_set_nocow(dentry, snapid);
+			ovl_snapshot_set_children_nocow(dir, snapid);
 			snap = NULL;
 		}
 		goto out_unlock;
@@ -181,7 +232,7 @@ static struct dentry *ovl_snapshot_check_cow(struct dentry *parent,
 	 */
 	if (ovl_dentry_is_whiteout(snap) ||
 	    (d_inode(snap) && ovl_already_copied_up(snap, O_WRONLY))) {
-		ovl_snapshot_set_nocow(dentry);
+		ovl_snapshot_set_nocow(dentry, snapid);
 		dput(snap);
 		snap = NULL;
 	}
@@ -380,15 +431,24 @@ static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config)
 	return 0;
 }
 
-static struct vfsmount *ovl_get_snapshot(struct ovl_fs *ofs)
+static struct ovl_snap *ovl_get_snapshot(struct ovl_fs *ofs, unsigned long id)
 {
 	struct super_block *snapsb;
 	struct path snappath = { };
-	struct vfsmount *snapmnt;
+	struct ovl_snap *snap = NULL;
 	char *tmp = NULL;
 	int err;
 
 	err = -ENOMEM;
+	snap = kzalloc(sizeof(struct ovl_snap), GFP_KERNEL);
+	if (!snap)
+		goto out_err;
+
+	snap->id = id;
+
+	if (!ofs->config.snapshot)
+		return snap;
+
 	tmp = kstrdup(ofs->config.snapshot, GFP_KERNEL);
 	if (!tmp)
 		goto out_err;
@@ -423,9 +483,9 @@ static struct vfsmount *ovl_get_snapshot(struct ovl_fs *ofs)
 		goto out_err;
 	}
 
-	snapmnt = clone_private_mount(&snappath);
-	err = PTR_ERR(snapmnt);
-	if (IS_ERR(snapmnt)) {
+	snap->mnt = clone_private_mount(&snappath);
+	err = PTR_ERR(snap->mnt);
+	if (IS_ERR(snap->mnt)) {
 		pr_err("failed to clone snapshot path\n");
 		goto out_err;
 	}
@@ -433,10 +493,11 @@ static struct vfsmount *ovl_get_snapshot(struct ovl_fs *ofs)
 out:
 	path_put(&snappath);
 	kfree(tmp);
-	return snapmnt;
+	return snap;
 
 out_err:
-	snapmnt = ERR_PTR(err);
+	kfree(snap);
+	snap = ERR_PTR(err);
 	goto out;
 }
 
@@ -445,7 +506,7 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 {
 	struct path upperpath = { };
 	struct dentry *root_dentry;
-	struct vfsmount *snapmnt;
+	struct ovl_snap *snap;
 	struct ovl_entry *oe = NULL;
 	struct ovl_layer *upper_layer;
 	struct ovl_fs *ofs;
@@ -503,14 +564,12 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 		goto out_err;
 	}
 
-	if (ofs->config.snapshot) {
-		snapmnt = ovl_get_snapshot(ofs);
-		err = PTR_ERR(snapmnt);
-		if (IS_ERR(snapmnt))
-			goto out_err;
+	snap = ovl_get_snapshot(ofs, 0);
+	err = PTR_ERR(snap);
+	if (IS_ERR(snap))
+		goto out_err;
 
-		ofs->snap_mnt = snapmnt;
-	}
+	ofs->snap = snap;
 
 	/* No need to set/get any overlay xattr for snaphsot fs */
 	ofs->noxattr = true;
@@ -541,7 +600,7 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 
 	mntput(upperpath.mnt);
 
-	ovl_snapshot_set_nocow(root_dentry);
+	ovl_snapshot_set_nocow(root_dentry, 0);
 	sb->s_root = root_dentry;
 
 	return 0;
@@ -607,6 +666,7 @@ void ovl_snapshot_fs_unregister(void)
  * Helpers for overlayfs snapshot that may be called from code that is
  * shared between snapshot fs mount and overlay fs mount.
  */
+
 static struct dentry *ovl_snapshot_dentry(struct dentry *dentry)
 {
 	struct dentry *parent = dget_parent(dentry);
@@ -710,7 +770,7 @@ static int ovl_snapshot_copy_up(struct dentry *dentry)
 		goto bug;
 
 	/* No need to copy to snapshot next time */
-	ovl_snapshot_set_nocow(dentry);
+	ovl_snapshot_set_nocow(dentry, 0);
 	dput(snap);
 	return 0;
 bug:
@@ -800,8 +860,8 @@ done:
 	 * set dentry flags to suppress copy to snapshot of future object
 	 * and possibly its children.
 	 */
-	ovl_snapshot_set_nocow(dentry);
-	ovl_snapshot_set_children_nocow(dentry);
+	ovl_snapshot_set_nocow(dentry, 0);
+	ovl_snapshot_set_children_nocow(dentry, 0);
 
 out_drop_write:
 	if (udir)
@@ -837,12 +897,13 @@ static int ovl_snapshot_copy_up_meta(struct dentry *dentry, bool new_is_dir)
 
 int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 {
-	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
+	unsigned long snapid;
+	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry, &snapid);
 	int err = 0;
 
 	if (snapmnt && ovl_open_flags_need_copy_up(flags) &&
 	    !special_file(d_inode(dentry)->i_mode) &&
-	    ovl_snapshot_need_cow(dentry))
+	    ovl_snapshot_need_cow(dentry, snapid))
 		err = ovl_snapshot_copy_up_meta(dentry, false);
 
 	mntput(snapmnt);
@@ -851,10 +912,11 @@ int ovl_snapshot_open(struct dentry *dentry, unsigned int flags)
 
 int ovl_snapshot_pre_modify(struct dentry *dentry, bool new_is_dir)
 {
-	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry);
+	unsigned long snapid;
+	struct vfsmount *snapmnt = ovl_snapshot_mntget(dentry, &snapid);
 	int err = 0;
 
-	if (snapmnt && ovl_snapshot_need_cow(dentry)) {
+	if (snapmnt && ovl_snapshot_need_cow(dentry, snapid)) {
 		/* Negative dentry may need to be explicitly whited out */
 		if (d_is_negative(dentry))
 			err = ovl_snapshot_whiteout(dentry, new_is_dir);
@@ -879,7 +941,7 @@ void ovl_snapshot_post_modify(struct dentry *dentry)
 	 * Find and drop that snapshot dentry.
 	 */
 	if (d_unhashed(dentry) && !d_is_dir(dentry)) {
-		ovl_snapshot_clear_nocow(dentry);
+		ovl_snapshot_reset_id(dentry, 0);
 		snap = ovl_snapshot_dentry(dentry);
 		pr_debug("ovl_snapshot: d_unhashed(%pd4), negative=%d\n",
 			 dentry, d_is_negative(dentry));

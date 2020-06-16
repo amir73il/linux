@@ -46,9 +46,14 @@ struct ovl_path {
 	struct dentry *dentry;
 };
 
+struct ovl_snap {
+	struct vfsmount *mnt;
+	unsigned long id;
+};
+
 /* private information held for overlayfs's superblock */
 struct ovl_fs {
-	struct vfsmount *snap_mnt;
+	struct ovl_snap *snap;
 	unsigned int numlayer;
 	/* Number of unique fs among layers including upper fs */
 	unsigned int numfs;
@@ -99,7 +104,8 @@ struct ovl_entry {
 		struct {
 			unsigned long flags;
 			/*
-			 * For snapshot fs dentries. We could squash this field
+			 * For snapshot fs dentries. Stored along side snapshot
+			 * id to validate the flags. We could squash this field
 			 * with flags above, but so far it fits inside union,
 			 * so easier to keep them apart.
 			 */

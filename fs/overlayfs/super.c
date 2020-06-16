@@ -216,7 +216,11 @@ void ovl_free_fs(struct ovl_fs *ofs)
 	struct vfsmount **mounts;
 	unsigned i;
 
-	mntput(ofs->snap_mnt);
+	if (ofs->snap) {
+		mntput(ofs->snap->mnt);
+		kfree(ofs->snap);
+	}
+
 	iput(ofs->workbasedir_trap);
 	iput(ofs->indexdir_trap);
 	iput(ofs->workdir_trap);
