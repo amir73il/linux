@@ -319,6 +319,29 @@ static int ovl_snapshot_show_options(struct seq_file *m, struct dentry *dentry)
 	return 0;
 }
 
+/*
+ * Make the new snapshot requested in remount effective.
+ */
+static void ovl_snapshot_barrier(struct super_block *sb)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct ovl_snap *oldsnap;
+
+	if (!ofs->new_snap)
+		return;
+
+	pr_info("%s: old snap id=%lu, new snap id=%lu\n",
+		__func__, ofs->snap ? ofs->snap->id : 0,
+		ofs->new_snap ? ofs->new_snap->id : 0);
+
+	oldsnap = ofs->snap;
+	rcu_assign_pointer(ofs->snap, ofs->new_snap);
+	ofs->new_snap = NULL;
+	/* wait grace period before dropping oldsnap->mnt refcount */
+	synchronize_rcu();
+	ovl_snap_free(oldsnap);
+}
+
 static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data);
 
 static const struct super_operations ovl_snapshot_super_operations = {
@@ -662,7 +685,7 @@ static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
 	 * config.snapshot will remain an empty string and nothing will change.
 	 * If snapshot= option will set a new config.snapshot value or
 	 * nosnapshot option will free the empty string, then we will change
-	 * the snapshot overlay to the new one or to no snapshot.
+	 * the requested snapshot overlay to the new one or to no snapshot.
 	 */
 	if (ofs->config.snapshot) {
 		config.snapshot = kstrdup("", GFP_KERNEL);
@@ -680,7 +703,7 @@ static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
 	 */
 	if ((config.snapshot && !*config.snapshot) ||
 	    (!config.snapshot && !ofs->config.snapshot))
-		goto out;
+		goto nochange;
 
 	snap = ovl_get_snapshot(ofs, config.snapshot, ofs->snap->id + 1);
 	err = PTR_ERR(snap);
@@ -688,14 +711,14 @@ static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
 		goto out;
 
 	err = 0;
-	/* Did anything change? */
-	oldsnap = ofs->snap;
+	/* Did anything change since last requested snapshot? */
+	oldsnap = ofs->new_snap ?: ofs->snap;
 	if ((!snap->mnt && !oldsnap->mnt) ||
 	    (snap->mnt && oldsnap->mnt &&
 	     snap->mnt->mnt_sb == oldsnap->mnt->mnt_sb)) {
 		/* Nope! */
 		ovl_snap_free(snap);
-		goto out;
+		goto nochange;
 	} else {
 		pr_info("%s: old snapshot='%s' (%lu), new snapshot='%s' (%lu)\n",
 			__func__, ofs->config.snapshot, oldsnap->id,
@@ -703,12 +726,18 @@ static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
 		kfree(ofs->config.snapshot);
 		ofs->config.snapshot = config.snapshot;
 		config.snapshot = NULL;
-		rcu_assign_pointer(ofs->snap, snap);
+		/* Discard old ineffective requested snapshot */
+		ovl_snap_free(ofs->new_snap);
+		ofs->new_snap = snap;
 	}
 
-	/* wait grace period before dropping oldsnap->mnt refcount */
-	synchronize_rcu();
-	ovl_snap_free(oldsnap);
+nochange:
+	/*
+	 * remount ro=>* and *=>ro can set effective snapshot now.
+	 * remount rw=>rw will set effective snapshot on next remount ro.
+	 */
+	if ((sb->s_flags & SB_RDONLY) || (*flags & SB_RDONLY))
+		ovl_snapshot_barrier(sb);
 
 out:
 	ovl_free_config(&config);

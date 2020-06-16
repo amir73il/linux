@@ -53,7 +53,8 @@ struct ovl_snap {
 
 /* private information held for overlayfs's superblock */
 struct ovl_fs {
-	struct ovl_snap *snap;
+	struct ovl_snap *snap;		/* effective */
+	struct ovl_snap *new_snap;	/* requested */
 	unsigned int numlayer;
 	/* Number of unique fs among layers including upper fs */
 	unsigned int numfs;

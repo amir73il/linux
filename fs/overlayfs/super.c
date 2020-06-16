@@ -234,6 +234,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 	unsigned i;
 
 	ovl_snap_free(ofs->snap);
+	ovl_snap_free(ofs->new_snap);
 	iput(ofs->workbasedir_trap);
 	iput(ofs->indexdir_trap);
 	iput(ofs->workdir_trap);
