@@ -94,14 +94,18 @@ static void ovl_snapshot_set_flag(int nr, struct dentry *dentry,
 static struct vfsmount *ovl_snapshot_mntget(struct dentry *dentry,
 					    unsigned long *snapid)
 {
-	struct ovl_snap *snap = OVL_FS(dentry->d_sb)->snap;
+	struct ovl_snap *snap;
+	struct vfsmount *snapmnt = NULL;
 
-	if (WARN_ON(!snap))
-		return NULL;
+	rcu_read_lock();
+	snap = rcu_dereference(OVL_FS(dentry->d_sb)->snap);
+	if (!WARN_ON(!snap)) {
+		snapmnt = mntget(snap->mnt);
+		*snapid = snap->id;
+	}
+	rcu_read_unlock();
 
-	*snapid = snap->id;
-
-	return mntget(snap->mnt);
+	return snapmnt;
 }
 
 static bool ovl_snapshot_need_cow(struct dentry *dentry, unsigned long id)
@@ -315,10 +319,7 @@ static int ovl_snapshot_show_options(struct seq_file *m, struct dentry *dentry)
 	return 0;
 }
 
-static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
-{
-	return 0;
-}
+static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data);
 
 static const struct super_operations ovl_snapshot_super_operations = {
 	.alloc_inode	= ovl_alloc_inode,
@@ -376,6 +377,8 @@ const struct export_operations ovl_snapshot_export_operations = {
 enum {
 	OPT_SNAPSHOT,
 	OPT_NOSNAPSHOT,
+	/* End of mount options that can be changed on remount */
+	OPT_REMOUNT_LAST,
 	OPT_METACOPY_ON,
 	OPT_METACOPY_OFF,
 	OPT_ERR,
@@ -389,7 +392,8 @@ static const match_table_t ovl_snapshot_tokens = {
 	{OPT_ERR,		NULL}
 };
 
-static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config)
+static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config,
+				  bool remount)
 {
 	char *p;
 
@@ -401,6 +405,10 @@ static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config)
 			continue;
 
 		token = match_token(p, ovl_snapshot_tokens, args);
+		/* Ignore options that cannot be changed on remount */
+		if (remount && token >= OPT_REMOUNT_LAST)
+			continue;
+
 		switch (token) {
 		case OPT_SNAPSHOT:
 			kfree(config->snapshot);
@@ -431,7 +439,8 @@ static int ovl_snapshot_parse_opt(char *opt, struct ovl_config *config)
 	return 0;
 }
 
-static struct ovl_snap *ovl_get_snapshot(struct ovl_fs *ofs, unsigned long id)
+static struct ovl_snap *ovl_get_snapshot(struct ovl_fs *ofs,
+					 const char *snapshot, unsigned long id)
 {
 	struct super_block *snapsb;
 	struct path snappath = { };
@@ -446,15 +455,15 @@ static struct ovl_snap *ovl_get_snapshot(struct ovl_fs *ofs, unsigned long id)
 
 	snap->id = id;
 
-	if (!ofs->config.snapshot)
+	if (!snapshot)
 		return snap;
 
-	tmp = kstrdup(ofs->config.snapshot, GFP_KERNEL);
+	tmp = kstrdup(snapshot, GFP_KERNEL);
 	if (!tmp)
 		goto out_err;
 
 	ovl_unescape(tmp);
-	err = ovl_mount_dir_noesc(ofs->config.snapshot, &snappath);
+	err = ovl_mount_dir_noesc(snapshot, &snappath);
 	if (err)
 		goto out_err;
 
@@ -522,7 +531,7 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 	if (!cred)
 		goto out_err;
 
-	err = ovl_snapshot_parse_opt(opt, &ofs->config);
+	err = ovl_snapshot_parse_opt(opt, &ofs->config, false);
 	if (err)
 		goto out_err;
 
@@ -564,7 +573,7 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 		goto out_err;
 	}
 
-	snap = ovl_get_snapshot(ofs, 0);
+	snap = ovl_get_snapshot(ofs, ofs->config.snapshot, 0);
 	err = PTR_ERR(snap);
 	if (IS_ERR(snap))
 		goto out_err;
@@ -633,6 +642,77 @@ static struct dentry *ovl_snapshot_mount(struct file_system_type *fs_type,
 	sb->s_flags |= SB_ACTIVE;
 
 	return dget(sb->s_root);
+}
+
+static int ovl_snapshot_remount(struct super_block *sb, int *flags, char *data)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct ovl_snap *oldsnap, *snap;
+	struct ovl_config config = { };
+	int err;
+
+	if (!data)
+		return 0;
+
+	pr_debug("%s: '%s'\n", __func__, (char *)data);
+
+	/*
+	 * Set config.snapshot to an empty string and parse remount options.
+	 * If no new snapshot= option nor nosnapshot option was found,
+	 * config.snapshot will remain an empty string and nothing will change.
+	 * If snapshot= option will set a new config.snapshot value or
+	 * nosnapshot option will free the empty string, then we will change
+	 * the snapshot overlay to the new one or to no snapshot.
+	 */
+	if (ofs->config.snapshot) {
+		config.snapshot = kstrdup("", GFP_KERNEL);
+		if (!config.snapshot)
+			return -ENOMEM;
+	}
+
+	err = ovl_snapshot_parse_opt((char *)data, &config, true);
+	if (err)
+		goto out;
+
+	/*
+	 * If parser did not change empty string or if parser found
+	 * 'nosnapshot' and there is no snapshot - do nothing
+	 */
+	if ((config.snapshot && !*config.snapshot) ||
+	    (!config.snapshot && !ofs->config.snapshot))
+		goto out;
+
+	snap = ovl_get_snapshot(ofs, config.snapshot, ofs->snap->id + 1);
+	err = PTR_ERR(snap);
+	if (IS_ERR(snap))
+		goto out;
+
+	err = 0;
+	/* Did anything change? */
+	oldsnap = ofs->snap;
+	if ((!snap->mnt && !oldsnap->mnt) ||
+	    (snap->mnt && oldsnap->mnt &&
+	     snap->mnt->mnt_sb == oldsnap->mnt->mnt_sb)) {
+		/* Nope! */
+		ovl_snap_free(snap);
+		goto out;
+	} else {
+		pr_info("%s: old snapshot='%s' (%lu), new snapshot='%s' (%lu)\n",
+			__func__, ofs->config.snapshot, oldsnap->id,
+			config.snapshot, snap->id);
+		kfree(ofs->config.snapshot);
+		ofs->config.snapshot = config.snapshot;
+		config.snapshot = NULL;
+		rcu_assign_pointer(ofs->snap, snap);
+	}
+
+	/* wait grace period before dropping oldsnap->mnt refcount */
+	synchronize_rcu();
+	ovl_snap_free(oldsnap);
+
+out:
+	ovl_free_config(&config);
+	return err;
 }
 
 struct file_system_type ovl_snapshot_fs_type = {

@@ -528,6 +528,8 @@ struct dentry *ovl_d_real(struct dentry *dentry, const struct inode *inode);
 struct inode *ovl_alloc_inode(struct super_block *sb);
 void ovl_free_inode(struct inode *inode);
 void ovl_destroy_inode(struct inode *inode);
+void ovl_free_config(struct ovl_config *config);
+void ovl_snap_free(struct ovl_snap *snap);
 void ovl_free_fs(struct ovl_fs *ofs);
 void ovl_put_super(struct super_block *sb);
 int ovl_sync_fs(struct super_block *sb, int wait);
