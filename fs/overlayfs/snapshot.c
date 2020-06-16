@@ -12,6 +12,7 @@
 
 #include <uapi/linux/magic.h>
 #include <linux/fs.h>
+#include <linux/file.h>
 #include <linux/cred.h>
 #include <linux/exportfs.h>
 #include <linux/module.h>
@@ -827,13 +828,42 @@ static struct dentry *ovl_snapshot_dentry(struct dentry *dentry)
 }
 
 /*
+ * With regular snapshot, fsync is done in ovl_copy_up_data() on copy of file
+ * to snapshot before writing new file data to disk, so there is no risk of
+ * exposing new file data to snapshot.
+ *
+ * With metacopy snapshot, file is not copied up, only its parent dir, so we
+ * need to make sure that copied up parent is persistent on-disk before writing
+ * new file data to disk to make sure that after a crash the modification is
+ * recorded.
+ */
+static int ovl_snapshot_fsync_meta(struct dentry *snap)
+{
+	struct path path;
+	struct file *file;
+	int err;
+
+	ovl_path_upper(snap, &path);
+	file = dentry_open(&path, O_RDONLY, current_cred());
+	if (IS_ERR(file))
+		return PTR_ERR(file);
+
+	err = vfs_fsync(file, 0);
+	fput(file);
+
+	return err;
+}
+
+/*
  * Copy to snapshot if needed before file is modified.
  */
 static int ovl_snapshot_copy_up(struct dentry *dentry)
 {
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	struct inode *inode = d_inode(dentry);
 	struct dentry *snap = NULL;
 	bool disconnected = dentry->d_flags & DCACHE_DISCONNECTED;
+	const struct cred *old_cred;
 	int flags = O_WRONLY;
 	int err = -ENOENT;
 
@@ -879,6 +909,11 @@ static int ovl_snapshot_copy_up(struct dentry *dentry)
 		flags |= O_TRUNC;
 
 	err = ovl_copy_up_flags(snap, flags);
+	if (!err && ofs->config.metacopy) {
+		old_cred = ovl_override_creds(snap->d_sb);
+		err = ovl_snapshot_fsync_meta(snap);
+		revert_creds(old_cred);
+	}
 	ovl_drop_write(snap);
 	if (err)
 		goto bug;
@@ -898,6 +933,7 @@ bug:
 /* Explicitly whiteout a negative snapshot fs dentry before create */
 static int ovl_snapshot_whiteout(struct dentry *dentry, bool new_is_dir)
 {
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	struct dentry *snap = ovl_snapshot_dentry(dentry);
 	struct dentry *parent = NULL;
 	struct dentry *upperdir;
@@ -965,6 +1001,12 @@ static int ovl_snapshot_whiteout(struct dentry *dentry, bool new_is_dir)
 	ovl_dir_modified(parent, true);
 
 done:
+	if (ofs->config.metacopy) {
+		err = ovl_snapshot_fsync_meta(parent);
+		if (err)
+			goto out_drop_write;
+	}
+
 	/*
 	 * set dentry flags to suppress copy to snapshot of future object
 	 * and possibly its children.
