@@ -488,8 +488,17 @@ int __init ovl_aio_request_cache_init(void);
 void ovl_aio_request_cache_destroy(void);
 
 /* copy_up.c */
+
+/*
+ * Internal flag combinations for ovl_copy_up_flags():
+ */
+/* fsync parent dir after copy up */
+#define OVL_SYNC_DIRECTORY (O_SYNC | O_DIRECTORY)
+
+int ovl_fsync_upperdir(struct path *upperpath);
 int ovl_copy_up(struct dentry *dentry);
 int ovl_copy_up_with_data(struct dentry *dentry);
+int ovl_copy_up_flags(struct dentry *dentry, int flags);
 int ovl_maybe_copy_up(struct dentry *dentry, int flags);
 int ovl_copy_xattr(struct dentry *old, struct dentry *new);
 int ovl_set_attr(struct dentry *upper, struct kstat *stat);

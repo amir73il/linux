@@ -441,7 +441,46 @@ struct ovl_copy_up_ctx {
 	bool origin;
 	bool indexed;
 	bool metacopy;
+	int flags;
 };
+
+int ovl_fsync_upperdir(struct path *upperpath)
+{
+	struct file *file;
+	int err;
+
+	file = dentry_open(upperpath, O_RDONLY, current_cred());
+	if (IS_ERR(file))
+		return PTR_ERR(file);
+
+	err = vfs_fsync(file, 0);
+	fput(file);
+
+	return err;
+}
+
+/* Completion routine after link/rename upper to place */
+static int ovl_copy_up_done(struct ovl_copy_up_ctx *c, struct dentry *upperdir)
+{
+	struct path upperpath = {
+		.mnt = ovl_upper_mnt(OVL_FS(c->dentry->d_sb)),
+		.dentry = upperdir,
+	};
+	int err = 0;
+
+
+	/* Restore timestamps on parent (best effort) */
+	ovl_set_timestamps(upperdir, &c->pstat);
+
+	/* Special flag combination to signal fsync parent after copy up */
+	if ((c->flags & OVL_SYNC_DIRECTORY) == OVL_SYNC_DIRECTORY)
+		err = ovl_fsync_upperdir(&upperpath);
+
+	/* Mark copy up done *after* fsync */
+	ovl_dentry_set_upper_alias(c->dentry);
+
+	return err;
+}
 
 static int ovl_link_up(struct ovl_copy_up_ctx *c)
 {
@@ -466,12 +505,8 @@ static int ovl_link_up(struct ovl_copy_up_ctx *c)
 	if (!IS_ERR(upper)) {
 		err = ovl_do_link(ovl_dentry_upper(c->dentry), udir, upper);
 		dput(upper);
-
-		if (!err) {
-			/* Restore timestamps on parent (best effort) */
-			ovl_set_timestamps(upperdir, &c->pstat);
-			ovl_dentry_set_upper_alias(c->dentry);
-		}
+		if (!err)
+			err = ovl_copy_up_done(c, upperdir);
 	}
 	inode_unlock(udir);
 	if (err)
@@ -752,10 +787,8 @@ static int ovl_do_copy_up(struct ovl_copy_up_ctx *c)
 
 		/* Restore timestamps on parent (best effort) */
 		inode_lock(udir);
-		ovl_set_timestamps(c->destdir, &c->pstat);
+		err = ovl_copy_up_done(c, c->destdir);
 		inode_unlock(udir);
-
-		ovl_dentry_set_upper_alias(c->dentry);
 	}
 
 out:
@@ -841,6 +874,7 @@ static int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 		.parent = parent,
 		.dentry = dentry,
 		.workdir = ovl_workdir(dentry),
+		.flags = flags,
 	};
 
 	if (WARN_ON(!ctx.workdir))
@@ -895,7 +929,7 @@ static int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 	return err;
 }
 
-static int ovl_copy_up_flags(struct dentry *dentry, int flags)
+int ovl_copy_up_flags(struct dentry *dentry, int flags)
 {
 	int err = 0;
 	const struct cred *old_cred = ovl_override_creds(dentry->d_sb);
