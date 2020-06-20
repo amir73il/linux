@@ -244,6 +244,37 @@ static inline void fsnotify_rmdir(struct inode *dir, struct dentry *dentry)
 }
 
 /*
+ * fsnotify_pre_modify_path - object at path is about to be modified
+ *
+ * This event may block and is intended for internal kernel listeners only.
+ *
+ * Caller must NOT hold any filesystem locks, because backend may need to
+ * write to another filesystem.
+ */
+static inline int fsnotify_pre_modify_path(const struct path *path)
+{
+	return fsnotify_parent(path->dentry, FS_PRE_MODIFY, path,
+			       FSNOTIFY_EVENT_PATH);
+}
+
+/*
+ * fsnotify_pre_modify_name - object at path/name is about to be linked/unlinked
+ *
+ * The object at path/name could already exist or is about to be created.
+ *
+ * This event may block and is intended for internal kernel listeners only.
+ *
+ * Caller must NOT hold any filesystem locks, because backend may need to
+ * write to another filesystem.
+ */
+static inline int fsnotify_pre_modify_name(const struct path *path,
+					   const struct qstr *name)
+{
+	return fsnotify_name(FS_PRE_MODIFY_NAME, path, FSNOTIFY_EVENT_PATH,
+			     d_inode(path->dentry), name, 0);
+}
+
+/*
  * fsnotify_access - file was read
  */
 static inline void fsnotify_access(struct file *file)

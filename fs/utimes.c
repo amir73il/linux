@@ -23,7 +23,7 @@ static int utimes_common(const struct path *path, struct timespec64 *times)
 	struct inode *inode = path->dentry->d_inode;
 	struct inode *delegated_inode = NULL;
 
-	error = mnt_want_write(path->mnt);
+	error = mnt_want_write_path(path);
 	if (error)
 		goto out;
 
