@@ -279,7 +279,7 @@ nfsd_proc_create(struct svc_rqst *rqstp)
 	resp->status = nfserr_exist;
 	if (isdotent(argp->name, argp->len))
 		goto done;
-	hosterr = fh_want_write(dirfhp);
+	hosterr = fh_want_write_name(dirfhp, argp->name, argp->len);
 	if (hosterr) {
 		resp->status = nfserrno(hosterr);
 		goto done;

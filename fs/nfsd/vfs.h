@@ -135,13 +135,63 @@ __be32		nfsd_permission(struct svc_rqst *, struct svc_export *,
 
 static inline int fh_want_write(struct svc_fh *fh)
 {
+	struct path path;
 	int ret;
 
 	if (fh->fh_want_write)
 		return 0;
-	ret = mnt_want_write(fh->fh_export->ex_path.mnt);
+
+	path.mnt = fh->fh_export->ex_path.mnt;
+	path.dentry = fh->fh_dentry;
+	ret = mnt_want_write_path(&path);
 	if (!ret)
 		fh->fh_want_write = true;
+	return ret;
+}
+
+static inline int fh_want_write_name(struct svc_fh *fh, char *fname, int flen)
+{
+	struct path path;
+	struct qstr name = { .name = fname, .len = flen };
+	int ret;
+
+	/*
+	 * XXX: this does not look like it should happen on link/unlink and it
+	 * may cause loosing fsnotify_want_write event on path/name.
+	 */
+	if (WARN_ON(fh->fh_want_write))
+		return 0;
+
+	path.mnt = fh->fh_export->ex_path.mnt;
+	path.dentry = fh->fh_dentry;
+	ret = mnt_want_write_name(&path, &name);
+	if (!ret)
+		fh->fh_want_write = true;
+	return ret;
+}
+
+static inline int fh_want_write_rename(struct svc_fh *ffh, char *fname, int flen,
+				       struct svc_fh *tfh, char *tname, int tlen)
+{
+	struct path oldpath, newpath;
+	struct qstr oldname = { .name = fname, .len = flen };
+	struct qstr newname = { .name = tname, .len = tlen };
+	int ret;
+
+	/*
+	 * XXX: this does not look like it should happen on rename and it may
+	 * cause loosing fsnotify_want_write event on source and target path/name.
+	 */
+	if (WARN_ON(ffh->fh_want_write))
+		return 0;
+
+	oldpath.mnt = ffh->fh_export->ex_path.mnt;
+	oldpath.dentry = ffh->fh_dentry;
+	newpath.mnt = tfh->fh_export->ex_path.mnt;
+	newpath.dentry = tfh->fh_dentry;
+	ret = mnt_want_write_rename(&oldpath, &oldname, &newpath, &newname, 0);
+	if (!ret)
+		ffh->fh_want_write = true;
 	return ret;
 }
 
