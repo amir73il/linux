@@ -696,7 +696,7 @@ void do_coredump(const kernel_siginfo_t *siginfo)
 	} else {
 		struct inode *inode;
 		int open_flags = O_CREAT | O_RDWR | O_NOFOLLOW |
-				 O_LARGEFILE | O_EXCL;
+				 O_LARGEFILE | O_EXCL | FMODE_NONOTIFY;
 
 		if (cprm.limit < binfmt->min_coredump)
 			goto fail_unlock;
