@@ -275,6 +275,19 @@ static inline int fsnotify_pre_modify_name(const struct path *path,
 }
 
 /*
+ * fsnotify_pre_modify - file is about to be modified
+ *
+ * This event may block and is intended for internal kernel listeners only.
+ *
+ * Caller must NOT hold any filesystem locks, because backend may need to
+ * write to another filesystem.
+ */
+static inline int fsnotify_pre_modify(struct file *file)
+{
+	return fsnotify_file(file, FS_PRE_MODIFY);
+}
+
+/*
  * fsnotify_access - file was read
  */
 static inline void fsnotify_access(struct file *file)
