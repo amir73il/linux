@@ -453,6 +453,73 @@ static int __nfsd_setattr(struct dentry *dentry, struct iattr *iap)
 	return notify_change(&nop_mnt_idmap, dentry, iap, NULL);
 }
 
+int fh_want_write(struct svc_fh *fh, unsigned int attr)
+{
+	struct path path;
+	int ret, idx;
+
+	if (fh->fh_got_write)
+		return 0;
+
+	path.mnt = fh->fh_export->ex_path.mnt;
+	path.dentry = fh->fh_dentry;
+	ret = mnt_want_write_path_attr(&path, attr, &idx);
+	if (!ret)
+		fh_got_write(fh, idx);
+	return ret;
+}
+
+int fh_want_fname(struct svc_fh *fh, char *fname, int flen, int mask)
+{
+	struct path path;
+	struct lookup_result res = {
+		.last = { .name = fname, .len = flen }
+	};
+	int ret, idx;
+
+	/*
+	 * XXX: this does not look like it should happen on link/unlink
+	 */
+	if (WARN_ON(fh->fh_got_write))
+		return 0;
+
+	path.mnt = fh->fh_export->ex_path.mnt;
+	path.dentry = fh->fh_dentry;
+	ret = mnt_want_write_parent(&path, mask, &res, &idx);
+	if (!ret)
+		fh_got_write(fh, idx);
+	return ret;
+}
+
+int fh_want_rename(struct svc_fh *ffh, char *fname, int flen,
+			 struct svc_fh *tfh, char *tname, int tlen)
+{
+	struct path oldpath, newpath;
+	struct lookup_result oldres = {
+		.last = { .name = fname, .len = flen }
+	};
+	struct lookup_result newres = {
+		.last = { .name = tname, .len = tlen }
+	};
+	int ret, idx;
+
+	/*
+	 * XXX: this does not look like it should happen on rename
+	 */
+	if (WARN_ON(ffh->fh_got_write))
+		return 0;
+
+	oldpath.mnt = ffh->fh_export->ex_path.mnt;
+	oldpath.dentry = ffh->fh_dentry;
+	newpath.mnt = tfh->fh_export->ex_path.mnt;
+	newpath.dentry = tfh->fh_dentry;
+	ret = mnt_want_write_parents(&oldpath, &oldres, &newpath, &newres,
+				     &idx);
+	if (!ret)
+		fh_got_write(ffh, idx);
+	return ret;
+}
+
 /**
  * nfsd_setattr - Set various file attributes.
  * @rqstp: controlling RPC transaction
@@ -510,7 +577,7 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	if (err)
 		return err;
 	if (get_write_count) {
-		host_err = fh_want_write(fhp);
+		host_err = fh_want_write(fhp, iap->ia_valid);
 		if (host_err)
 			goto out;
 	}
@@ -1518,7 +1585,7 @@ nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 
 	dentry = fhp->fh_dentry;
 
-	host_err = fh_want_write(fhp);
+	host_err = fh_want_fname(fhp, fname, flen, MAY_CREATE);
 	if (host_err)
 		return nfserrno(host_err);
 
@@ -1618,7 +1685,7 @@ nfsd_symlink(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	if (err)
 		goto out;
 
-	host_err = fh_want_write(fhp);
+	host_err = fh_want_fname(fhp, fname, flen, MAY_CREATE);
 	if (host_err) {
 		err = nfserrno(host_err);
 		goto out;
@@ -1679,7 +1746,7 @@ nfsd_link(struct svc_rqst *rqstp, struct svc_fh *ffhp,
 	if (isdotent(name, len))
 		goto out;
 
-	host_err = fh_want_write(tfhp);
+	host_err = fh_want_fname(ffhp, name, len, MAY_CREATE);
 	if (host_err) {
 		err = nfserrno(host_err);
 		goto out;
@@ -1779,7 +1846,7 @@ nfsd_rename(struct svc_rqst *rqstp, struct svc_fh *ffhp, char *fname, int flen,
 		goto out;
 
 retry:
-	host_err = fh_want_write(ffhp);
+	host_err = fh_want_rename(ffhp, fname, flen, tfhp, tname, tlen);
 	if (host_err) {
 		err = nfserrno(host_err);
 		goto out;
@@ -1894,7 +1961,7 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 	if (err)
 		goto out;
 
-	host_err = fh_want_write(fhp);
+	host_err = fh_want_fname(fhp, fname, flen, MAY_DELETE);
 	if (host_err)
 		goto out_nfserr;
 
@@ -2333,7 +2400,7 @@ nfsd_removexattr(struct svc_rqst *rqstp, struct svc_fh *fhp, char *name)
 	if (err)
 		return err;
 
-	ret = fh_want_write(fhp);
+	ret = fh_want_write(fhp, ATTR_OTHER);
 	if (ret)
 		return nfserrno(ret);
 
@@ -2361,7 +2428,7 @@ nfsd_setxattr(struct svc_rqst *rqstp, struct svc_fh *fhp, char *name,
 	if (err)
 		return err;
 
-	ret = fh_want_write(fhp);
+	ret = fh_want_write(fhp, ATTR_OTHER);
 	if (ret)
 		return nfserrno(ret);
 	inode_lock(fhp->fh_dentry->d_inode);

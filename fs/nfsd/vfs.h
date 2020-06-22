@@ -147,23 +147,23 @@ __be32		nfsd_statfs(struct svc_rqst *, struct svc_fh *,
 __be32		nfsd_permission(struct svc_rqst *, struct svc_export *,
 				struct dentry *, int);
 
-static inline int fh_want_write(struct svc_fh *fh)
-{
-	int ret;
+int fh_want_write(struct svc_fh *fh, unsigned int attr);
+int fh_want_fname(struct svc_fh *fh, char *fname, int flen, int mask);
+int fh_want_rename(struct svc_fh *ffh, char *fname, int flen,
+		   struct svc_fh *tfh, char *tname, int tlen);
 
-	if (fh->fh_want_write)
-		return 0;
-	ret = mnt_want_write(fh->fh_export->ex_path.mnt);
-	if (!ret)
-		fh->fh_want_write = true;
-	return ret;
+static inline void fh_got_write(struct svc_fh *fh, int idx)
+{
+	fh->fh_srcu_idx = idx;
+	fh->fh_got_write = true;
 }
 
 static inline void fh_drop_write(struct svc_fh *fh)
 {
-	if (fh->fh_want_write) {
-		fh->fh_want_write = false;
-		mnt_drop_write(fh->fh_export->ex_path.mnt);
+	if (fh->fh_got_write) {
+		fh->fh_got_write = false;
+		mnt_drop_write_srcu(fh->fh_export->ex_path.mnt,
+				    fh->fh_srcu_idx);
 	}
 }
 

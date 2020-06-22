@@ -254,7 +254,7 @@ nfsd4_create_file(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	parent = fhp->fh_dentry;
 	inode = d_inode(parent);
 
-	host_err = fh_want_write(fhp);
+	host_err = fh_want_write(fhp, 0);
 	if (host_err)
 		return nfserrno(host_err);
 
@@ -1115,7 +1115,7 @@ nfsd4_setattr(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		if (status)
 			return status;
 	}
-	err = fh_want_write(&cstate->current_fh);
+	err = fh_want_write(&cstate->current_fh, setattr->sa_iattr.ia_valid);
 	if (err)
 		return nfserrno(err);
 	status = nfs_ok;

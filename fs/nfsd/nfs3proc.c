@@ -245,7 +245,7 @@ nfsd3_create_file(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	parent = fhp->fh_dentry;
 	inode = d_inode(parent);
 
-	host_err = fh_want_write(fhp);
+	host_err = fh_want_write(fhp, 0);
 	if (host_err)
 		return nfserrno(host_err);
 

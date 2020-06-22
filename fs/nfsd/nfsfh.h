@@ -81,7 +81,8 @@ typedef struct svc_fh {
 	struct dentry *		fh_dentry;	/* validated dentry */
 	struct svc_export *	fh_export;	/* export pointer */
 
-	bool			fh_want_write;	/* remount protection taken */
+	bool			fh_got_write;	/* freeze protection taken */
+	int			fh_srcu_idx;	/* vfs write barrier */
 	bool			fh_no_wcc;	/* no wcc data needed */
 	bool			fh_no_atomic_attr;
 						/*

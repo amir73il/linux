@@ -97,7 +97,7 @@ static __be32 nfsd3_proc_setacl(struct svc_rqst *rqstp)
 
 	inode = d_inode(fh->fh_dentry);
 
-	error = fh_want_write(fh);
+	error = fh_want_write(fh, ATTR_OTHER);
 	if (error)
 		goto out_errno;
 
