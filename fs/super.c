@@ -1643,7 +1643,7 @@ EXPORT_SYMBOL(__sb_end_write);
  * This is an internal function, please use sb_start_{write,pagefault,intwrite}
  * instead.
  */
-int __sb_start_write(struct super_block *sb, int level, bool wait)
+static int ___sb_start_write(struct super_block *sb, int level, bool wait)
 {
 	bool force_trylock = false;
 	int ret = 1;
@@ -1676,7 +1676,31 @@ int __sb_start_write(struct super_block *sb, int level, bool wait)
 	WARN_ON(force_trylock && !ret);
 	return ret;
 }
-EXPORT_SYMBOL(__sb_start_write);
+
+/*
+ * This is an internal function, please use sb_start_{write,pagefault,intwrite}
+ * or file_start_write instead.
+ *
+ * Notify listeners on intent to modify only if call can block (wait=true).
+ *
+ * Return value interpretation depends on the value of @wait:
+ * false: 0 for failure to trylock, 1 for success
+ * true:  0 for no notify or success to notify, <0 for failure to notify
+ */
+int __sb_file_start_write(struct super_block *sb, struct file *file, int level, bool wait)
+{
+	int ret;
+
+	if (file && wait) {
+		ret = fsnotify_pre_modify(file);
+		if (ret)
+			return ret;
+	}
+	ret = ___sb_start_write(sb, level, wait);
+
+	return wait ? 0 : ret;
+}
+EXPORT_SYMBOL(__sb_file_start_write);
 
 /**
  * sb_wait_write - wait until all writers to given file system finish

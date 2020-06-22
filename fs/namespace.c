@@ -476,12 +476,18 @@ int __mnt_want_write_file(struct file *file)
  *
  * This is like mnt_want_write, but it takes a file and can
  * do some optimisations if the file is open for write already
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
  */
 int mnt_want_write_file(struct file *file)
 {
 	int ret;
 
-	sb_start_write(file_inode(file)->i_sb);
+	ret = __file_start_write(file);
+	if (ret)
+		return ret;
+
 	ret = __mnt_want_write_file(file);
 	if (ret)
 		sb_end_write(file_inode(file)->i_sb);
