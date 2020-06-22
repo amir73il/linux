@@ -1322,7 +1322,7 @@ nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 
 	dentry = fhp->fh_dentry;
 
-	host_err = fh_want_write(fhp);
+	host_err = fh_want_write_name(fhp, fname, flen);
 	if (host_err)
 		return nfserrno(host_err);
 
@@ -1375,7 +1375,7 @@ do_nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	dentry = fhp->fh_dentry;
 	dirp = d_inode(dentry);
 
-	host_err = fh_want_write(fhp);
+	host_err = fh_want_write_name(fhp, fname, flen);
 	if (host_err)
 		goto out_nfserr;
 
@@ -1571,7 +1571,7 @@ nfsd_symlink(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	if (err)
 		goto out;
 
-	host_err = fh_want_write(fhp);
+	host_err = fh_want_write_name(fhp, fname, flen);
 	if (host_err)
 		goto out_nfserr;
 
@@ -1630,7 +1630,7 @@ nfsd_link(struct svc_rqst *rqstp, struct svc_fh *ffhp,
 	if (isdotent(name, len))
 		goto out;
 
-	host_err = fh_want_write(tfhp);
+	host_err = fh_want_write_name(ffhp, name, len);
 	if (host_err) {
 		err = nfserrno(host_err);
 		goto out;
@@ -1726,7 +1726,7 @@ nfsd_rename(struct svc_rqst *rqstp, struct svc_fh *ffhp, char *fname, int flen,
 		goto out;
 
 retry:
-	host_err = fh_want_write(ffhp);
+	host_err = fh_want_write_rename(ffhp, fname, flen, tfhp, tname, tlen);
 	if (host_err) {
 		err = nfserrno(host_err);
 		goto out;
@@ -1831,7 +1831,7 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 	if (err)
 		goto out;
 
-	host_err = fh_want_write(fhp);
+	host_err = fh_want_write_name(fhp, fname, flen);
 	if (host_err)
 		goto out_nfserr;
 
