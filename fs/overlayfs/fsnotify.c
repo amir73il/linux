@@ -10,6 +10,7 @@
 #include <linux/fs.h>
 #include <linux/fsnotify.h>
 #include <linux/namei.h>
+#include <linux/ratelimit.h>
 #include "overlayfs.h"
 
 /*
@@ -78,6 +79,92 @@ noop:
 	dput(snap);
 	snap = NULL;
 	goto out;
+}
+
+/*
+ * Mark change in snapshot if needed before file is modified.
+ */
+static int ovl_handle_pre_modify(struct super_block *sb, struct dentry *lowerdir,
+				 const struct qstr *name)
+{
+	const char *fname = name ? name->name : (void *)"";
+	struct inode *inode = d_inode(lowerdir);
+	struct dentry *snap = NULL;
+	int err = -ENOENT;
+
+	/* Pre-modify event on disconnected parent is unexpected */
+	if (WARN_ON(lowerdir->d_flags & DCACHE_DISCONNECTED))
+		goto bug;
+
+	snap = ovl_snapshot_lookup(sb, lowerdir, name);
+	/*
+	 * Overlay snapshot dentry may be positive or negative or NULL.
+	 * If positive, it may need to be copied up.
+	 * If negative, it may need to be whited out.
+	 * If overlay snapshot dentry is already copied up or whiteout or if it
+	 * is an ancestor of an already whited out directory, we need to do
+	 * nothing about it.
+	 */
+	if (IS_ERR_OR_NULL(snap)) {
+		err = PTR_ERR(snap);
+		snap = NULL;
+		/*
+		 * ENOENT - parent is whiteout in snapshot?
+		 * ESTALE - origin mismatch in snapshot?
+		 * EXDEV  - lowerdir is not under overlay lower layer root?
+		 */
+		if (!err || err == -ENOENT || err == -ESTALE || err == -EXDEV)
+			goto out;
+
+		goto bug;
+	}
+
+	if (d_is_negative(snap)) {
+		/* TODO: whiteout in snapshot before creating lower */
+		err = -ENOENT;
+		goto bug;
+	}
+
+	if (ovl_dentry_has_upper_alias(snap)) {
+		/* TODO: set upper dir opaque before creating lower */
+		err = 0;
+		goto out;
+	}
+
+	err = ovl_want_write(snap);
+	if (err)
+		goto bug;
+
+	/*
+	 * Create directory or empty file in overlay snapshot.
+	 * With overlay snapshot, file is not copied up, only an empty file or
+	 * its parent dir, so there is no fsync in copy up.  We need to make
+	 * sure that the change markers are persistent on-disk before making
+	 * the modification to make sure that we will find them after a crash.
+	 * Use the OVL_SYNC_DIRECTORY flag combination to request fsync of
+	 * parent before a parallel thread can find that the overlay dentry is
+	 * ovl_already_copied_up().
+	 */
+	err = ovl_copy_up_flags(snap, O_TRUNC | OVL_SYNC_DIRECTORY);
+	ovl_drop_write(snap);
+	if (err)
+		goto bug;
+
+out:
+	pr_debug("%s: %pd2/%s %s in snapshot (err=%i)\n", __func__, lowerdir, fname,
+		 !snap ? (!err ? "is already" : "noop") :
+		 d_is_negative(snap) ? "whiteout created" : "created", err);
+	dput(snap);
+
+	return 0;
+
+bug:
+	pr_warn_ratelimited("failed copy to snapshot (%pd2/%s ino=%lu, err=%i)\n",
+			    lowerdir, fname, inode ? inode->i_ino : 0, err);
+	dput(snap);
+
+	/* Allowing write would corrupt snapshot so deny */
+	return -EPERM;
 }
 
 #define OVL_FSNOTIFY_MASK (FS_PRE_MODIFY | FS_PRE_MODIFY_NAME)
@@ -153,13 +240,8 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 	}
 
 	if (lowerdir) {
-		struct dentry *snap;
-
-		/* TODO: copy to snapshot */
-		snap = ovl_snapshot_lookup(sb, lowerdir, name);
-		if (!IS_ERR(snap))
-			dput(snap);
-		err = -EPERM;
+		err = ovl_handle_pre_modify(sb, lowerdir, name);
+		/* TODO: add inode mark on lowerdir with ignore mask */
 	}
 
 out:
