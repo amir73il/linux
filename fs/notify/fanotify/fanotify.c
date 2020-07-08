@@ -299,33 +299,58 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 }
 
 /*
+ * Check size needed to encode fanotify_fh.
+ *
+ * Return size of encoded fh without fanotify_fh header.
+ * Return 0 on failure to encode.
+ */
+static int fanotify_encode_fh_len(struct inode *inode)
+{
+	int dwords = 0;
+
+	if (!inode)
+		return 0;
+
+	exportfs_encode_inode_fh(inode, NULL, &dwords, NULL);
+
+	return dwords << 2;
+}
+
+/*
  * Encode fanotify_fh.
  *
  * Return total size of encoded fh including fanotify_fh header.
  * Return 0 on failure to encode.
  */
 static int fanotify_encode_fh(struct fanotify_fh *fh, struct inode *inode,
-			      gfp_t gfp)
+			      unsigned int fh_len, gfp_t gfp)
 {
-	int dwords, type, bytes = 0;
+	int dwords, bytes, type = 0;
 	char *ext_buf = NULL;
 	void *buf = fh->buf;
 	int err;
 
 	fh->type = FILEID_ROOT;
 	fh->len = 0;
+	fh->flags = 0;
 	if (!inode)
 		return 0;
 
-	dwords = 0;
+	/*
+	 * !gpf means preallocated variable size fh, but fh_len could
+	 * be zero in that case if encoding fh len failed.
+	 */
 	err = -ENOENT;
-	type = exportfs_encode_inode_fh(inode, NULL, &dwords, NULL);
-	if (!dwords)
+	if (!gfp)
+		bytes = fh_len;
+	else
+		bytes = fanotify_encode_fh_len(inode);
+	if (bytes < 4 || WARN_ON_ONCE(bytes % 4))
 		goto out_err;
 
-	bytes = dwords << 2;
-	if (bytes > FANOTIFY_INLINE_FH_LEN) {
-		/* Treat failure to allocate fh as failure to allocate event */
+	/* No external buffer in a variable size allocated fh */
+	if (gfp && bytes > FANOTIFY_INLINE_FH_LEN) {
+		/* Treat failure to allocate fh as failure to encode fh */
 		err = -ENOMEM;
 		ext_buf = kmalloc(bytes, gfp);
 		if (!ext_buf)
@@ -333,8 +358,10 @@ static int fanotify_encode_fh(struct fanotify_fh *fh, struct inode *inode,
 
 		*fanotify_fh_ext_buf_ptr(fh) = ext_buf;
 		buf = ext_buf;
+		fh->flags |= FANOTIFY_FH_FLAG_EXT_BUF;
 	}
 
+	dwords = bytes >> 2;
 	type = exportfs_encode_inode_fh(inode, buf, &dwords, NULL);
 	err = -EINVAL;
 	if (!type || type == FILEID_INVALID || bytes != dwords << 2)
@@ -419,7 +446,7 @@ static struct fanotify_event *fanotify_alloc_fid_event(struct inode *id,
 
 	ffe->fae.type = FANOTIFY_EVENT_TYPE_FID;
 	ffe->fsid = *fsid;
-	fanotify_encode_fh(&ffe->object_fh, id, gfp);
+	fanotify_encode_fh(&ffe->object_fh, id, 0, gfp);
 
 	return &ffe->fae;
 }
@@ -432,8 +459,13 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *id,
 	struct fanotify_name_event *fne;
 	struct fanotify_info *info;
 	struct fanotify_fh *dfh;
+	unsigned int dir_fh_len = fanotify_encode_fh_len(id);
+	unsigned int size;
 
-	fne = kmalloc(sizeof(*fne) + file_name->len + 1, gfp);
+	size = sizeof(*fne) + FANOTIFY_FH_HDR_LEN + dir_fh_len;
+	if (file_name)
+		size += file_name->len + 1;
+	fne = kmalloc(size, gfp);
 	if (!fne)
 		return NULL;
 
@@ -442,8 +474,13 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *id,
 	info = &fne->info;
 	fanotify_info_init(info);
 	dfh = fanotify_info_dir_fh(info);
-	info->dir_fh_totlen = fanotify_encode_fh(dfh, id, gfp);
-	fanotify_info_copy_name(info, file_name);
+	info->dir_fh_totlen = fanotify_encode_fh(dfh, id, dir_fh_len, 0);
+	if (file_name)
+		fanotify_info_copy_name(info, file_name);
+
+	pr_debug("%s: ino=%lu size=%u dir_fh_len=%u name_len=%u name='%.*s'\n",
+		 __func__, id->i_ino, size, dir_fh_len,
+		 info->name_len, info->name_len, fanotify_info_name(info));
 
 	return &fne->fae;
 }
@@ -658,12 +695,7 @@ static void fanotify_free_fid_event(struct fanotify_event *event)
 
 static void fanotify_free_name_event(struct fanotify_event *event)
 {
-	struct fanotify_name_event *fne = FANOTIFY_NE(event);
-	struct fanotify_fh *dfh = fanotify_info_dir_fh(&fne->info);
-
-	if (fanotify_fh_has_ext_buf(dfh))
-		kfree(fanotify_fh_ext_buf(dfh));
-	kfree(fne);
+	kfree(FANOTIFY_NE(event));
 }
 
 static void fanotify_free_event(struct fsnotify_event *fsn_event)
