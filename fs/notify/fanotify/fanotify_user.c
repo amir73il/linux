@@ -651,7 +651,7 @@ static __u32 fanotify_mark_remove_from_mask(struct fsnotify_mark *fsn_mark,
 					    __u32 mask, unsigned int flags,
 					    __u32 umask, int *destroy)
 {
-	__u32 oldmask = 0;
+	__u32 oldmask, removed = 0;
 
 	/* umask bits cannot be removed by user */
 	mask &= ~umask;
@@ -659,8 +659,19 @@ static __u32 fanotify_mark_remove_from_mask(struct fsnotify_mark *fsn_mark,
 	if (!(flags & FAN_MARK_IGNORED_MASK)) {
 		oldmask = fsn_mark->mask;
 		fsn_mark->mask &= ~mask;
+		removed = mask & oldmask;
 	} else {
+		oldmask = fsn_mark->ignored_mask;
 		fsn_mark->ignored_mask &= ~mask;
+		/*
+		 * We may need to clear FS_MODIFY in connector mask if we
+		 * removed an ignored mask that does not survive FS_MODIFY
+		 * and there is no FS_MODIFY is mark mask.
+		 */
+		if (oldmask && !fsn_mark->ignored_mask &&
+		    !(fsn_mark->mask & FS_MODIFY) &&
+		    !(fsn_mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY))
+			removed = FS_MODIFY;
 	}
 	/*
 	 * We need to keep the mark around even if remaining mask cannot
@@ -671,7 +682,7 @@ static __u32 fanotify_mark_remove_from_mask(struct fsnotify_mark *fsn_mark,
 	*destroy = !((fsn_mark->mask | fsn_mark->ignored_mask) & ~umask);
 	spin_unlock(&fsn_mark->lock);
 
-	return mask & oldmask;
+	return removed;
 }
 
 static int fanotify_remove_mark(struct fsnotify_group *group,
@@ -728,24 +739,41 @@ static int fanotify_remove_inode_mark(struct fsnotify_group *group,
 				    flags, umask);
 }
 
+#define FAN_RECALC_IGNORED_SURV_MODIFY ((__u32)-1)
+
 static __u32 fanotify_mark_add_to_mask(struct fsnotify_mark *fsn_mark,
 				       __u32 mask,
 				       unsigned int flags)
 {
-	__u32 oldmask = -1;
+	__u32 oldmask, added = 0;
 
 	spin_lock(&fsn_mark->lock);
 	if (!(flags & FAN_MARK_IGNORED_MASK)) {
 		oldmask = fsn_mark->mask;
 		fsn_mark->mask |= mask;
+		added = mask & ~oldmask;
 	} else {
+		oldmask = fsn_mark->ignored_mask;
 		fsn_mark->ignored_mask |= mask;
-		if (flags & FAN_MARK_IGNORED_SURV_MODIFY)
+		/* Do we need to recalc FS_MODIFY in connector mask? */
+		if (fsn_mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY) {
+			/* FS_MODIFY still needed (no change) */
+			added = 0;
+		} else if (flags & FAN_MARK_IGNORED_SURV_MODIFY) {
 			fsn_mark->flags |= FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY;
+			/* FS_MODIFY now not needed (added survive) */
+			if (!(fsn_mark->mask & FS_MODIFY))
+				added = FAN_RECALC_IGNORED_SURV_MODIFY;
+		} else if (!oldmask) {
+			/* FS_MODIFY now needed (added ignored) */
+			added = FS_MODIFY;
+		}
+
+
 	}
 	spin_unlock(&fsn_mark->lock);
 
-	return mask & ~oldmask;
+	return added;
 }
 
 static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
@@ -792,7 +820,15 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 		}
 	}
 	added = fanotify_mark_add_to_mask(fsn_mark, mask, flags);
-	if (added & ~fsnotify_conn_mask(fsn_mark->connector))
+	/*
+	 * We may need to set FS_MODIFY in connector mask if we added an ignored
+	 * mask that does not survive FS_MODIFY.  We may need to clear FS_MODIFY
+	 * if it was set because of an ignored mask on this mark that from now
+	 * on survives FS_MODIFY.
+	 */
+	if ((added & ~fsnotify_conn_mask(fsn_mark->connector)) ||
+	    (added == FAN_RECALC_IGNORED_SURV_MODIFY &&
+	     fsnotify_conn_mask(fsn_mark->connector) & FS_MODIFY))
 		fsnotify_recalc_mask(fsn_mark->connector);
 	mutex_unlock(&group->mark_mutex);
 

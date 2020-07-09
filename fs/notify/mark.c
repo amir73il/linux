@@ -116,6 +116,18 @@ __u32 fsnotify_conn_mask(struct fsnotify_mark_connector *conn)
 	return *fsnotify_conn_mask_p(conn);
 }
 
+static u32 __fsnotify_calc_mask(struct fsnotify_mark *mark)
+{
+	u32 mask = mark->mask;
+
+	/* Do we need FS_MODIFY for clearing ignored mask? */
+	if (mark->ignored_mask &&
+	    !(mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY))
+		mask |= FS_MODIFY;
+
+	return mask;
+}
+
 static void __fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 {
 	u32 new_mask = 0;
@@ -127,7 +139,7 @@ static void __fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 		return;
 	hlist_for_each_entry(mark, &conn->list, obj_list) {
 		if (mark->flags & FSNOTIFY_MARK_FLAG_ATTACHED)
-			new_mask |= mark->mask;
+			new_mask |= __fsnotify_calc_mask(mark);
 	}
 	*fsnotify_conn_mask_p(conn) = new_mask;
 }
