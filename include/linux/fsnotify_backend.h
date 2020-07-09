@@ -349,6 +349,7 @@ struct fsnotify_mark_connector {
 	spinlock_t lock;
 	unsigned short type;	/* Type of object [lock] */
 #define FSNOTIFY_CONN_FLAG_HAS_FSID	0x01
+#define FSNOTIFY_CONN_FLAG_HAS_IREF	0x02
 	unsigned short flags;	/* flags [lock] */
 	__kernel_fsid_t fsid;	/* fsid of filesystem containing object */
 	union {
@@ -501,6 +502,7 @@ extern void fsnotify_remove_queued_event(struct fsnotify_group *group,
 
 /* Flags for fsnotify_add_mark() */
 #define FSNOTIFY_ADD_MARK_ALLOW_DUPS	0x1
+#define FSNOTIFY_ADD_MARK_NO_IREF	0x2
 
 /* Get mask of events for a list of marks */
 extern __u32 fsnotify_conn_mask(struct fsnotify_mark_connector *conn);
