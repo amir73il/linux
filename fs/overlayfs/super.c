@@ -117,13 +117,23 @@ bug:
 	return dentry;
 }
 
+static bool ovl_dentry_is_deleted(struct dentry *d)
+{
+	struct inode *inode = READ_ONCE(d->d_inode);
+
+	return unlikely(!inode || IS_DEADDIR(inode));
+}
+
 static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak)
 {
 	int ret = 1;
 
-	if (weak) {
+	/* Invalidate dentry if real was deleted since we found it */
+	if (ovl_dentry_is_deleted(d)) {
+		ret = 0;
+	} else if (weak) {
 		if (d->d_flags & DCACHE_OP_WEAK_REVALIDATE)
-			ret =  d->d_op->d_weak_revalidate(d, flags);
+			ret = d->d_op->d_weak_revalidate(d, flags);
 	} else if (d->d_flags & DCACHE_OP_REVALIDATE) {
 		ret = d->d_op->d_revalidate(d, flags);
 		if (!ret) {

@@ -111,6 +111,11 @@ void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 	for (i = 0; i < oe->numlower; i++)
 		flags |= oe->lowerstack[i].dentry->d_flags;
 
+	/* Revalidate on local fs changes */
+	if ((upperdentry || oe->numlower) &&
+	    !ovl_allow_offline_changes(OVL_FS(dentry->d_sb)))
+		flags |= mask;
+
 	spin_lock(&dentry->d_lock);
 	dentry->d_flags &= ~mask;
 	dentry->d_flags |= flags & mask;
