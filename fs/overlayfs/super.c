@@ -129,7 +129,6 @@ static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak)
 		if (!ret) {
 			if (!(flags & LOOKUP_RCU))
 				d_invalidate(d);
-			ret = -ESTALE;
 		}
 	}
 	return ret;
