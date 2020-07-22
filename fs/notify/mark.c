@@ -180,9 +180,11 @@ static void *fsnotify_detach_connector_from_object(
 		return NULL;
 
 	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE) {
-		inode = fsnotify_conn_inode(conn);
-		inode->i_fsnotify_mask = 0;
-		atomic_long_inc(&inode->i_sb->s_fsnotify_inode_refs);
+		fsnotify_conn_inode(conn)->i_fsnotify_mask = 0;
+		if (conn->flags & FSNOTIFY_CONN_FLAG_HAS_IREF) {
+			inode = fsnotify_conn_inode(conn);
+			atomic_long_inc(&inode->i_sb->s_fsnotify_inode_refs);
+		}
 	} else if (conn->type == FSNOTIFY_OBJ_TYPE_VFSMOUNT) {
 		fsnotify_conn_mount(conn)->mnt_fsnotify_mask = 0;
 	} else if (conn->type == FSNOTIFY_OBJ_TYPE_SB) {
@@ -474,7 +476,7 @@ int fsnotify_compare_groups(struct fsnotify_group *a, struct fsnotify_group *b)
 }
 
 static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
-					       unsigned int obj_type,
+					       unsigned int obj_type, int flags,
 					       __kernel_fsid_t *fsid)
 {
 	struct inode *inode = NULL;
@@ -495,9 +497,11 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 		conn->fsid.val[0] = conn->fsid.val[1] = 0;
 		conn->flags = 0;
 	}
-	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE) {
+	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE &&
+	    !(flags & FSNOTIFY_ADD_MARK_NO_IREF)) {
 		inode = fsnotify_conn_inode(conn);
 		ihold(inode);
+		conn->flags |= FSNOTIFY_CONN_FLAG_HAS_IREF;
 	}
 
 	/*
@@ -568,7 +572,7 @@ restart:
 	conn = fsnotify_grab_connector(connp);
 	if (!conn) {
 		spin_unlock(&mark->lock);
-		err = fsnotify_attach_connector_to_object(connp, obj_type, fsid);
+		err = fsnotify_attach_connector_to_object(connp, obj_type, flags, fsid);
 		if (err)
 			return err;
 		goto restart;
@@ -592,6 +596,14 @@ restart:
 				    fsid->val[0], fsid->val[1],
 				    conn->fsid.val[0], conn->fsid.val[1]);
 		err = -EXDEV;
+		goto out_err;
+	}
+
+	/* TODO: mix marks that pin the inode with marks that do not */
+	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE &&
+	    !(flags & FSNOTIFY_ADD_MARK_NO_IREF) !=
+	    !!(conn->flags & FSNOTIFY_CONN_FLAG_HAS_IREF)) {
+		err = -EBUSY;
 		goto out_err;
 	}
 

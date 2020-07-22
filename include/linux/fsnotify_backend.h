@@ -440,6 +440,7 @@ struct fsnotify_mark_connector {
 	spinlock_t lock;
 	unsigned short type;	/* Type of object [lock] */
 #define FSNOTIFY_CONN_FLAG_HAS_FSID	0x01
+#define FSNOTIFY_CONN_FLAG_HAS_IREF	0x02
 	unsigned short flags;	/* flags [lock] */
 	__kernel_fsid_t fsid;	/* fsid of filesystem containing object */
 	union {
@@ -642,6 +643,7 @@ extern int fsnotify_get_conn_fsid(const struct fsnotify_mark_connector *conn,
 
 /* attach the mark to the object */
 #define FSNOTIFY_ADD_MARK_ALLOW_DUPS	0x1
+#define FSNOTIFY_ADD_MARK_NO_IREF	0x2
 
 extern int fsnotify_add_mark(struct fsnotify_mark *mark,
 			     fsnotify_connp_t *connp, unsigned int obj_type,
