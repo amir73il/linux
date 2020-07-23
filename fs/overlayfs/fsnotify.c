@@ -13,6 +13,22 @@
 #include <linux/ratelimit.h>
 #include "overlayfs.h"
 
+/* Check if lowerdir was deleted/renamed since copied up to snapshot */
+static bool ovl_snapshot_verify_origin(struct dentry *snap)
+{
+	struct ovl_entry *oe = snap->d_fsdata;
+	struct ovl_path *lower = oe->lowerstack;
+
+	/* Pure upper dir in snapshot means that lower was deleted/renamed */
+	if (!oe->numlower)
+		return false;
+
+	if (lower->hash != lower->dentry->d_name.hash_len)
+		return false;
+
+	return true;
+}
+
 /*
  * Check if lower dir or its child need to be copied to snapshot.
  *
@@ -21,7 +37,8 @@
  * snapshot's parent directory.
  *
  * Returns error if failed to lookup overlay snapshot dentry.
- * Returns NULL if found an opaque or pure upper snapshot dentry.
+ * Returns NULL if found an opaque snapshot dentry.
+ * Returns NULL if found a verified merged dir snapshot dentry.
  * Returns the found overlay snapshot dentry otherwise.
  */
 static struct dentry *ovl_snapshot_lookup(struct super_block *sb,
@@ -65,8 +82,8 @@ static struct dentry *ovl_snapshot_lookup(struct super_block *sb,
 	if (d_is_negative(snap) || !ovl_dentry_has_upper_alias(snap))
 		goto out;
 
-	/* Pure upper in snapshot returns NULL for noop */
-	if (!d_is_dir(snap) || !ovl_dentry_lower(snap))
+	/* Copied up non-dir and verified merged dir return NULL for noop */
+	if (!d_is_dir(snap) || ovl_snapshot_verify_origin(snap))
 		goto noop;
 
 out:
@@ -157,6 +174,60 @@ out:
 }
 
 /*
+ * Explicitly set a merged overlay snapshot directory opaque before creating
+ * a lower object.
+ */
+static int ovl_snapshot_set_opaque(struct dentry *snap)
+{
+	struct path upperpath;
+	struct inode *sdir = snap->d_inode;
+	const struct cred *old_cred = NULL;
+	int err = 0;
+
+	inode_lock(sdir);
+
+	/* Raced with another set opaque? */
+	if (ovl_dentry_is_opaque(snap))
+		goto out;
+
+	err = ovl_want_write(snap);
+	if (err)
+		goto out;
+
+	ovl_path_upper(snap, &upperpath);
+	old_cred = ovl_override_creds(snap->d_sb);
+	err = ovl_check_setxattr(snap, upperpath.dentry, OVL_XATTR_OPAQUE,
+				 "y", 1, -EIO);
+	if (!err)
+		err = ovl_fsync_upperdir(&upperpath);
+	/*
+	 * Setting dentry OPAQUE flag only *after* fsync, because a parallel
+	 * ovl_handle_pre_modify() MUST NOT find this dentry opaque and skip
+	 * ovl_snapshot_set_opaque() unless the opaque xattr is safe on disk.
+	 *
+	 * For example: directory A is renamed to X, file X/B/C/F is modified
+	 * and not marked in snapshot (because a is under a whiteout). Then X
+	 * is renamed back to A by thread 1, which gets here and waits on fsync.
+	 * Thread 2 tries to write to file A/B/C/F.  If it finds the snapshot
+	 * dentry is opaque, it will be able to modify file before fsync of
+	 * thread 1 has completed and file F data may hit the disk before the
+	 * OPAQUE xattr does. That will make directory A look like it has no
+	 * changes in its tree after a crash, while actually the file A/B/C/F
+	 * data was in fact modified.
+	 */
+	if (!err)
+		ovl_dentry_set_opaque(snap);
+	ovl_dir_modified(snap, true);
+
+	revert_creds(old_cred);
+	ovl_drop_write(snap);
+out:
+	inode_unlock(sdir);
+
+	return err;
+}
+
+/*
  * Mark change in snapshot if needed before file is modified.
  */
 static int ovl_handle_pre_modify(struct super_block *sb, struct dentry *lowerdir,
@@ -214,8 +285,27 @@ static int ovl_handle_pre_modify(struct super_block *sb, struct dentry *lowerdir
 	}
 
 	if (ovl_dentry_has_upper_alias(snap)) {
-		/* TODO: set upper dir opaque before creating lower */
 		err = 0;
+		/*
+		 * The snapshot dentry is expected to be a merged directory,
+		 * because a "copied up" non-dir is supposed to be pure upper
+		 * and return NULL (noop) from ovl_snapshot_lookup(), but we
+		 * could have raced with another pre modify event that has
+		 * beat us to copy up of non-dir.  In any case, there is
+		 * nothing left to do for a "copied up" non-dir.
+		 */
+		if (!d_is_dir(snap))
+			goto out;
+
+		/*
+		 * On pre modify event, we need to make a pure upper directory
+		 * opaque before creating lower.
+		 */
+		err = ovl_snapshot_set_opaque(snap);
+		if (err)
+			goto bug;
+
+		err = -EEXIST;
 		goto out;
 	}
 
@@ -241,7 +331,8 @@ static int ovl_handle_pre_modify(struct super_block *sb, struct dentry *lowerdir
 out:
 	pr_debug("%s: %pd2/%s %s in snapshot (err=%i)\n", __func__, lowerdir, fname,
 		 !snap ? (!err ? "is already" : "noop") :
-		 d_is_negative(snap) ? "whiteout created" : "created", err);
+		 d_is_negative(snap) ? "whiteout created" :
+		 err ? "set opaque" : "created", err);
 	dput(snap);
 
 	return 0;
