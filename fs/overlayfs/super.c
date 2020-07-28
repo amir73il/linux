@@ -1366,7 +1366,7 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 
 	/* Verify lower root is upper root origin */
 	err = ovl_verify_origin(upperpath->dentry, oe->lowerstack[0].dentry,
-				true);
+				true, true);
 	if (err) {
 		pr_err("failed to verify upper root origin\n");
 		goto out;
@@ -1396,7 +1396,7 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 		 */
 		if (ovl_check_origin_xattr(ofs->indexdir)) {
 			err = ovl_verify_set_fh(ofs->indexdir, OVL_XATTR_ORIGIN,
-						upperpath->dentry, true, false);
+						upperpath->dentry, true, false, true);
 			if (err)
 				pr_err("failed to verify index dir 'origin' xattr\n");
 		}

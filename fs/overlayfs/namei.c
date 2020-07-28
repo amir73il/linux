@@ -439,10 +439,12 @@ static int ovl_verify_fh(struct dentry *dentry, const char *name,
  * If @set is true and there is no stored file handle, encode @real and store
  * file handle in xattr @name.
  *
+ * If @warn is true, warn on mismatch.
+ *
  * Return 0 on match, -ESTALE on mismatch, -ENODATA on no xattr, < 0 on error.
  */
 int ovl_verify_set_fh(struct dentry *dentry, const char *name,
-		      struct dentry *real, bool is_upper, bool set)
+		      struct dentry *real, bool is_upper, bool set, bool warn)
 {
 	struct inode *inode;
 	struct ovl_fh *fh;
@@ -458,7 +460,9 @@ int ovl_verify_set_fh(struct dentry *dentry, const char *name,
 	err = ovl_verify_fh(dentry, name, fh);
 	if (set && err == -ENODATA)
 		err = ovl_do_setxattr(dentry, name, fh->buf, fh->fb.len, 0);
-	if (err)
+	else if (!warn && err == -ESTALE)
+		goto out;
+	else if (err)
 		goto fail;
 
 out:
@@ -940,7 +944,8 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		if (upperdentry && !ctr &&
 		    ((d.is_dir && ovl_verify_lower(dentry->d_sb)) ||
 		     (!d.is_dir && ofs->config.index && origin_path))) {
-			err = ovl_verify_origin(upperdentry, this, false);
+			err = ovl_verify_origin(upperdentry, this, false,
+						!ovl_is_snapshot(ofs));
 			if (err) {
 				dput(this);
 				if (d.is_dir)
