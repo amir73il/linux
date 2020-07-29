@@ -65,6 +65,7 @@ static struct dentry *ovl_snapshot_lookup(struct super_block *sb,
 	 */
 	if (name) {
 		snap = lookup_one_len_unlocked(name->name, snapdir, name->len);
+		/* TODO: make sure this does not return the "benign" errors */
 		if (IS_ERR(snap))
 			goto out;
 	} else {
@@ -229,6 +230,10 @@ out:
 
 /*
  * Mark change in snapshot if needed before file is modified.
+ *
+ * Returns 0 if change is marked snapshot
+ * Returns >0 if dir or ancestor are opaque in snapshot
+ * Returns <0 on failure to mark the change in snapshot
  */
 static int ovl_handle_pre_modify(struct super_block *sb, struct dentry *lowerdir,
 				 const struct qstr *name)
@@ -237,6 +242,7 @@ static int ovl_handle_pre_modify(struct super_block *sb, struct dentry *lowerdir
 	struct inode *inode = d_inode(lowerdir);
 	struct dentry *snap = NULL;
 	int err = -ENOENT;
+	int ret = 0;
 
 	/* Pre-modify event on disconnected parent is unexpected */
 	if (WARN_ON(lowerdir->d_flags & DCACHE_DISCONNECTED))
@@ -259,6 +265,7 @@ static int ovl_handle_pre_modify(struct super_block *sb, struct dentry *lowerdir
 		 * ESTALE - origin mismatch in snapshot?
 		 * EXDEV  - lowerdir is not under overlay lower layer root?
 		 */
+		ret = -err;
 		if (!err || err == -ENOENT || err == -ESTALE || err == -EXDEV)
 			goto out;
 
@@ -329,13 +336,13 @@ static int ovl_handle_pre_modify(struct super_block *sb, struct dentry *lowerdir
 		goto bug;
 
 out:
-	pr_debug("%s: %pd2/%s %s in snapshot (err=%i)\n", __func__, lowerdir, fname,
+	pr_debug("%s: %pd2/%s %s in snapshot (ret=%i)\n", __func__, lowerdir, fname,
 		 !snap ? (!err ? "is already" : "noop") :
 		 d_is_negative(snap) ? "whiteout created" :
-		 err ? "set opaque" : "created", err);
+		 err ? "set opaque" : "created", ret);
 	dput(snap);
 
-	return 0;
+	return ret;
 
 bug:
 	pr_warn_ratelimited("failed copy to snapshot (%pd2/%s ino=%lu, err=%i)\n",
@@ -356,6 +363,39 @@ struct ovl_mark {
 };
 
 
+static void ovl_add_ignored_mark(struct fsnotify_group *group,
+				 struct dentry *lowerdir, u32 mask)
+{
+	struct inode *inode = d_inode(lowerdir);
+	struct ovl_mark *ovm;
+	int err = -ENOMEM;
+
+	ovm = kmem_cache_alloc(ovl_mark_cachep, GFP_KERNEL);
+	if (!ovm)
+		goto out;
+
+	pr_debug("%s: %pd2 group=%p mark=%p mask=%x\n", __func__,
+		 lowerdir, group, ovm, mask);
+
+	fsnotify_init_mark(&ovm->fsn_mark, group);
+	/* Set the mark mask, so fsnotify_parent() will find this mark */
+	ovm->fsn_mark.mask = mask | FS_EVENT_ON_CHILD;
+	ovm->fsn_mark.ignored_mask = mask;
+	ovm->fsn_mark.flags = FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY;
+	err = fsnotify_add_mark(&ovm->fsn_mark, &inode->i_fsnotify_marks,
+				FSNOTIFY_OBJ_TYPE_INODE,
+				FSNOTIFY_ADD_MARK_NO_IREF, NULL);
+	fsnotify_put_mark(&ovm->fsn_mark);
+
+out:
+	if (!err)
+		return;
+
+	/* Adding ignored mask is an optimization so just warn */
+	pr_warn_ratelimited("failed add ignored mask (%pd2 ino=%lu, err=%i)\n",
+			    lowerdir, inode ? inode->i_ino : 0, err);
+}
+
 static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 			    const void *data, int data_type, struct inode *dir,
 			    const struct qstr *name, u32 cookie,
@@ -366,9 +406,8 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 	struct dentry *lowerdir = NULL;
 	int err = 0;
 
-	/* Should be no events from inode/mount marks */
-	if (WARN_ON_ONCE(fsnotify_iter_inode_mark(iter_info)) ||
-	    WARN_ON_ONCE(fsnotify_iter_vfsmount_mark(iter_info)))
+	/* Should be no events from mount marks */
+	if (WARN_ON_ONCE(fsnotify_iter_vfsmount_mark(iter_info)))
 		return 0;
 
 	if (WARN_ON(!(mask & OVL_FSNOTIFY_MASK)) || !lowerpath)
@@ -419,8 +458,31 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 	}
 
 	if (lowerdir) {
+		u32 ignored = FS_PRE_MODIFY;
+
 		err = ovl_handle_pre_modify(sb, lowerdir, name);
-		/* TODO: add inode mark on lowerdir with ignore mask */
+		if (err < 0)
+			goto out;
+
+		/*
+		 * Add inode mark on lowerdir with ignored mask.
+		 * If lowerdir is copied to snapshot ignore only FS_PRE_MODIFY.
+		 * If lowerdir or an ancestor is opaque in snapshot, ignore also
+		 * FS_PRE_MODIFY_NAME, because children do not need to and
+		 * cannot be marked in snapshot.
+		 */
+		if (err > 0)
+			ignored |= FS_PRE_MODIFY_NAME;
+
+		/*
+		 * Do not add ignored mask without FS_PRE_MODIFY_NAME from an
+		 * FS_PRE_MODIFY_NAME event, because we will keep getting those
+		 * events after adding the mark and will keep getting -EEXIST on
+		 * attempt to re-add the mark.
+		 */
+		if (!(mask & ~ignored & OVL_FSNOTIFY_MASK))
+			ovl_add_ignored_mark(group, lowerdir, ignored);
+		err = 0;
 	}
 
 out:
@@ -451,6 +513,8 @@ static int ovl_add_sb_mark(struct fsnotify_group *group,
 static void ovl_free_mark(struct fsnotify_mark *mark)
 {
 	struct ovl_mark *ovm = container_of(mark, struct ovl_mark, fsn_mark);
+
+	pr_debug("%s: group=%p mark=%p\n", __func__, mark->group, ovm);
 
 	kmem_cache_free(ovl_mark_cachep, ovm);
 }
