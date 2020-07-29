@@ -92,6 +92,7 @@ void fsnotify_destroy_group(struct fsnotify_group *group)
 
 	fsnotify_put_group(group);
 }
+EXPORT_SYMBOL_GPL(fsnotify_destroy_group);
 
 /*
  * Get reference to a group.
