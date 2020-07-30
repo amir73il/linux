@@ -21,6 +21,8 @@ struct ovl_config {
 	bool nfs_export;
 	int xino;
 	bool metacopy;
+	/* Watching lowerdir modifications */
+	bool watch;
 };
 
 struct ovl_sb {

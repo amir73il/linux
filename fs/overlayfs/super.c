@@ -355,8 +355,9 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 {
 	struct super_block *sb = dentry->d_sb;
 	struct ovl_fs *ofs = sb->s_fs_info;
+	const char *loweropt = ofs->config.watch ? "watchdir" : "lowerdir";
 
-	seq_show_option(m, "lowerdir", ofs->config.lowerdir);
+	seq_show_option(m, loweropt, ofs->config.lowerdir);
 	if (ofs->config.upperdir) {
 		seq_show_option(m, "upperdir", ofs->config.upperdir);
 		seq_show_option(m, "workdir", ofs->config.workdir);
@@ -375,6 +376,7 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 	if (ofs->config.metacopy != ovl_metacopy_def)
 		seq_printf(m, ",metacopy=%s",
 			   ofs->config.metacopy ? "on" : "off");
+
 	return 0;
 }
 
@@ -410,6 +412,8 @@ static const struct super_operations ovl_super_operations = {
 };
 
 enum {
+	OPT_WATCH,
+	OPT_WATCHDIR,
 	OPT_LOWERDIR,
 	OPT_UPPERDIR,
 	OPT_WORKDIR,
@@ -428,6 +432,8 @@ enum {
 };
 
 static const match_table_t ovl_tokens = {
+	{OPT_WATCH,			"watch"},
+	{OPT_WATCHDIR,			"watchdir=%s"},
 	{OPT_LOWERDIR,			"lowerdir=%s"},
 	{OPT_UPPERDIR,			"upperdir=%s"},
 	{OPT_WORKDIR,			"workdir=%s"},
@@ -523,6 +529,20 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 				return -ENOMEM;
 			break;
 
+#ifdef CONFIG_OVERLAY_FS_WATCH
+		/*
+		 * lowerdir=<path>,{watch} => watchdir=<path>
+		 *
+		 * XXX: Keep alternative config options?
+		 */
+		case OPT_WATCH:
+			config->watch = true;
+			break;
+
+		case OPT_WATCHDIR:
+			config->watch = true;
+			fallthrough;
+#endif
 		case OPT_LOWERDIR:
 			kfree(config->lowerdir);
 			config->lowerdir = match_strdup(&args[0]);
@@ -642,6 +662,29 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 		} else {
 			/* Automatically enable redirect otherwise. */
 			config->redirect_follow = config->redirect_dir = true;
+		}
+	}
+
+	/* Resolve watchdir/watch dependencies */
+	if (config->watch && (!config->lowerdir || config->redirect_follow ||
+			      config->metacopy || config->nfs_export)) {
+		if (!config->lowerdir) {
+			pr_err("option 'watch' requires lowerdir/watchdir\n");
+			return -EINVAL;
+		} else if (config->redirect_follow && redirect_opt) {
+			pr_err("watchdir/watch conflicting with redirect_dir=%s\n",
+			       config->redirect_mode);
+			return -EINVAL;
+		} else if (config->metacopy && metacopy_opt) {
+			pr_err("watchdir/watch conflicting with metacopy=on\n");
+			return -EINVAL;
+		} else if (config->nfs_export && index_opt) {
+			pr_err("watchdir/watch conflicting with nfs_export=on\n");
+			return -EINVAL;
+		} else {
+			/* Automatically disable redirect/metacopy/nfs_export */
+			config->redirect_follow = config->redirect_dir = false;
+			config->metacopy = config->nfs_export = false;
 		}
 	}
 
@@ -1510,6 +1553,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 {
 	int err;
 	unsigned int i;
+	const char *loweropt = ofs->config.watch ? "watchdir" : "lowerdir";
 
 	err = -ENOMEM;
 	ofs->fs = kcalloc(numlower + 1, sizeof(struct ovl_sb), GFP_KERNEL);
@@ -1552,12 +1596,12 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		 * the upperdir/workdir is in fact in-use by our
 		 * upperdir/workdir.
 		 */
-		err = ovl_setup_trap(sb, stack[i].dentry, &trap, "lowerdir");
+		err = ovl_setup_trap(sb, stack[i].dentry, &trap, loweropt);
 		if (err)
 			goto out;
 
 		if (ovl_is_inuse(stack[i].dentry)) {
-			err = ovl_report_in_use(ofs, "lowerdir");
+			err = ovl_report_in_use(ofs, loweropt);
 			if (err) {
 				iput(trap);
 				goto out;
@@ -1871,6 +1915,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	/* alloc/destroy_inode needed for setting up traps in inode cache */
 	sb->s_op = &ovl_super_operations;
 
+	err = -EINVAL;
 	if (ofs->config.upperdir) {
 		if (!ofs->config.workdir) {
 			pr_err("missing 'workdir'\n");
@@ -1892,10 +1937,30 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 		sb->s_time_gran = ovl_upper_mnt(ofs)->mnt_sb->s_time_gran;
 
 	}
+
+	if (ofs->config.watch) {
+		if (numlower > 1) {
+			pr_err("watchdir/watch is not supported with multi lower layers.\n");
+			goto out_err;
+		}
+
+		if (!ofs->config.upperdir || !ofs->workdir) {
+			pr_err("watchdir/watch requires upperdir and workdir.\n");
+			goto out_err;
+		}
+	}
+
 	oe = ovl_get_lowerstack(sb, splitlower, numlower, ofs, layers);
 	err = PTR_ERR(oe);
 	if (IS_ERR(oe))
 		goto out_err;
+
+	/* Setup fsnotify watch on lowerdir */
+	if (ofs->config.watch) {
+		err = ovl_get_watch(sb, ofs);
+		if (err)
+			goto out_err;
+	}
 
 	/* If overlay is a snapshot or has no upperdir, we force r/o mount */
 	if (!ovl_upper_mnt(ofs) || ovl_is_snapshot(ofs))

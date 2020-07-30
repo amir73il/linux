@@ -491,6 +491,19 @@ match the origin file handle that was stored at copy_up time.  If a
 found lower directory does not match the stored origin, that directory
 will not be merged with the upper directory.
 
+Changes to the underlying filesystems while part of a mounted overlay are
+allowed in the special case of an "overlay snapshot" mount.  When providing
+the mount option "watch" or replacing the mount option "lowerdir=" with
+"watchdir=", the resulting mount is a read-only overlay that acts as a
+"persistent change tracking snapshot" of a single lower tree.
+
+Any attempt to change the lower tree while overlay snapshot is mounted, will
+copy the lower object's ancestry to overlay upper tree before the change.
+Before creating a new lower object, if the overlay snapshot has no entry in
+the upper tree, a whiteout will be created in the upper tree.
+The "trusted.overlay.origin" extended attribute in overlay snapshot upper
+directories can be used to detect the case where a lower directory is
+deleted and then re-created.
 
 
 NFS export

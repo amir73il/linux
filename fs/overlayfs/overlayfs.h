@@ -353,7 +353,7 @@ static inline void ovl_inode_unlock(struct inode *inode)
 /* Is this an overlay snapshot mount? */
 static inline bool ovl_is_snapshot(struct ovl_fs *ofs)
 {
-	return ofs->config.redirect_origin;
+	return ofs->watch || ofs->config.redirect_origin;
 }
 
 
