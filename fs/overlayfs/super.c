@@ -313,7 +313,7 @@ static int ovl_statfs(struct dentry *dentry, struct kstatfs *buf)
 /* Will this overlay be forced to mount/remount ro? */
 static bool ovl_force_readonly(struct ovl_fs *ofs)
 {
-	return (!ovl_upper_mnt(ofs) || !ofs->workdir);
+	return (!ovl_upper_mnt(ofs) || !ofs->workdir || ovl_is_snapshot(ofs));
 }
 
 static const char *ovl_redirect_mode_def(void)
@@ -1871,8 +1871,8 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	if (IS_ERR(oe))
 		goto out_err;
 
-	/* If the upper fs is nonexistent, we mark overlayfs r/o too */
-	if (!ovl_upper_mnt(ofs))
+	/* If overlay is a snapshot or has no upperdir, we force r/o mount */
+	if (!ovl_upper_mnt(ofs) || ovl_is_snapshot(ofs))
 		sb->s_flags |= SB_RDONLY;
 
 	if (!ovl_force_readonly(ofs) && ofs->config.index) {

@@ -349,6 +349,12 @@ static inline void ovl_inode_unlock(struct inode *inode)
 	mutex_unlock(&OVL_I(inode)->lock);
 }
 
+/* Is this an overlay snapshot mount? */
+static inline bool ovl_is_snapshot(struct ovl_fs *ofs)
+{
+	return false;
+}
+
 
 /* namei.c */
 int ovl_check_fb_len(struct ovl_fb *fb, int fb_len);
