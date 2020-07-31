@@ -224,6 +224,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 	struct vfsmount **mounts;
 	unsigned i;
 
+	ovl_free_watch(ofs);
 	kern_unmount(ofs->snap_mnt);
 	iput(ofs->workbasedir_trap);
 	iput(ofs->indexdir_trap);
@@ -1969,11 +1970,23 @@ static struct dentry *ovl_mount(struct file_system_type *fs_type, int flags,
 	return mount_nodev(fs_type, flags, raw_data, ovl_fill_super);
 }
 
+void ovl_kill_super(struct super_block *sb)
+{
+	/*
+	 * We need to destroy the fsnotify group and wait on all pending events
+	 * *before* shutting down super block, because event handler is
+	 * derefernecing this sb from group->private.
+	 */
+	if (sb->s_root)
+		ovl_free_watch(sb->s_fs_info);
+	kill_anon_super(sb);
+}
+
 struct file_system_type ovl_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "overlay",
 	.mount		= ovl_mount,
-	.kill_sb	= kill_anon_super,
+	.kill_sb	= ovl_kill_super,
 };
 MODULE_ALIAS_FS("overlay");
 
@@ -1996,6 +2009,12 @@ static int __init ovl_init(void)
 	if (ovl_inode_cachep == NULL)
 		return -ENOMEM;
 
+	err = ovl_fsnotify_init();
+	if (err) {
+		kmem_cache_destroy(ovl_inode_cachep);
+		return err;
+	}
+
 	err = ovl_aio_request_cache_init();
 	if (!err) {
 		err = register_filesystem(&ovl_fs_type);
@@ -2008,6 +2027,8 @@ static int __init ovl_init(void)
 		}
 		ovl_aio_request_cache_destroy();
 	}
+
+	ovl_fsnotify_destroy();
 	kmem_cache_destroy(ovl_inode_cachep);
 
 	return err;
@@ -2025,6 +2046,7 @@ static void __exit ovl_exit(void)
 	rcu_barrier();
 	kmem_cache_destroy(ovl_inode_cachep);
 	ovl_aio_request_cache_destroy();
+	ovl_fsnotify_destroy();
 }
 
 module_init(ovl_init);
