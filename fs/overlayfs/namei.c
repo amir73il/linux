@@ -390,20 +390,37 @@ invalid:
 }
 
 static int ovl_check_origin(struct ovl_fs *ofs, struct dentry *upperdentry,
-			    struct ovl_path **stackp)
+			    struct ovl_path **stackp, struct ovl_lookup_data *d)
 {
 	struct ovl_fh *fh = ovl_get_fh(upperdentry, OVL_XATTR_ORIGIN);
-	int err;
+	int err = -ESTALE;
 
 	if (IS_ERR_OR_NULL(fh))
 		return PTR_ERR(fh);
 
-	err = ovl_check_origin_fh(ofs, fh, false, upperdentry, stackp);
+	if (stackp)
+		err = ovl_check_origin_fh(ofs, fh, d->is_dir, upperdentry, stackp);
 	kfree(fh);
 
 	if (err) {
-		if (err == -ESTALE)
+		if (err != -ESTALE)
+			return err;
+
+		if (!d->is_dir)
 			return 0;
+
+		d->opaque = true;
+
+		err = mnt_want_write(ovl_upper_mnt(ofs));
+		if (err)
+			return err;
+
+		/* Set opaque xattr if origin fh is stale */
+		err = ovl_do_setxattr(upperdentry, OVL_XATTR_OPAQUE, "y", 1, 0);
+		pr_debug("implicit opaque dir (%pd2) %s(err=%i)\n",
+			 upperdentry, err ? "" : "set explicit ", err);
+
+		mnt_drop_write(ovl_upper_mnt(ofs));
 		return err;
 	}
 
@@ -872,7 +889,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			 * number - it's the same as if we held a reference
 			 * to a dentry in lower layer that was moved under us.
 			 */
-			err = ovl_check_origin(ofs, upperdentry, &origin_path);
+			err = ovl_check_origin(ofs, upperdentry, &origin_path, &d);
 			if (err)
 				goto out_put_upper;
 
@@ -1018,6 +1035,20 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		ctr = 1;
 		origin = origin_path->dentry;
 		origin_path = NULL;
+	}
+
+	/*
+	 * With "redirect_dir=origin", if upper has origin xattr, but lower was
+	 * not found by name or did not match the stored origin fh, set the
+	 * upper dir opaque.
+	 */
+	if (!d.stop && upperdentry && !ctr && ofs->config.redirect_origin) {
+		err = ovl_check_origin(ofs, upperdentry, NULL, &d);
+		if (err)
+			goto out_put;
+
+		if (d.opaque)
+			upperopaque = true;
 	}
 
 	/*
