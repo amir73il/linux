@@ -13,6 +13,7 @@
 #include <uapi/linux/magic.h>
 #include <linux/fs.h>
 #include <linux/cred.h>
+#include <linux/exportfs.h>
 #include <linux/module.h>
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -254,6 +255,47 @@ static const struct super_operations ovl_snapshot_super_operations = {
 	.remount_fs	= ovl_snapshot_remount,
 };
 
+static int ovl_snapshot_encode_fh(struct inode *inode, u32 *fid, int *max_len,
+				  struct inode *parent)
+{
+	/* Encode the real fs inode */
+	return exportfs_encode_inode_fh(ovl_inode_upper(inode),
+					(struct fid *)fid, max_len,
+					parent ? ovl_inode_upper(parent) :
+					NULL);
+}
+
+static int ovl_snapshot_acceptable(void *context, struct dentry *dentry)
+{
+	return 1;
+}
+
+static struct dentry *ovl_snapshot_fh_to_dentry(struct super_block *sb,
+						struct fid *fid,
+						int fh_len, int fh_type)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct dentry *real;
+	struct dentry *this;
+
+	/* Decode the real fs inode */
+	real = exportfs_decode_fh(ovl_upper_mnt(ofs), fid, fh_len, fh_type,
+				  ovl_snapshot_acceptable, NULL);
+	if (IS_ERR_OR_NULL(real))
+		return real;
+
+	this = ovl_get_dentry(sb, real, NULL, NULL);
+	dput(real);
+
+	return this;
+}
+
+const struct export_operations ovl_snapshot_export_operations = {
+	.encode_fh      = ovl_snapshot_encode_fh,
+	.fh_to_dentry   = ovl_snapshot_fh_to_dentry,
+};
+
+
 enum {
 	OPT_SNAPSHOT,
 	OPT_NOSNAPSHOT,
@@ -442,6 +484,9 @@ static int ovl_snapshot_fill_super(struct super_block *sb, const char *dev_name,
 
 	sb->s_d_op = &ovl_snapshot_dentry_operations;
 
+	if (ovl_can_decode_fh(upperpath.dentry->d_sb))
+		sb->s_export_op = &ovl_snapshot_export_operations;
+
 	/* Never override disk quota limits or use reserved space */
 	cap_lower(cred->cap_effective, CAP_SYS_RESOURCE);
 
@@ -545,8 +590,11 @@ static int ovl_snapshot_copy_up(struct dentry *dentry)
 	bool disconnected = dentry->d_flags & DCACHE_DISCONNECTED;
 	int err = -ENOENT;
 
-	if (WARN_ON(!inode) ||
-	    WARN_ON(disconnected))
+	if (WARN_ON(!inode))
+		goto bug;
+
+	err = -ESTALE;
+	if (disconnected)
 		goto bug;
 
 	/*

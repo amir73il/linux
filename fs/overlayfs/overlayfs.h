@@ -521,6 +521,8 @@ int ovl_set_origin(struct dentry *dentry, struct dentry *lower,
 extern const struct export_operations ovl_export_operations;
 struct dentry *ovl_lookup_real(struct super_block *sb, struct dentry *real,
 			       const struct ovl_layer *layer);
+struct dentry *ovl_get_dentry(struct super_block *sb, struct dentry *upper,
+			      struct ovl_path *lowerpath, struct dentry *index);
 
 /* super.c */
 extern const struct xattr_handler *ovl_xattr_handlers[];
