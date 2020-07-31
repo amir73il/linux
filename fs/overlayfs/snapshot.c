@@ -666,9 +666,15 @@ static int ovl_snapshot_copy_up(struct dentry *dentry)
 	 * Before a directory is renamed, we usually cover the target with a
 	 * whiteout. When directory is exchanged with a file in a metacopy
 	 * snapshot, we cover the target with an empty file instead.
+	 * With metacopy snapshot, file is not copied up, only an empty file or
+	 * its parent dir, so there is no fsync in copy up.  We need to make
+	 * sure that the change markers are persistent on-disk before making
+	 * the modification to make sure that we will find them after a crash.
+	 * Use the O_SYNC flag to request fsync of parent before a parallel
+	 * thread can find the overlay dentry ovl_already_copied_up().
 	 */
 	if (ofs->config.metacopy)
-		flags |= O_TRUNC;
+		flags |= O_TRUNC | OVL_SYNC_DIRECTORY;
 
 	err = ovl_copy_up_flags(snap, flags);
 	ovl_drop_write(snap);
