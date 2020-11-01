@@ -47,6 +47,8 @@
 #define FS_OPEN_PERM		0x00010000	/* open event in an permission hook */
 #define FS_ACCESS_PERM		0x00020000	/* access event in a permissions hook */
 #define FS_OPEN_EXEC_PERM	0x00040000	/* open/exec event in a permission hook */
+#define FS_PRE_MODIFY		0x00080000	/* Modification intent (internal only) */
+#define FS_PRE_MODIFY_NAME	0x00100000	/* Link/Unlink intent (internal only) */
 
 #define FS_EXCL_UNLINK		0x04000000	/* do not send events if object is unlinked */
 /*
@@ -74,6 +76,9 @@
 #define ALL_FSNOTIFY_PERM_EVENTS (FS_OPEN_PERM | FS_ACCESS_PERM | \
 				  FS_OPEN_EXEC_PERM)
 
+/* Events generated before modifications and without any filesystem locks */
+#define ALL_FSNOTIFY_PRE_MODIFY_EVENTS	(FS_PRE_MODIFY | FS_PRE_MODIFY_NAME)
+
 /*
  * This is a list of all events that may get sent to a parent that is watching
  * with flag FS_EVENT_ON_CHILD based on fs event on a child of that directory.
@@ -81,7 +86,7 @@
 #define FS_EVENTS_POSS_ON_CHILD   (ALL_FSNOTIFY_PERM_EVENTS | \
 				   FS_ACCESS | FS_MODIFY | FS_ATTRIB | \
 				   FS_CLOSE_WRITE | FS_CLOSE_NOWRITE | \
-				   FS_OPEN | FS_OPEN_EXEC)
+				   FS_OPEN | FS_OPEN_EXEC | FS_PRE_MODIFY)
 
 /*
  * This is a list of all events that may get sent with the parent inode as the
@@ -93,6 +98,7 @@
 
 /* Events that can be reported to backends */
 #define ALL_FSNOTIFY_EVENTS (ALL_FSNOTIFY_DIRENT_EVENTS | \
+			     ALL_FSNOTIFY_PRE_MODIFY_EVENTS | \
 			     FS_EVENTS_POSS_ON_CHILD | \
 			     FS_DELETE_SELF | FS_MOVE_SELF | FS_DN_RENAME | \
 			     FS_UNMOUNT | FS_Q_OVERFLOW | FS_IN_IGNORED)
@@ -354,6 +360,7 @@ struct fsnotify_mark_connector {
 	spinlock_t lock;
 	unsigned short type;	/* Type of object [lock] */
 #define FSNOTIFY_CONN_FLAG_HAS_FSID	0x01
+#define FSNOTIFY_CONN_FLAG_HAS_IREF	0x02
 	unsigned short flags;	/* flags [lock] */
 	__kernel_fsid_t fsid;	/* fsid of filesystem containing object */
 	union {
@@ -505,6 +512,29 @@ extern void fsnotify_remove_queued_event(struct fsnotify_group *group,
 
 /* functions used to manipulate the marks attached to inodes */
 
+/* Get mask for calculating object interest taking ignored mask into account */
+static inline __u32 fsnotify_calc_mask(struct fsnotify_mark *mark)
+{
+	__u32 mask = mark->mask;
+
+	if (!mark->ignored_mask)
+		return mask;
+
+	/* Interest in FS_MODIFY may be needed for clearing ignored mask */
+	if (!(mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY))
+		mask |= FS_MODIFY;
+
+	/*
+	 * If parent is interested in ignoring events on children, it must
+	 * show interest in those events for fsnotify_parent() to notice it.
+	 */
+	if (mark->connector->type == FSNOTIFY_OBJ_TYPE_INODE &&
+	    (mark->mask & FS_EVENT_ON_CHILD))
+		mask |= mark->ignored_mask & FS_EVENTS_POSS_ON_CHILD;
+
+	return mask;
+}
+
 /* Get mask of events for a list of marks */
 extern __u32 fsnotify_conn_mask(struct fsnotify_mark_connector *conn);
 /* Calculate mask of events for a list of marks */
@@ -517,30 +547,31 @@ extern struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
 /* Get cached fsid of filesystem containing object */
 extern int fsnotify_get_conn_fsid(const struct fsnotify_mark_connector *conn,
 				  __kernel_fsid_t *fsid);
+
 /* attach the mark to the object */
+#define FSNOTIFY_ADD_MARK_ALLOW_DUPS	0x1
+#define FSNOTIFY_ADD_MARK_NO_IREF	0x2
+
 extern int fsnotify_add_mark(struct fsnotify_mark *mark,
 			     fsnotify_connp_t *connp, unsigned int type,
-			     int allow_dups, __kernel_fsid_t *fsid);
+			     int flags, __kernel_fsid_t *fsid);
 extern int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 				    fsnotify_connp_t *connp,
-				    unsigned int type, int allow_dups,
+				    unsigned int type, int flags,
 				    __kernel_fsid_t *fsid);
 
 /* attach the mark to the inode */
 static inline int fsnotify_add_inode_mark(struct fsnotify_mark *mark,
-					  struct inode *inode,
-					  int allow_dups)
+					  struct inode *inode, int flags)
 {
 	return fsnotify_add_mark(mark, &inode->i_fsnotify_marks,
-				 FSNOTIFY_OBJ_TYPE_INODE, allow_dups, NULL);
+				 FSNOTIFY_OBJ_TYPE_INODE, flags, NULL);
 }
 static inline int fsnotify_add_inode_mark_locked(struct fsnotify_mark *mark,
-						 struct inode *inode,
-						 int allow_dups)
+						 struct inode *inode, int flags)
 {
 	return fsnotify_add_mark_locked(mark, &inode->i_fsnotify_marks,
-					FSNOTIFY_OBJ_TYPE_INODE, allow_dups,
-					NULL);
+					FSNOTIFY_OBJ_TYPE_INODE, flags, NULL);
 }
 
 /* given a group and a mark, flag mark to be freed when all references are dropped */

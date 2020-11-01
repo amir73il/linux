@@ -1576,12 +1576,21 @@ extern struct timespec64 current_time(struct inode *inode);
  */
 
 void __sb_end_write(struct super_block *sb, int level);
-int __sb_start_write(struct super_block *sb, int level, bool wait);
+int __sb_file_start_write(struct super_block *sb, struct file *file, int level, bool wait);
 
 #define __sb_writers_acquired(sb, lev)	\
 	percpu_rwsem_acquire(&(sb)->s_writers.rw_sem[(lev)-1], 1, _THIS_IP_)
 #define __sb_writers_release(sb, lev)	\
 	percpu_rwsem_release(&(sb)->s_writers.rw_sem[(lev)-1], 1, _THIS_IP_)
+
+/*
+ * This is an internal function, please use sb_start_{write,pagefault,intwrite}
+ * instead.
+ */
+static inline int __sb_start_write(struct super_block *sb, int level, bool wait)
+{
+	return __sb_file_start_write(sb, NULL, level, wait);
+}
 
 /**
  * sb_end_write - drop write access to a superblock
@@ -2776,11 +2785,29 @@ static inline bool execute_ok(struct inode *inode)
 	return (inode->i_mode & S_IXUGO) || S_ISDIR(inode->i_mode);
 }
 
+/*
+ * This is an internal function, please use file_start_write{,_trylock} instead.
+ *
+ * Returns 0 for success and <0 for error.
+ */
+static inline int __file_start_write(struct file *file)
+{
+	return __sb_file_start_write(file_inode(file)->i_sb, file, SB_FREEZE_WRITE, true);
+}
+
+/**
+ * __file_start_write - get freeze protection to a file's superblock
+ * @file: the file whose super we write to
+ *
+ * In addition to getting freeze protection, it is also used to notify
+ * listeners on an intent to make a modification in the filesystem.
+ * We proceed with the write even if notification devlivery failed.
+ */
 static inline void file_start_write(struct file *file)
 {
 	if (!S_ISREG(file_inode(file)->i_mode))
 		return;
-	__sb_start_write(file_inode(file)->i_sb, SB_FREEZE_WRITE, true);
+	__file_start_write(file);
 }
 
 static inline bool file_start_write_trylock(struct file *file)

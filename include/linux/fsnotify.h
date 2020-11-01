@@ -26,17 +26,18 @@
  * FS_EVENT_ON_CHILD mask on the parent inode and will not be reported if only
  * the child is interested and not the parent.
  */
-static inline void fsnotify_name(struct inode *dir, __u32 mask,
-				 struct inode *child,
-				 const struct qstr *name, u32 cookie)
+static inline int fsnotify_name(__u32 mask, const void *data, int data_type,
+				struct inode *dir, const struct qstr *name,
+				u32 cookie)
 {
-	fsnotify(mask, child, FSNOTIFY_EVENT_INODE, dir, name, NULL, cookie);
+	return fsnotify(mask, data, data_type, dir, name, NULL, cookie);
 }
 
 static inline void fsnotify_dirent(struct inode *dir, struct dentry *dentry,
 				   __u32 mask)
 {
-	fsnotify_name(dir, mask, d_inode(dentry), &dentry->d_name, 0);
+	fsnotify_name(mask, d_inode(dentry), FSNOTIFY_EVENT_INODE,
+		      dir, &dentry->d_name, 0);
 }
 
 static inline void fsnotify_inode(struct inode *inode, __u32 mask)
@@ -145,8 +146,10 @@ static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
 		new_dir_mask |= FS_ISDIR;
 	}
 
-	fsnotify_name(old_dir, old_dir_mask, source, old_name, fs_cookie);
-	fsnotify_name(new_dir, new_dir_mask, source, new_name, fs_cookie);
+	fsnotify_name(old_dir_mask, source, FSNOTIFY_EVENT_INODE,
+		      old_dir, old_name, fs_cookie);
+	fsnotify_name(new_dir_mask, source, FSNOTIFY_EVENT_INODE,
+		      new_dir, new_name, fs_cookie);
 
 	if (target)
 		fsnotify_link_count(target);
@@ -200,7 +203,8 @@ static inline void fsnotify_link(struct inode *dir, struct inode *inode,
 	fsnotify_link_count(inode);
 	audit_inode_child(dir, new_dentry, AUDIT_TYPE_CHILD_CREATE);
 
-	fsnotify_name(dir, FS_CREATE, inode, &new_dentry->d_name, 0);
+	fsnotify_name(FS_CREATE, inode, FSNOTIFY_EVENT_INODE,
+		      dir, &new_dentry->d_name, 0);
 }
 
 /*
@@ -237,6 +241,50 @@ static inline void fsnotify_rmdir(struct inode *dir, struct dentry *dentry)
 	WARN_ON_ONCE(d_is_negative(dentry));
 
 	fsnotify_dirent(dir, dentry, FS_DELETE | FS_ISDIR);
+}
+
+/*
+ * fsnotify_pre_modify_path - object at path is about to be modified
+ *
+ * This event may block and is intended for internal kernel listeners only.
+ *
+ * Caller must NOT hold any filesystem locks, because backend may need to
+ * write to another filesystem.
+ */
+static inline int fsnotify_pre_modify_path(const struct path *path)
+{
+	return fsnotify_parent(path->dentry, FS_PRE_MODIFY, path,
+			       FSNOTIFY_EVENT_PATH);
+}
+
+/*
+ * fsnotify_pre_modify_name - object at path/name is about to be linked/unlinked
+ *
+ * The object at path/name could already exist or is about to be created.
+ *
+ * This event may block and is intended for internal kernel listeners only.
+ *
+ * Caller must NOT hold any filesystem locks, because backend may need to
+ * write to another filesystem.
+ */
+static inline int fsnotify_pre_modify_name(const struct path *path,
+					   const struct qstr *name)
+{
+	return fsnotify_name(FS_PRE_MODIFY_NAME, path, FSNOTIFY_EVENT_PATH,
+			     d_inode(path->dentry), name, 0);
+}
+
+/*
+ * fsnotify_pre_modify - file is about to be modified
+ *
+ * This event may block and is intended for internal kernel listeners only.
+ *
+ * Caller must NOT hold any filesystem locks, because backend may need to
+ * write to another filesystem.
+ */
+static inline int fsnotify_pre_modify(struct file *file)
+{
+	return fsnotify_file(file, FS_PRE_MODIFY);
 }
 
 /*

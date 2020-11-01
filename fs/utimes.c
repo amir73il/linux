@@ -32,7 +32,7 @@ int vfs_utimes(const struct path *path, struct timespec64 *times)
 			times = NULL;
 	}
 
-	error = mnt_want_write(path->mnt);
+	error = mnt_want_write_path(path);
 	if (error)
 		goto out;
 
