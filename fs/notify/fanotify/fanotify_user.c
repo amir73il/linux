@@ -760,7 +760,7 @@ static int fanotify_remove_mark(struct fsnotify_group *group,
 
 	removed = fanotify_mark_remove_from_mask(fsn_mark, mask, flags,
 						 umask, &destroy_mark);
-	if (removed & fsnotify_conn_mask(fsn_mark->connector))
+	if (!mask || (removed & fsnotify_conn_mask(fsn_mark->connector)))
 		fsnotify_recalc_mask(fsn_mark->connector);
 	if (destroy_mark)
 		fsnotify_detach_mark(fsn_mark);
@@ -779,6 +779,35 @@ static int fanotify_remove_vfsmount_mark(struct fsnotify_group *group,
 {
 	return fanotify_remove_mark(group, &real_mount(mnt)->mnt_fsnotify_marks,
 				    mask, flags, umask);
+}
+
+static int fanotify_remove_sb_view_mark(struct fsnotify_group *group,
+					struct vfsmount *mnt, __u32 mask,
+					unsigned int flags, __u32 umask)
+{
+	struct fsnotify_mark *sb_mark;
+	int ret;
+
+	/* Find the head sb mark */
+	mutex_lock(&group->mark_mutex);
+	sb_mark = fsnotify_find_mark(&mnt->mnt_sb->s_fsnotify_marks, group);
+	mutex_unlock(&group->mark_mutex);
+	/* Cannot have both sb mark and sb_view marks on the same sb */
+	if (!sb_mark || !(sb_mark->flags & FSNOTIFY_MARK_FLAG_SB_VIEW_HEAD)) {
+		if (sb_mark)
+			fsnotify_put_mark(sb_mark);
+		return -ENOENT;
+	}
+
+	/* Update or destroy the sb_view mark */
+	ret = fanotify_remove_mark(group, &fsnotify_sbv_mark(sb_mark)->sbv_marks,
+				   mask, flags, umask);
+	fsnotify_put_mark(sb_mark);
+	if (ret)
+		return ret;
+
+	/* Remove mask 0 to update or destroy the head sb mark */
+	return fanotify_remove_mark(group, &mnt->mnt_sb->s_fsnotify_marks, 0, flags, umask);
 }
 
 static int fanotify_remove_sb_mark(struct fsnotify_group *group,
@@ -833,6 +862,7 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 		return ERR_PTR(-ENOMEM);
 
 	fsnotify_init_mark(mark, group);
+	fsnotify_sbv_mark(mark)->mnt = NULL;
 	ret = fsnotify_add_mark_locked(mark, connp, type, 0, fsid);
 	if (ret) {
 		fsnotify_put_mark(mark);
@@ -843,13 +873,19 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 }
 
 
-static int fanotify_add_mark(struct fsnotify_group *group,
+/* Returns fsnotify_mark with elevated refcount */
+static struct fsnotify_mark *__fanotify_add_mark(struct fsnotify_group *group,
 			     fsnotify_connp_t *connp, unsigned int type,
 			     __u32 mask, unsigned int flags,
-			     __kernel_fsid_t *fsid)
+			     __kernel_fsid_t *fsid, struct vfsmount *mnt)
 {
 	struct fsnotify_mark *fsn_mark;
 	__u32 added;
+	unsigned int sb_view_head = 0;
+
+	if (type == FSNOTIFY_OBJ_TYPE_SB &&
+	    (flags & FAN_MARK_FS_VIEW) == FAN_MARK_FS_VIEW)
+		sb_view_head = FSNOTIFY_MARK_FLAG_SB_VIEW_HEAD;
 
 	mutex_lock(&group->mark_mutex);
 	fsn_mark = fsnotify_find_mark(connp, group);
@@ -857,13 +893,37 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 		fsn_mark = fanotify_add_new_mark(group, connp, type, fsid);
 		if (IS_ERR(fsn_mark)) {
 			mutex_unlock(&group->mark_mutex);
-			return PTR_ERR(fsn_mark);
+			return fsn_mark;
 		}
+		if (type == FSNOTIFY_OBJ_TYPE_SB_VIEW)
+			fsnotify_sbv_mark(fsn_mark)->mnt = mnt;
+		else
+			fsn_mark->flags |= sb_view_head;
+
+	} else if ((fsn_mark->flags & FSNOTIFY_MARK_FLAG_SB_VIEW_HEAD) != sb_view_head) {
+		/* Cannot have both sb mark and sb_view marks on the same sb */
+		mutex_unlock(&group->mark_mutex);
+		fsnotify_put_mark(fsn_mark);
+		return ERR_PTR(-EEXIST);
 	}
 	added = fanotify_mark_add_to_mask(fsn_mark, mask, flags);
-	if (added & ~fsnotify_conn_mask(fsn_mark->connector))
+	if (!mask || (added & ~fsnotify_conn_mask(fsn_mark->connector)))
 		fsnotify_recalc_mask(fsn_mark->connector);
 	mutex_unlock(&group->mark_mutex);
+
+	return fsn_mark;
+}
+
+static int fanotify_add_mark(struct fsnotify_group *group,
+			     fsnotify_connp_t *connp, unsigned int type,
+			     __u32 mask, unsigned int flags,
+			     __kernel_fsid_t *fsid, struct vfsmount *mnt)
+{
+	struct fsnotify_mark *fsn_mark;
+
+	fsn_mark = __fanotify_add_mark(group, connp, type, mask, flags, fsid, mnt);
+	if (IS_ERR(fsn_mark))
+		return PTR_ERR(fsn_mark);
 
 	fsnotify_put_mark(fsn_mark);
 	return 0;
@@ -874,7 +934,31 @@ static int fanotify_add_vfsmount_mark(struct fsnotify_group *group,
 				      unsigned int flags, __kernel_fsid_t *fsid)
 {
 	return fanotify_add_mark(group, &real_mount(mnt)->mnt_fsnotify_marks,
-				 FSNOTIFY_OBJ_TYPE_VFSMOUNT, mask, flags, fsid);
+				 FSNOTIFY_OBJ_TYPE_VFSMOUNT, mask, flags, fsid, NULL);
+}
+
+static int fanotify_add_sb_view_mark(struct fsnotify_group *group,
+				     struct vfsmount *mnt, __u32 mask,
+				     unsigned int flags, __kernel_fsid_t *fsid)
+{
+	struct fsnotify_mark *sb_mark;
+	int ret;
+
+	sb_mark = __fanotify_add_mark(group, &mnt->mnt_sb->s_fsnotify_marks,
+				      FSNOTIFY_OBJ_TYPE_SB, mask, flags, fsid, mnt);
+	if (IS_ERR(sb_mark))
+		return PTR_ERR(sb_mark);
+
+	/* Add to sb_view mark */
+	ret = fanotify_add_mark(group, &fsnotify_sbv_mark(sb_mark)->sbv_marks,
+				FSNOTIFY_OBJ_TYPE_SB_VIEW, mask, flags, fsid, mnt);
+	fsnotify_put_mark(sb_mark);
+	if (ret)
+		return ret;
+
+	/* Add mask 0 to re-calc the sb object mask after updating the sb view head mark mask */
+	return fanotify_add_mark(group, &mnt->mnt_sb->s_fsnotify_marks, FSNOTIFY_OBJ_TYPE_SB, 0,
+				 flags, fsid, mnt);
 }
 
 static int fanotify_add_sb_mark(struct fsnotify_group *group,
@@ -882,7 +966,7 @@ static int fanotify_add_sb_mark(struct fsnotify_group *group,
 				unsigned int flags, __kernel_fsid_t *fsid)
 {
 	return fanotify_add_mark(group, &sb->s_fsnotify_marks,
-				 FSNOTIFY_OBJ_TYPE_SB, mask, flags, fsid);
+				 FSNOTIFY_OBJ_TYPE_SB, mask, flags, fsid, NULL);
 }
 
 static int fanotify_add_inode_mark(struct fsnotify_group *group,
@@ -902,7 +986,7 @@ static int fanotify_add_inode_mark(struct fsnotify_group *group,
 		return 0;
 
 	return fanotify_add_mark(group, &inode->i_fsnotify_marks,
-				 FSNOTIFY_OBJ_TYPE_INODE, mask, flags, fsid);
+				 FSNOTIFY_OBJ_TYPE_INODE, mask, flags, fsid, NULL);
 }
 
 static struct fsnotify_event *fanotify_alloc_overflow_event(void)
@@ -1116,7 +1200,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	struct path path;
 	__kernel_fsid_t __fsid, *fsid = NULL;
 	u32 valid_mask = FANOTIFY_EVENTS | FANOTIFY_EVENT_FLAGS;
-	unsigned int mark_type = flags & FANOTIFY_MARK_TYPE_BITS;
+	unsigned int mark_type = FANOTIFY_MARK_TYPE(flags);
 	bool ignored = flags & FAN_MARK_IGNORED_MASK;
 	unsigned int obj_type, fid_mode;
 	u32 umask = 0;
@@ -1138,6 +1222,9 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		break;
 	case FAN_MARK_MOUNT:
 		obj_type = FSNOTIFY_OBJ_TYPE_VFSMOUNT;
+		break;
+	case FAN_MARK_FS_VIEW:
+		obj_type = FSNOTIFY_OBJ_TYPE_SB_VIEW;
 		break;
 	case FAN_MARK_FILESYSTEM:
 		obj_type = FSNOTIFY_OBJ_TYPE_SB;
@@ -1205,6 +1292,8 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		ret = 0;
 		if (mark_type == FAN_MARK_MOUNT)
 			fsnotify_clear_vfsmount_marks_by_group(group);
+		else if (mark_type == FAN_MARK_FS_VIEW)
+			fsnotify_clear_sb_view_marks_by_group(group);
 		else if (mark_type == FAN_MARK_FILESYSTEM)
 			fsnotify_clear_sb_marks_by_group(group);
 		else
@@ -1256,6 +1345,9 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		if (mark_type == FAN_MARK_MOUNT)
 			ret = fanotify_add_vfsmount_mark(group, mnt, mask,
 							 flags, fsid);
+		else if (mark_type == FAN_MARK_FS_VIEW)
+			ret = fanotify_add_sb_view_mark(group, mnt, mask,
+							flags, fsid);
 		else if (mark_type == FAN_MARK_FILESYSTEM)
 			ret = fanotify_add_sb_mark(group, mnt->mnt_sb, mask,
 						   flags, fsid);
@@ -1267,6 +1359,9 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		if (mark_type == FAN_MARK_MOUNT)
 			ret = fanotify_remove_vfsmount_mark(group, mnt, mask,
 							    flags, umask);
+		else if (mark_type == FAN_MARK_FS_VIEW)
+			ret = fanotify_remove_sb_view_mark(group, mnt, mask,
+							   flags, umask);
 		else if (mark_type == FAN_MARK_FILESYSTEM)
 			ret = fanotify_remove_sb_mark(group, mnt->mnt_sb, mask,
 						      flags, umask);
@@ -1318,7 +1413,7 @@ static int __init fanotify_user_setup(void)
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 10);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 9);
 
-	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
+	fanotify_mark_cache = KMEM_CACHE(fsnotify_sb_view_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);
 	fanotify_fid_event_cachep = KMEM_CACHE(fanotify_fid_event,
 					       SLAB_PANIC);

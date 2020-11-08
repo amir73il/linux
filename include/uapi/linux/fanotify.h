@@ -79,6 +79,8 @@
 #define FAN_MARK_INODE		0x00000000
 #define FAN_MARK_MOUNT		0x00000010
 #define FAN_MARK_FILESYSTEM	0x00000100
+/* FS View is a subtree of a filesystem accessible from a specific mount point */
+#define FAN_MARK_FS_VIEW	(FAN_MARK_FILESYSTEM | FAN_MARK_MOUNT)
 
 /* Deprecated - do not use this in programs and do not add new flags here! */
 #define FAN_ALL_MARK_FLAGS	(FAN_MARK_ADD |\

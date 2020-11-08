@@ -279,6 +279,7 @@ enum fsnotify_obj_type {
 	FSNOTIFY_OBJ_TYPE_INODE,
 	FSNOTIFY_OBJ_TYPE_CHILD,
 	FSNOTIFY_OBJ_TYPE_VFSMOUNT,
+	FSNOTIFY_OBJ_TYPE_SB_VIEW,
 	FSNOTIFY_OBJ_TYPE_SB,
 	FSNOTIFY_OBJ_TYPE_COUNT,
 	FSNOTIFY_OBJ_TYPE_DETACHED = FSNOTIFY_OBJ_TYPE_COUNT
@@ -287,6 +288,7 @@ enum fsnotify_obj_type {
 #define FSNOTIFY_OBJ_TYPE_INODE_FL	(1U << FSNOTIFY_OBJ_TYPE_INODE)
 #define FSNOTIFY_OBJ_TYPE_CHILD_FL	(1U << FSNOTIFY_OBJ_TYPE_CHILD)
 #define FSNOTIFY_OBJ_TYPE_VFSMOUNT_FL	(1U << FSNOTIFY_OBJ_TYPE_VFSMOUNT)
+#define FSNOTIFY_OBJ_TYPE_SB_VIEW_FL	(1U << FSNOTIFY_OBJ_TYPE_SB_VIEW)
 #define FSNOTIFY_OBJ_TYPE_SB_FL		(1U << FSNOTIFY_OBJ_TYPE_SB)
 #define FSNOTIFY_OBJ_ALL_TYPES_MASK	((1U << FSNOTIFY_OBJ_TYPE_COUNT) - 1)
 
@@ -403,8 +405,29 @@ struct fsnotify_mark {
 #define FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY	0x01
 #define FSNOTIFY_MARK_FLAG_ALIVE		0x02
 #define FSNOTIFY_MARK_FLAG_ATTACHED		0x04
+#define FSNOTIFY_MARK_FLAG_SB_VIEW_HEAD		0x08
 	unsigned int flags;		/* flags [mark->lock] */
 };
+
+/*
+ * The head sb_view mark is connected to an sb objects and the rest of the
+ * sb_view marks are connected to the head mark.
+ * The mask on the head mark is the cumulative mask of all sb_view marks.
+ */
+struct fsnotify_sb_view_mark {
+	struct fsnotify_mark fsn_mark;
+	union {
+		/* sb_view marks connected to this head sb mark */
+		struct fsnotify_mark_connector __rcu *sbv_marks;
+		/* mntpoint associated with this sb view mark */
+		struct vfsmount *mnt;
+	};
+};
+
+static inline struct fsnotify_sb_view_mark *fsnotify_sbv_mark(struct fsnotify_mark *fsn_mark)
+{
+	return container_of(fsn_mark, struct fsnotify_sb_view_mark, fsn_mark);
+}
 
 #ifdef CONFIG_FSNOTIFY
 
@@ -552,22 +575,31 @@ extern void fsnotify_detach_mark(struct fsnotify_mark *mark);
 extern void fsnotify_free_mark(struct fsnotify_mark *mark);
 /* Wait until all marks queued for destruction are destroyed */
 extern void fsnotify_wait_marks_destroyed(void);
-/* run all the marks in a group, and clear all of the marks attached to given object type */
-extern void fsnotify_clear_marks_by_group(struct fsnotify_group *group, unsigned int type);
+/* run all the marks in a group, and clear all of the marks by object type and flags */
+extern void fsnotify_clear_marks_by_group(struct fsnotify_group *group, unsigned int type,
+					  unsigned int flags);
 /* run all the marks in a group, and clear all of the vfsmount marks */
 static inline void fsnotify_clear_vfsmount_marks_by_group(struct fsnotify_group *group)
 {
-	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_VFSMOUNT_FL);
+	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_VFSMOUNT_FL, 0);
 }
 /* run all the marks in a group, and clear all of the inode marks */
 static inline void fsnotify_clear_inode_marks_by_group(struct fsnotify_group *group)
 {
-	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_INODE_FL);
+	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_INODE_FL, 0);
 }
-/* run all the marks in a group, and clear all of the sn marks */
+/* run all the marks in a group, and clear all of the sb view marks */
+static inline void fsnotify_clear_sb_view_marks_by_group(struct fsnotify_group *group)
+{
+	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_SB_VIEW_FL, 0);
+	/* Clear all sb marks associated with sb view marks */
+	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_SB_FL,
+				      FSNOTIFY_MARK_FLAG_SB_VIEW_HEAD);
+}
+/* run all the marks in a group, and clear all of the sb marks */
 static inline void fsnotify_clear_sb_marks_by_group(struct fsnotify_group *group)
 {
-	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_SB_FL);
+	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_SB_FL, 0);
 }
 extern void fsnotify_get_mark(struct fsnotify_mark *mark);
 extern void fsnotify_put_mark(struct fsnotify_mark *mark);

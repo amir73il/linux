@@ -275,6 +275,9 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 	return ops->handle_inode_event(child_mark, mask, inode, NULL, NULL);
 }
 
+static struct fsnotify_mark *fsnotify_first_mark(struct fsnotify_mark_connector **connp);
+static struct fsnotify_mark *fsnotify_next_mark(struct fsnotify_mark *mark);
+
 static int send_to_group(__u32 mask, const void *data, int data_type,
 			 struct inode *dir, const struct qstr *file_name,
 			 u32 cookie, struct fsnotify_iter_info *iter_info)
@@ -305,9 +308,39 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 		if (!fsnotify_iter_should_report_type(iter_info, type))
 			continue;
 		mark = iter_info->marks[type];
+		if (!mark)
+			continue;
+
 		/* does the object mark tell us to do something? */
-		if (mark) {
-			group = mark->group;
+		group = mark->group;
+		if (type == FSNOTIFY_OBJ_TYPE_SB && mark &&
+		     (mark->flags & FSNOTIFY_MARK_FLAG_SB_VIEW_HEAD)) {
+			const struct path *path = fsnotify_data_path(data, data_type);
+			struct fsnotify_sb_view_mark *sbv_mark = (void *)mark;
+
+			/* TODO: pass FSNOTIFY_EVENT_DENTRY data type for dir modify events */
+			if (!path || !sbv_mark->sbv_marks)
+				continue;
+
+			/*
+			 * Iterate sb_view marks and apply masks if victim is under mnt root.
+			 * We already have rcu read lock and d_ancestor is accurate enough
+			 * for our needs - if any of the ancestors have been moved in or out
+			 * of the mnt root path, we may either send the event or not.
+			 * The important thing is that if ancestry was always under mnt root
+			 * we will send the event.
+			 */
+			for (sbv_mark = (void *)fsnotify_first_mark(&sbv_mark->sbv_marks);
+			     sbv_mark; sbv_mark = (void *)fsnotify_next_mark((void *)sbv_mark)) {
+				if ((!(test_mask & sbv_mark->fsn_mark.mask) &&
+				     !(test_mask & sbv_mark->fsn_mark.ignored_mask)) ||
+				    !d_ancestor(sbv_mark->mnt->mnt_root, path->dentry))
+					continue;
+
+				marks_mask |= sbv_mark->fsn_mark.mask;
+				marks_ignored_mask |= sbv_mark->fsn_mark.ignored_mask;
+			}
+		} else {
 			marks_mask |= mark->mask;
 			marks_ignored_mask |= mark->ignored_mask;
 		}

@@ -103,6 +103,8 @@ static __u32 *fsnotify_conn_mask_p(struct fsnotify_mark_connector *conn)
 		return &fsnotify_conn_inode(conn)->i_fsnotify_mask;
 	else if (conn->type == FSNOTIFY_OBJ_TYPE_VFSMOUNT)
 		return &fsnotify_conn_mount(conn)->mnt_fsnotify_mask;
+	else if (conn->type == FSNOTIFY_OBJ_TYPE_SB_VIEW)
+		return &fsnotify_conn_sb_view_mark(conn)->fsn_mark.mask;
 	else if (conn->type == FSNOTIFY_OBJ_TYPE_SB)
 		return &fsnotify_conn_sb(conn)->s_fsnotify_mask;
 	return NULL;
@@ -185,6 +187,8 @@ static void *fsnotify_detach_connector_from_object(
 		atomic_long_inc(&inode->i_sb->s_fsnotify_inode_refs);
 	} else if (conn->type == FSNOTIFY_OBJ_TYPE_VFSMOUNT) {
 		fsnotify_conn_mount(conn)->mnt_fsnotify_mask = 0;
+	} else if (conn->type == FSNOTIFY_OBJ_TYPE_SB_VIEW) {
+		fsnotify_conn_sb_view_mark(conn)->fsn_mark.mask = 0;
 	} else if (conn->type == FSNOTIFY_OBJ_TYPE_SB) {
 		fsnotify_conn_sb(conn)->s_fsnotify_mask = 0;
 	}
@@ -720,9 +724,9 @@ struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
 }
 EXPORT_SYMBOL_GPL(fsnotify_find_mark);
 
-/* Clear any marks in a group with given type mask */
+/* Clear any marks in a group with given type mask or given flags */
 void fsnotify_clear_marks_by_group(struct fsnotify_group *group,
-				   unsigned int type_mask)
+				   unsigned int type_mask, unsigned int flags_mask)
 {
 	struct fsnotify_mark *lmark, *mark;
 	LIST_HEAD(to_free);
@@ -744,7 +748,8 @@ void fsnotify_clear_marks_by_group(struct fsnotify_group *group,
 	 */
 	mutex_lock_nested(&group->mark_mutex, SINGLE_DEPTH_NESTING);
 	list_for_each_entry_safe(mark, lmark, &group->marks_list, g_list) {
-		if ((1U << mark->connector->type) & type_mask)
+		if (((1U << mark->connector->type) & type_mask) ||
+		    (mark->flags & flags_mask))
 			list_move(&mark->g_list, &to_free);
 	}
 	mutex_unlock(&group->mark_mutex);
