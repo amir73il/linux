@@ -113,6 +113,9 @@ static void fanotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
 	unsigned int mflags = 0;
 	struct inode *inode;
 
+	if (FSNOTIFY_MARK_DOMAIN(mark) != FSNOTIFY_MARK_DOMAIN_USER)
+		return;
+
 	if (mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY)
 		mflags |= FAN_MARK_IGNORED_SURV_MODIFY;
 

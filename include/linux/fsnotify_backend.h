@@ -403,8 +403,14 @@ struct fsnotify_mark {
 #define FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY	0x01
 #define FSNOTIFY_MARK_FLAG_ALIVE		0x02
 #define FSNOTIFY_MARK_FLAG_ATTACHED		0x04
+#define FSNOTIFY_MARK_FLAG_DOMAIN_BITS		0x10
 	unsigned int flags;		/* flags [mark->lock] */
 };
+
+/* Domain bits help to maintain several marks for the same group-object */
+#define FSNOTIFY_MARK_DOMAIN_USER		0x00
+#define FSNOTIFY_MARK_DOMAIN_INTERNAL		0x10
+#define FSNOTIFY_MARK_DOMAIN(mark) ((mark)->flags & FSNOTIFY_MARK_FLAG_DOMAIN_BITS)
 
 #ifdef CONFIG_FSNOTIFY
 
@@ -511,9 +517,22 @@ extern __u32 fsnotify_conn_mask(struct fsnotify_mark_connector *conn);
 extern void fsnotify_recalc_mask(struct fsnotify_mark_connector *conn);
 extern void fsnotify_init_mark(struct fsnotify_mark *mark,
 			       struct fsnotify_group *group);
-/* Find mark belonging to given group in the list of marks */
-extern struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
-						struct fsnotify_group *group);
+/*
+ * Find mark belonging to given group in the list of marks.
+ * @domain creates partitions for kernel internal use, so several marks can
+ * co-exist for the same object-group pair. The marks that are visible to users
+ * via legacy inotify/fanotify userspace APIs live in the 'user' domain.
+ */
+extern struct fsnotify_mark *__fsnotify_find_mark(fsnotify_connp_t *connp,
+						  struct fsnotify_group *group,
+						  unsigned int domain);
+
+static inline struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
+						       struct fsnotify_group *group)
+{
+	return __fsnotify_find_mark(connp, group, FSNOTIFY_MARK_DOMAIN_USER);
+}
+
 /* Get cached fsid of filesystem containing object */
 extern int fsnotify_get_conn_fsid(const struct fsnotify_mark_connector *conn,
 				  __kernel_fsid_t *fsid);
@@ -553,7 +572,14 @@ extern void fsnotify_free_mark(struct fsnotify_mark *mark);
 /* Wait until all marks queued for destruction are destroyed */
 extern void fsnotify_wait_marks_destroyed(void);
 /* run all the marks in a group, and clear all of the marks attached to given object type */
-extern void fsnotify_clear_marks_by_group(struct fsnotify_group *group, unsigned int type);
+extern void __fsnotify_clear_marks_by_group(struct fsnotify_group *group,
+					    unsigned int type, unsigned int domain);
+static inline void fsnotify_clear_marks_by_group(struct fsnotify_group *group,
+						 unsigned int type)
+{
+	return __fsnotify_clear_marks_by_group(group, type, FSNOTIFY_MARK_DOMAIN_USER);
+}
+
 /* run all the marks in a group, and clear all of the vfsmount marks */
 static inline void fsnotify_clear_vfsmount_marks_by_group(struct fsnotify_group *group)
 {
