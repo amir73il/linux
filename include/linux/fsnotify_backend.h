@@ -561,9 +561,23 @@ extern __u32 fsnotify_conn_mask(struct fsnotify_mark_connector *conn);
 extern void fsnotify_recalc_mask(struct fsnotify_mark_connector *conn);
 extern void fsnotify_init_mark(struct fsnotify_mark *mark,
 			       struct fsnotify_group *group);
-/* Find mark belonging to given group in the list of marks */
-extern struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
-						struct fsnotify_group *group);
+/*
+ * Find mark belonging to given group in the list of marks.
+ * @match(@key) is a callback for group internal use, so several marks can
+ * co-exist for the same object-group pair. NULL match() will return any mark
+ * for the object-group pair.
+ */
+extern struct fsnotify_mark *__fsnotify_find_mark(fsnotify_connp_t *connp,
+				struct fsnotify_group *group,
+				int (*match)(struct fsnotify_mark *, void *),
+				void *key);
+
+static inline struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
+						       struct fsnotify_group *group)
+{
+	return __fsnotify_find_mark(connp, group, NULL, NULL);
+}
+
 /* Get cached fsid of filesystem containing object */
 extern int fsnotify_get_conn_fsid(const struct fsnotify_mark_connector *conn,
 				  __kernel_fsid_t *fsid);
@@ -602,8 +616,16 @@ extern void fsnotify_detach_mark(struct fsnotify_mark *mark);
 extern void fsnotify_free_mark(struct fsnotify_mark *mark);
 /* Wait until all marks queued for destruction are destroyed */
 extern void fsnotify_wait_marks_destroyed(void);
-/* run all the marks in a group, and clear all of the marks attached to given object type */
-extern void fsnotify_clear_marks_by_group(struct fsnotify_group *group, unsigned int type);
+/* Clear all of the marks attached to given object type that match(key) */
+extern void __fsnotify_clear_marks_by_group(struct fsnotify_group *group,
+				int (*match)(struct fsnotify_mark *, void *),
+				void *key, unsigned int type_mask);
+static inline void fsnotify_clear_marks_by_group(struct fsnotify_group *group,
+						 unsigned int type_mask)
+{
+	return __fsnotify_clear_marks_by_group(group, NULL, NULL, type_mask);
+}
+
 /* run all the marks in a group, and clear all of the vfsmount marks */
 static inline void fsnotify_clear_vfsmount_marks_by_group(struct fsnotify_group *group)
 {
