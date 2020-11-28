@@ -693,8 +693,10 @@ EXPORT_SYMBOL_GPL(fsnotify_add_mark);
  * Given a list of marks, find the mark associated with given group. If found
  * take a reference to that mark and return it, else return NULL.
  */
-struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
-					 struct fsnotify_group *group)
+struct fsnotify_mark *__fsnotify_find_mark(fsnotify_connp_t *connp,
+				struct fsnotify_group *group,
+				int (*match)(struct fsnotify_mark *, void *),
+				void *key)
 {
 	struct fsnotify_mark_connector *conn;
 	struct fsnotify_mark *mark;
@@ -705,6 +707,7 @@ struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
 
 	hlist_for_each_entry(mark, &conn->list, obj_list) {
 		if (mark->group == group &&
+		    (!match || match(mark, key)) &&
 		    (mark->flags & FSNOTIFY_MARK_FLAG_ATTACHED)) {
 			fsnotify_get_mark(mark);
 			spin_unlock(&conn->lock);
@@ -714,18 +717,20 @@ struct fsnotify_mark *fsnotify_find_mark(fsnotify_connp_t *connp,
 	spin_unlock(&conn->lock);
 	return NULL;
 }
-EXPORT_SYMBOL_GPL(fsnotify_find_mark);
+EXPORT_SYMBOL_GPL(__fsnotify_find_mark);
 
-/* Clear any marks in a group with given type mask */
-void fsnotify_clear_marks_by_group(struct fsnotify_group *group,
-				   unsigned int type_mask)
+/* Clear any marks in a group with given type mask that match(key) */
+void __fsnotify_clear_marks_by_group(struct fsnotify_group *group,
+				int (*match)(struct fsnotify_mark *, void *),
+				void *key, unsigned int type_mask)
 {
 	struct fsnotify_mark *lmark, *mark;
 	LIST_HEAD(to_free);
 	struct list_head *head = &to_free;
 
-	/* Skip selection step if we want to clear all marks. */
+	/* Skip selection step and ignore match() if clearing all marks */
 	if (type_mask == FSNOTIFY_OBJ_ALL_TYPES_MASK) {
+		WARN_ON_ONCE(match);
 		head = &group->marks_list;
 		goto clear;
 	}
@@ -740,7 +745,8 @@ void fsnotify_clear_marks_by_group(struct fsnotify_group *group,
 	 */
 	mutex_lock_nested(&group->mark_mutex, SINGLE_DEPTH_NESTING);
 	list_for_each_entry_safe(mark, lmark, &group->marks_list, g_list) {
-		if ((1U << mark->connector->type) & type_mask)
+		if (((1U << mark->connector->type) & type_mask) &&
+		    (!match || match(mark, key)))
 			list_move(&mark->g_list, &to_free);
 	}
 	mutex_unlock(&group->mark_mutex);
