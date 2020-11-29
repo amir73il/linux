@@ -320,9 +320,9 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 	return fsnotify_handle_inode_event(group, inode_mark, mask, event_info);
 }
 
-static int send_to_group(__u32 mask,
-			 const struct fsnotify_event_info *event_info,
-			 struct fsnotify_iter_info *iter_info)
+static int send_to_group(__u32 mask, const void *data, int data_type,
+			 struct inode *dir, const struct qstr *file_name,
+			 u32 cookie, struct fsnotify_iter_info *iter_info)
 {
 	struct fsnotify_group *group = NULL;
 	__u32 test_mask = (mask & ALL_FSNOTIFY_EVENTS);
@@ -350,17 +350,14 @@ static int send_to_group(__u32 mask,
 		if (!fsnotify_iter_should_report_type(iter_info, type))
 			continue;
 		mark = iter_info->marks[type];
+		if (!mark)
+			continue;
+
 		/* does the object mark tell us to do something? */
 		if (!mark)
 			continue;
 
-		/* Is this mark restricted to events in its group's user ns? */
 		group = mark->group;
-		if ((mark->flags & FSNOTIFY_MARK_FLAG_IN_USERNS) &&
-		    (!event_info->fs_userns ||
-		     !in_userns(group->user_ns, event_info->fs_userns)))
-			continue;
-
 		marks_mask |= mark->mask;
 		marks_ignored_mask |= mark->ignored_mask;
 	}
@@ -467,6 +464,7 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
  * Input args in struct fsnotify_event_info:
  * @data:	object that event happened on
  * @data_type:	type of object for fanotify_data_XXX() accessors
+ * @fs_userns:	userns of the mount or sb where event happened
  * @dir:	optional directory associated with event -
  *		if @name is not NULL, this is the directory that
  *		@name is relative to
@@ -479,6 +477,7 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
 int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 {
 	const struct path *path = fsnotify_event_info_path(event_info);
+	struct user_namespace *userns = event_info->fs_userns;
 	struct inode *inode = event_info->inode;
 	struct fsnotify_iter_info iter_info = {};
 	struct super_block *sb;
@@ -489,6 +488,9 @@ int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 
 	if (path)
 		mnt = real_mount(path->mnt);
+
+	if (userns == &init_user_ns)
+		userns = NULL;
 
 	if (!inode) {
 		/* Dirent event - report on TYPE_INODE to dir */
@@ -510,12 +512,15 @@ int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 	 * need SRCU to keep them "alive".
 	 */
 	if (!sb->s_fsnotify_marks &&
+	    (!userns || !userns->fsnotify_marks) &&
 	    (!mnt || !mnt->mnt_fsnotify_marks) &&
 	    (!inode || !inode->i_fsnotify_marks) &&
 	    (!parent || !parent->i_fsnotify_marks))
 		return 0;
 
 	marks_mask = sb->s_fsnotify_mask;
+	if (userns)
+		marks_mask |= userns->fsnotify_mask;
 	if (mnt)
 		marks_mask |= mnt->mnt_fsnotify_mask;
 	if (inode)
@@ -536,6 +541,10 @@ int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 
 	iter_info.marks[FSNOTIFY_OBJ_TYPE_SB] =
 		fsnotify_first_mark(&sb->s_fsnotify_marks);
+	if (userns) {
+		iter_info.marks[FSNOTIFY_OBJ_TYPE_USERNS] =
+			fsnotify_first_mark(&userns->fsnotify_marks);
+	}
 	if (mnt) {
 		iter_info.marks[FSNOTIFY_OBJ_TYPE_VFSMOUNT] =
 			fsnotify_first_mark(&mnt->mnt_fsnotify_marks);

@@ -6,6 +6,7 @@
 #include <linux/fsnotify.h>
 #include <linux/srcu.h>
 #include <linux/types.h>
+#include <linux/user_namespace.h>
 
 #include "../mount.h"
 
@@ -25,6 +26,12 @@ static inline struct super_block *fsnotify_conn_sb(
 				struct fsnotify_mark_connector *conn)
 {
 	return container_of(conn->obj, struct super_block, s_fsnotify_marks);
+}
+
+static inline struct user_namespace *fsnotify_conn_userns(
+				struct fsnotify_mark_connector *conn)
+{
+	return container_of(conn->obj, struct user_namespace, fsnotify_marks);
 }
 
 /* destroy all events sitting in this groups notification queue */
@@ -53,7 +60,15 @@ static inline void fsnotify_clear_marks_by_mount(struct vfsmount *mnt)
 static inline void fsnotify_clear_marks_by_sb(struct super_block *sb)
 {
 	fsnotify_destroy_marks(&sb->s_fsnotify_marks);
+	/* TODO: clear userns marks associated with this sb */
 }
+/* run the list of all marks associated with userns and destroy them */
+static inline void fsnotify_clear_marks_by_userns(struct user_namespace *userns)
+{
+	/* TODO: call from userns destrutor */
+	fsnotify_destroy_marks(&userns->fsnotify_marks);
+}
+
 
 /*
  * update the dentry->d_flags of all of inode's children to indicate if inode cares

@@ -308,6 +308,7 @@ enum fsnotify_obj_type {
 	FSNOTIFY_OBJ_TYPE_PARENT,
 	FSNOTIFY_OBJ_TYPE_VFSMOUNT,
 	FSNOTIFY_OBJ_TYPE_SB,
+	FSNOTIFY_OBJ_TYPE_USERNS,
 	FSNOTIFY_OBJ_TYPE_COUNT,
 	FSNOTIFY_OBJ_TYPE_DETACHED = FSNOTIFY_OBJ_TYPE_COUNT
 };
@@ -316,6 +317,7 @@ enum fsnotify_obj_type {
 #define FSNOTIFY_OBJ_TYPE_PARENT_FL	(1U << FSNOTIFY_OBJ_TYPE_PARENT)
 #define FSNOTIFY_OBJ_TYPE_VFSMOUNT_FL	(1U << FSNOTIFY_OBJ_TYPE_VFSMOUNT)
 #define FSNOTIFY_OBJ_TYPE_SB_FL		(1U << FSNOTIFY_OBJ_TYPE_SB)
+#define FSNOTIFY_OBJ_TYPE_USERNS_FL	(1U << FSNOTIFY_OBJ_TYPE_USERNS)
 #define FSNOTIFY_OBJ_ALL_TYPES_MASK	((1U << FSNOTIFY_OBJ_TYPE_COUNT) - 1)
 
 static inline bool fsnotify_valid_obj_type(unsigned int type)
@@ -431,9 +433,24 @@ struct fsnotify_mark {
 #define FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY	0x01
 #define FSNOTIFY_MARK_FLAG_ALIVE		0x02
 #define FSNOTIFY_MARK_FLAG_ATTACHED		0x04
-#define FSNOTIFY_MARK_FLAG_IN_USERNS		0x08
 	unsigned int flags;		/* flags [mark->lock] */
 };
+
+/*
+ * userns sb marks are connected to a userns object and have a weak reference
+ * the the super block that is idmapped mounted.
+ */
+struct fsnotify_userns_sb_mark {
+	struct fsnotify_mark fsn_mark;
+	/* sb associated with this userns mark */
+	struct super_block *sb;
+};
+
+static inline struct fsnotify_userns_sb_mark *fsnotify_userns_sb_mark(
+						struct fsnotify_mark *fsn_mark)
+{
+	return container_of(fsn_mark, struct fsnotify_userns_sb_mark, fsn_mark);
+}
 
 #ifdef CONFIG_FSNOTIFY
 
@@ -640,6 +657,12 @@ static inline void fsnotify_clear_inode_marks_by_group(struct fsnotify_group *gr
 static inline void fsnotify_clear_sb_marks_by_group(struct fsnotify_group *group)
 {
 	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_SB_FL);
+}
+/* run all the marks in a group, and clear all of the userns sb marks */
+static inline void fsnotify_clear_userns_sb_marks_by_group(
+						struct fsnotify_group *group)
+{
+	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_USERNS_FL);
 }
 extern void fsnotify_get_mark(struct fsnotify_mark *mark);
 extern void fsnotify_put_mark(struct fsnotify_mark *mark);

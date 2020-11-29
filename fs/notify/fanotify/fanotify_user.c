@@ -830,15 +830,17 @@ static __u32 fanotify_mark_remove_from_mask(struct fsnotify_mark *fsn_mark,
 }
 
 static int fanotify_remove_mark(struct fsnotify_group *group,
-				fsnotify_connp_t *connp, __u32 mask,
-				unsigned int flags, __u32 umask)
+				fsnotify_connp_t *connp,
+				int (*match)(struct fsnotify_mark *, void *),
+				void *key,
+				__u32 mask, unsigned int flags, __u32 umask)
 {
 	struct fsnotify_mark *fsn_mark = NULL;
 	__u32 removed;
 	int destroy_mark;
 
 	mutex_lock(&group->mark_mutex);
-	fsn_mark = fsnotify_find_mark(connp, group);
+	fsn_mark = __fsnotify_find_mark(connp, group, match, key);
 	if (!fsn_mark) {
 		mutex_unlock(&group->mark_mutex);
 		return -ENOENT;
@@ -864,23 +866,52 @@ static int fanotify_remove_vfsmount_mark(struct fsnotify_group *group,
 					 unsigned int flags, __u32 umask)
 {
 	return fanotify_remove_mark(group, &real_mount(mnt)->mnt_fsnotify_marks,
+				    NULL, NULL, mask, flags, umask);
+}
+
+static void fanotify_clear_sb_marks_by_group(struct fsnotify_group *group,
+					     unsigned int flags)
+{
+	if (flags & FAN_MARK_IN_USERNS)
+		fanotify_clear_userns_sb_marks_by_group(group);
+	else
+		fsnotify_clear_sb_marks_by_group(group);
+}
+
+int fanotify_match_userns_sb(struct fsnotify_mark *fsn, void *sb)
+{
+	return fsnotify_userns_sb_mark(fsn)->sb == sb;
+}
+
+static int fanotify_remove_userns_sb_mark(struct fsnotify_group *group,
+					  struct vfsmount *mnt, __u32 mask,
+					  unsigned int flags, __u32 umask)
+{
+	struct user_namespace *mnt_userns = mnt_user_ns(mnt);
+
+	return fanotify_remove_mark(group, &mnt_userns->fsnotify_marks,
+				    fanotify_match_userns_sb, mnt->mnt_sb,
 				    mask, flags, umask);
 }
 
 static int fanotify_remove_sb_mark(struct fsnotify_group *group,
-				   struct super_block *sb, __u32 mask,
+				   struct vfsmount *mnt, __u32 mask,
 				   unsigned int flags, __u32 umask)
 {
-	return fanotify_remove_mark(group, &sb->s_fsnotify_marks, mask,
-				    flags, umask);
+	if (flags & FAN_MARK_IN_USERNS)
+		return fanotify_remove_userns_sb_mark(group, mnt, mask, flags,
+						      umask);
+
+	return fanotify_remove_mark(group, &mnt->mnt_sb->s_fsnotify_marks,
+				    NULL, NULL, mask, flags, umask);
 }
 
 static int fanotify_remove_inode_mark(struct fsnotify_group *group,
 				      struct inode *inode, __u32 mask,
 				      unsigned int flags, __u32 umask)
 {
-	return fanotify_remove_mark(group, &inode->i_fsnotify_marks, mask,
-				    flags, umask);
+	return fanotify_remove_mark(group, &inode->i_fsnotify_marks,
+				    NULL, NULL, mask, flags, umask);
 }
 
 static __u32 fanotify_mark_add_to_mask(struct fsnotify_mark *fsn_mark,
@@ -897,8 +928,6 @@ static __u32 fanotify_mark_add_to_mask(struct fsnotify_mark *fsn_mark,
 		fsn_mark->ignored_mask |= mask;
 		if (flags & FAN_MARK_IGNORED_SURV_MODIFY)
 			fsn_mark->flags |= FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY;
-		if (flags & FANOTIFY_MARK_FLAG_IN_USERNS)
-			fsn_mark->flags |= FSNOTIFY_MARK_FLAG_IN_USERNS;
 	}
 	spin_unlock(&fsn_mark->lock);
 
@@ -948,20 +977,23 @@ out_dec_ucounts:
 
 static int fanotify_add_mark(struct fsnotify_group *group,
 			     fsnotify_connp_t *connp, unsigned int type,
-			     __u32 mask, unsigned int flags,
+			     int (*match)(struct fsnotify_mark *, void *),
+			     void *key, __u32 mask, unsigned int flags,
 			     __kernel_fsid_t *fsid)
 {
 	struct fsnotify_mark *fsn_mark;
 	__u32 added;
 
 	mutex_lock(&group->mark_mutex);
-	fsn_mark = fsnotify_find_mark(connp, group);
+	fsn_mark = __fsnotify_find_mark(connp, group, match, key);
 	if (!fsn_mark) {
 		fsn_mark = fanotify_add_new_mark(group, connp, type, fsid);
 		if (IS_ERR(fsn_mark)) {
 			mutex_unlock(&group->mark_mutex);
 			return PTR_ERR(fsn_mark);
 		}
+		if (type == FSNOTIFY_OBJ_TYPE_USERNS)
+			fsnotify_userns_sb_mark(fsn_mark)->sb = key;
 	}
 	added = fanotify_mark_add_to_mask(fsn_mark, mask, flags);
 	if (added & ~fsnotify_conn_mask(fsn_mark->connector))
@@ -977,15 +1009,33 @@ static int fanotify_add_vfsmount_mark(struct fsnotify_group *group,
 				      unsigned int flags, __kernel_fsid_t *fsid)
 {
 	return fanotify_add_mark(group, &real_mount(mnt)->mnt_fsnotify_marks,
-				 FSNOTIFY_OBJ_TYPE_VFSMOUNT, mask, flags, fsid);
+				 FSNOTIFY_OBJ_TYPE_VFSMOUNT, NULL, NULL,
+				 mask, flags, fsid);
+}
+
+static int fanotify_add_userns_sb_mark(struct fsnotify_group *group,
+				       struct vfsmount *mnt, __u32 mask,
+				       unsigned int flags, __kernel_fsid_t *fsid)
+{
+	struct user_namespace *mnt_userns = mnt_user_ns(mnt);
+
+	return fanotify_add_mark(group, &mnt_userns->fsnotify_marks,
+				 FSNOTIFY_OBJ_TYPE_USERNS,
+				 fanotify_match_userns_sb, mnt->mnt_sb,
+				 mask, flags, fsid);
 }
 
 static int fanotify_add_sb_mark(struct fsnotify_group *group,
-				struct super_block *sb, __u32 mask,
+				struct vfsmount *mnt, __u32 mask,
 				unsigned int flags, __kernel_fsid_t *fsid)
 {
+	if (flags & FAN_MARK_IN_USERNS)
+		return fanotify_add_userns_sb_mark(group, mnt, mask, flags,
+						   fsid);
+
 	return fanotify_add_mark(group, &sb->s_fsnotify_marks,
-				 FSNOTIFY_OBJ_TYPE_SB, mask, flags, fsid);
+				 FSNOTIFY_OBJ_TYPE_SB, NULL, NULL,
+				 mask, flags, fsid);
 }
 
 static int fanotify_add_inode_mark(struct fsnotify_group *group,
@@ -1005,7 +1055,8 @@ static int fanotify_add_inode_mark(struct fsnotify_group *group,
 		return 0;
 
 	return fanotify_add_mark(group, &inode->i_fsnotify_marks,
-				 FSNOTIFY_OBJ_TYPE_INODE, mask, flags, fsid);
+				 FSNOTIFY_OBJ_TYPE_INODE, NULL, NULL,
+				 mask, flags, fsid);
 }
 
 static struct fsnotify_event *fanotify_alloc_overflow_event(void)
@@ -1336,7 +1387,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		if (mark_type == FAN_MARK_MOUNT)
 			fsnotify_clear_vfsmount_marks_by_group(group);
 		else if (mark_type == FAN_MARK_FILESYSTEM)
-			fsnotify_clear_sb_marks_by_group(group);
+			fanotify_clear_sb_marks_by_group(group, flags);
 		else
 			fsnotify_clear_inode_marks_by_group(group);
 		goto fput_and_out;
@@ -1382,12 +1433,13 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 				goto path_put_and_out;
 
 			/*
-			 * For sb marks of a group created inside userns, report
-			 * only events generated via mount that is idmapped
-			 * inside the group's user ns.
+			 * For sb marks of a group created inside userns, allow
+			 * reporting events generated via mount that is idmapped
+			 * to the group's user ns.
 			 */
-			if (mark_type == FAN_MARK_FILESYSTEM)
-				flags |= FANOTIFY_MARK_FLAG_IN_USERNS;
+			if (mark_type == FAN_MARK_FILESYSTEM &&
+			    !(flags & FAN_MARK_IN_USERNS))
+				goto path_put_and_out;
 		}
 	}
 
@@ -1411,7 +1463,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 			ret = fanotify_add_vfsmount_mark(group, mnt, mask,
 							 flags, fsid);
 		else if (mark_type == FAN_MARK_FILESYSTEM)
-			ret = fanotify_add_sb_mark(group, mnt->mnt_sb, mask,
+			ret = fanotify_add_sb_mark(group, mnt, mask,
 						   flags, fsid);
 		else
 			ret = fanotify_add_inode_mark(group, inode, mask,
@@ -1422,7 +1474,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 			ret = fanotify_remove_vfsmount_mark(group, mnt, mask,
 							    flags, umask);
 		else if (mark_type == FAN_MARK_FILESYSTEM)
-			ret = fanotify_remove_sb_mark(group, mnt->mnt_sb, mask,
+			ret = fanotify_remove_sb_mark(group, mnt, mask,
 						      flags, umask);
 		else
 			ret = fanotify_remove_inode_mark(group, inode, mask,
@@ -1483,9 +1535,8 @@ static int __init fanotify_user_setup(void)
 
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 10);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 9);
-	BUILD_BUG_ON(FANOTIFY_MARK_FLAGS & FANOTIFY_INTERNAL_MARK_FLAGS);
 
-	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
+	fanotify_mark_cache = KMEM_CACHE(fsnotify_sb_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);
 	fanotify_fid_event_cachep = KMEM_CACHE(fanotify_fid_event,
 					       SLAB_PANIC);
