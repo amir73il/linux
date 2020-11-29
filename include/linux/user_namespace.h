@@ -88,6 +88,10 @@ struct user_namespace {
 	struct ctl_table_set	set;
 	struct ctl_table_header *sysctls;
 #endif
+#ifdef CONFIG_FSNOTIFY
+	struct fsnotify_mark_connector __rcu *fsnotify_marks;
+	__u32 fsnotify_mask;
+#endif
 	struct ucounts		*ucounts;
 	int ucount_max[UCOUNT_COUNTS];
 } __randomize_layout;

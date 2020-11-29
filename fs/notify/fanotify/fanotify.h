@@ -6,6 +6,7 @@
 #include <linux/hashtable.h>
 
 extern struct kmem_cache *fanotify_mark_cache;
+extern struct kmem_cache *fanotify_userns_sb_mark_cache;
 extern struct kmem_cache *fanotify_fid_event_cachep;
 extern struct kmem_cache *fanotify_path_event_cachep;
 extern struct kmem_cache *fanotify_perm_event_cachep;

@@ -112,6 +112,7 @@ static void fanotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
 {
 	unsigned int mflags = 0;
 	struct inode *inode;
+	struct super_block *sb = NULL;
 
 	if (mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY)
 		mflags |= FAN_MARK_IGNORED_SURV_MODIFY;
@@ -132,8 +133,13 @@ static void fanotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
 		seq_printf(m, "fanotify mnt_id:%x mflags:%x mask:%x ignored_mask:%x\n",
 			   mnt->mnt_id, mflags, mark->mask, mark->ignored_mask);
 	} else if (mark->connector->type == FSNOTIFY_OBJ_TYPE_SB) {
-		struct super_block *sb = fsnotify_conn_sb(mark->connector);
+		sb = fsnotify_conn_sb(mark->connector);
+	} else if (mark->connector->type == FSNOTIFY_OBJ_TYPE_USERNS) {
+		sb = fsnotify_userns_sb_mark(mark)->sb;
+		mflags |= FAN_MARK_IDMAPPED;
+	}
 
+	if (sb) {
 		seq_printf(m, "fanotify sdev:%x mflags:%x mask:%x ignored_mask:%x\n",
 			   sb->s_dev, mflags, mark->mask, mark->ignored_mask);
 	}

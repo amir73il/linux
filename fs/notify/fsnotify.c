@@ -98,6 +98,19 @@ void fsnotify_sb_delete(struct super_block *sb)
 	fsnotify_clear_marks_by_sb(sb);
 }
 
+/* Called before a userns goes away */
+void fsnotify_userns_delete(struct user_namespace *userns)
+{
+	fsnotify_clear_marks_by_userns(userns);
+}
+
+/* Called before the last idmapped mount of userns-sb pair goes away */
+void fsnotify_idmapped_delete(struct user_namespace *userns,
+			      struct super_block *sb)
+{
+	/* TODO: destroy the userns marks associated with this sb */
+}
+
 /*
  * Given an inode, first check if we care what happens to our children.  Inotify
  * and dnotify both tell their parents about events.  If we care about any event
@@ -143,7 +156,8 @@ void __fsnotify_update_child_dentry_flags(struct inode *inode)
 }
 
 /* Are inode/sb/mount interested in parent and name info with this event? */
-static bool fsnotify_event_needs_parent(struct inode *inode, struct mount *mnt,
+static bool fsnotify_event_needs_parent(struct user_namespace *userns,
+					struct inode *inode, struct mount *mnt,
 					__u32 mask)
 {
 	__u32 marks_mask = 0;
@@ -164,6 +178,8 @@ static bool fsnotify_event_needs_parent(struct inode *inode, struct mount *mnt,
 	marks_mask |= fsnotify_parent_needed_mask(inode->i_sb->s_fsnotify_mask);
 	if (mnt)
 		marks_mask |= fsnotify_parent_needed_mask(mnt->mnt_fsnotify_mask);
+	if (userns)
+		marks_mask |= fsnotify_parent_needed_mask(userns->fsnotify_mask);
 
 	/* Did they subscribe for this event with parent/name info? */
 	return mask & marks_mask;
@@ -193,16 +209,20 @@ int __fsnotify_parent(struct user_namespace *userns,
 	struct qstr *file_name = NULL;
 	int ret = 0;
 
+	if (userns == &init_user_ns)
+		userns = NULL;
+
 	/*
 	 * Do inode/sb/mount care about parent and name info on non-dir?
 	 * Do they care about any event at all?
 	 */
 	if (!inode->i_fsnotify_marks && !inode->i_sb->s_fsnotify_marks &&
-	    (!mnt || !mnt->mnt_fsnotify_marks) && !parent_watched)
+	    (!mnt || !mnt->mnt_fsnotify_marks) && !parent_watched &&
+	    (!userns || !userns->fsnotify_marks))
 		return 0;
 
 	parent = NULL;
-	parent_needed = fsnotify_event_needs_parent(inode, mnt, mask);
+	parent_needed = fsnotify_event_needs_parent(userns, inode, mnt, mask);
 	if (!parent_watched && !parent_needed)
 		goto notify;
 
@@ -354,13 +374,12 @@ static int send_to_group(__u32 mask,
 		if (!mark)
 			continue;
 
-		/* Is this mark restricted to events in its group's user ns? */
-		group = mark->group;
-		if ((mark->flags & FSNOTIFY_MARK_FLAG_IN_USERNS) &&
-		    (!event_info->fs_userns ||
-		     !in_userns(group->user_ns, event_info->fs_userns)))
+		/* userns mark are restricted to events in a specific sb */
+		if (type == FSNOTIFY_OBJ_TYPE_USERNS &&
+		    iter_info->sb != fsnotify_userns_sb_mark(mark)->sb)
 			continue;
 
+		group = mark->group;
 		marks_mask |= mark->mask;
 		marks_ignored_mask |= mark->ignored_mask;
 	}
@@ -467,6 +486,7 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
  * Input args in struct fsnotify_event_info:
  * @data:	object that event happened on
  * @data_type:	type of object for fanotify_data_XXX() accessors
+ * @fs_userns:	userns of the mount or sb where event happened
  * @dir:	optional directory associated with event -
  *		if @name is not NULL, this is the directory that
  *		@name is relative to
@@ -479,6 +499,7 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
 int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 {
 	const struct path *path = fsnotify_event_info_path(event_info);
+	struct user_namespace *userns = event_info->fs_userns;
 	struct inode *inode = event_info->inode;
 	struct fsnotify_iter_info iter_info = {};
 	struct super_block *sb;
@@ -489,6 +510,9 @@ int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 
 	if (path)
 		mnt = real_mount(path->mnt);
+
+	if (userns == &init_user_ns)
+		userns = NULL;
 
 	if (!inode) {
 		/* Dirent event - report on TYPE_INODE to dir */
@@ -510,12 +534,15 @@ int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 	 * need SRCU to keep them "alive".
 	 */
 	if (!sb->s_fsnotify_marks &&
+	    (!userns || !userns->fsnotify_marks) &&
 	    (!mnt || !mnt->mnt_fsnotify_marks) &&
 	    (!inode || !inode->i_fsnotify_marks) &&
 	    (!parent || !parent->i_fsnotify_marks))
 		return 0;
 
 	marks_mask = sb->s_fsnotify_mask;
+	if (userns)
+		marks_mask |= userns->fsnotify_mask;
 	if (mnt)
 		marks_mask |= mnt->mnt_fsnotify_mask;
 	if (inode)
@@ -534,8 +561,13 @@ int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 
 	iter_info.srcu_idx = srcu_read_lock(&fsnotify_mark_srcu);
 
+	iter_info.sb = sb;
 	iter_info.marks[FSNOTIFY_OBJ_TYPE_SB] =
 		fsnotify_first_mark(&sb->s_fsnotify_marks);
+	if (userns) {
+		iter_info.marks[FSNOTIFY_OBJ_TYPE_USERNS] =
+			fsnotify_first_mark(&userns->fsnotify_marks);
+	}
 	if (mnt) {
 		iter_info.marks[FSNOTIFY_OBJ_TYPE_VFSMOUNT] =
 			fsnotify_first_mark(&mnt->mnt_fsnotify_marks);
