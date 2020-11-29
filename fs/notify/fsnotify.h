@@ -21,6 +21,12 @@ static inline struct mount *fsnotify_conn_mount(
 	return container_of(conn->obj, struct mount, mnt_fsnotify_marks);
 }
 
+static inline struct fsnotify_sb_mark *fsnotify_conn_subtree_mark(
+				struct fsnotify_mark_connector *conn)
+{
+	return container_of(conn->obj, struct fsnotify_sb_mark, sub_marks);
+}
+
 static inline struct super_block *fsnotify_conn_sb(
 				struct fsnotify_mark_connector *conn)
 {
@@ -48,11 +54,13 @@ static inline void fsnotify_clear_marks_by_inode(struct inode *inode)
 static inline void fsnotify_clear_marks_by_mount(struct vfsmount *mnt)
 {
 	fsnotify_destroy_marks(&real_mount(mnt)->mnt_fsnotify_marks);
+	/* TODO: clear subtree marks associated with this mnt */
 }
 /* run the list of all marks associated with sb and destroy them */
 static inline void fsnotify_clear_marks_by_sb(struct super_block *sb)
 {
 	fsnotify_destroy_marks(&sb->s_fsnotify_marks);
+	/* TODO: clear subtree marks associated with this sb */
 }
 
 /*

@@ -275,6 +275,9 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 	return ops->handle_inode_event(child_mark, mask, inode, NULL, NULL);
 }
 
+static struct fsnotify_mark *fsnotify_first_mark(struct fsnotify_mark_connector **connp);
+static struct fsnotify_mark *fsnotify_next_mark(struct fsnotify_mark *mark);
+
 static int send_to_group(__u32 mask, const void *data, int data_type,
 			 struct inode *dir, const struct qstr *file_name,
 			 u32 cookie, struct fsnotify_iter_info *iter_info)
@@ -305,9 +308,42 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 		if (!fsnotify_iter_should_report_type(iter_info, type))
 			continue;
 		mark = iter_info->marks[type];
+		if (!mark)
+			continue;
+
 		/* does the object mark tell us to do something? */
-		if (mark) {
-			group = mark->group;
+		group = mark->group;
+		if (type == FSNOTIFY_OBJ_TYPE_SB &&
+		    FSNOTIFY_MARK_DOMAIN(mark) == FSNOTIFY_MARK_DOMAIN_INTERNAL) {
+			struct dentry *dentry = fsnotify_data_dentry(data, data_type);
+			struct fsnotify_sb_mark *sub_mark, *sb_mark = fsnotify_sb_mark(mark);
+
+			/* First check if event is in cumulative mask of all subtree marks */
+			if (!dentry || !sb_mark->sub_marks ||
+			    !(test_mask & sb_mark->fsn_mark.mask))
+				continue;
+
+			/* TOOD: traverse ancestors once with rcu_read_lock() and check
+			 * d_mountpoint() */
+			/*
+			 * Iterate subtree marks and apply masks if victim is inside the subtree.
+			 * d_ancestor is accurate enough for our needs - if any of the ancestors
+			 * have been moved in or out of the subtree, we may either send the event
+			 * or not.  The important thing is that if ancestry was always inside the
+			 * subtree we will send the event and if ancestry was never inside the
+			 * subtree we will not send the event.
+			 */
+			for (sub_mark = (void *)fsnotify_first_mark(&sb_mark->sub_marks);
+			     sub_mark; sub_mark = (void *)fsnotify_next_mark((void *)sub_mark)) {
+				if ((!(test_mask & sub_mark->fsn_mark.mask) &&
+				     !(test_mask & sub_mark->fsn_mark.ignored_mask)) ||
+				    !d_ancestor(sub_mark->mnt->mnt_root, dentry))
+					continue;
+
+				marks_mask |= sub_mark->fsn_mark.mask;
+				marks_ignored_mask |= sub_mark->fsn_mark.ignored_mask;
+			}
+		} else {
 			marks_mask |= mark->mask;
 			marks_ignored_mask |= mark->ignored_mask;
 		}

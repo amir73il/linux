@@ -296,6 +296,7 @@ enum fsnotify_obj_type {
 	FSNOTIFY_OBJ_TYPE_INODE,
 	FSNOTIFY_OBJ_TYPE_CHILD,
 	FSNOTIFY_OBJ_TYPE_VFSMOUNT,
+	FSNOTIFY_OBJ_TYPE_SUBTREE,
 	FSNOTIFY_OBJ_TYPE_SB,
 	FSNOTIFY_OBJ_TYPE_COUNT,
 	FSNOTIFY_OBJ_TYPE_DETACHED = FSNOTIFY_OBJ_TYPE_COUNT
@@ -304,6 +305,7 @@ enum fsnotify_obj_type {
 #define FSNOTIFY_OBJ_TYPE_INODE_FL	(1U << FSNOTIFY_OBJ_TYPE_INODE)
 #define FSNOTIFY_OBJ_TYPE_CHILD_FL	(1U << FSNOTIFY_OBJ_TYPE_CHILD)
 #define FSNOTIFY_OBJ_TYPE_VFSMOUNT_FL	(1U << FSNOTIFY_OBJ_TYPE_VFSMOUNT)
+#define FSNOTIFY_OBJ_TYPE_SUBTREE_FL	(1U << FSNOTIFY_OBJ_TYPE_SUBTREE)
 #define FSNOTIFY_OBJ_TYPE_SB_FL		(1U << FSNOTIFY_OBJ_TYPE_SB)
 #define FSNOTIFY_OBJ_ALL_TYPES_MASK	((1U << FSNOTIFY_OBJ_TYPE_COUNT) - 1)
 
@@ -428,6 +430,26 @@ struct fsnotify_mark {
 #define FSNOTIFY_MARK_DOMAIN_USER		0x00
 #define FSNOTIFY_MARK_DOMAIN_INTERNAL		0x10
 #define FSNOTIFY_MARK_DOMAIN(mark) ((mark)->flags & FSNOTIFY_MARK_FLAG_DOMAIN_BITS)
+
+/*
+ * subtree marks are connected to an internal sb mark and the internal sb mark
+ * is connected to an sb object.
+ * The mask on the internal sb mark is the cumulative mask of all subtree marks.
+ */
+struct fsnotify_sb_mark {
+	struct fsnotify_mark fsn_mark;
+	union {
+		/* subtree marks connected to this internal sb mark */
+		struct fsnotify_mark_connector __rcu *sub_marks;
+		/* mntpoint associated with this subtree mark */
+		struct vfsmount *mnt;
+	};
+};
+
+static inline struct fsnotify_sb_mark *fsnotify_sb_mark(struct fsnotify_mark *fsn_mark)
+{
+	return container_of(fsn_mark, struct fsnotify_sb_mark, fsn_mark);
+}
 
 #ifdef CONFIG_FSNOTIFY
 
@@ -607,7 +629,15 @@ static inline void fsnotify_clear_inode_marks_by_group(struct fsnotify_group *gr
 {
 	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_INODE_FL);
 }
-/* run all the marks in a group, and clear all of the sn marks */
+/* run all the marks in a group, and clear all of the subtree marks */
+static inline void fsnotify_clear_subtree_marks_by_group(struct fsnotify_group *group)
+{
+	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_SUBTREE_FL);
+	/* Clear all internal sb marks */
+	__fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_SB_FL,
+					FSNOTIFY_MARK_DOMAIN_INTERNAL);
+}
+/* run all the marks in a group, and clear all of the sb marks */
 static inline void fsnotify_clear_sb_marks_by_group(struct fsnotify_group *group)
 {
 	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_TYPE_SB_FL);
