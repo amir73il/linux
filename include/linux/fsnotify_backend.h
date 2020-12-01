@@ -61,6 +61,14 @@
 #define FS_ISDIR		0x40000000	/* event occurred against dir */
 #define FS_IN_ONESHOT		0x80000000	/* only send event once */
 
+/*
+ * Overload FS_IN_ONESHOT is set only on inotify marks, which never set the
+ * ignored mask and is not relevant in the object's cumulative mask.
+ * Overload the flag to indicate the existence of marks on the object that
+ * have an ignored mask.
+ */
+#define FS_HAS_IGNORED_MASK	FS_IN_ONESHOT
+
 #define FS_MOVE			(FS_MOVED_FROM | FS_MOVED_TO)
 
 /*
@@ -603,13 +611,13 @@ static inline __u32 fsnotify_calc_mask(struct fsnotify_mark *mark)
 	__u32 mask = mark->mask;
 
 	if (!mark->ignored_mask)
-		return mask;
+		return mask & ~FS_HAS_IGNORED_MASK;
 
 	/* Interest in FS_MODIFY may be needed for clearing ignored mask */
 	if (!(mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY))
 		mask |= FS_MODIFY;
 
-	return mask;
+	return mask | FS_HAS_IGNORED_MASK;
 }
 
 /* Get mask of events for a list of marks */
