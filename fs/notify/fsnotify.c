@@ -506,7 +506,6 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	if (parent)
 		marks_mask |= parent->i_fsnotify_mask;
 
-
 	/*
 	 * If this is a modify event we may need to clear some ignored masks.
 	 * In that case, the object with ignored masks will have the FS_MODIFY
@@ -527,17 +526,24 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	BUILD_BUG_ON(FSNOTIFY_OBJ_TYPE_VFSMOUNT != (int)FSNOTIFY_ITER_TYPE_VFSMOUNT);
 	BUILD_BUG_ON(FSNOTIFY_OBJ_TYPE_SB != (int)FSNOTIFY_ITER_TYPE_SB);
 
-	iter_info.marks[FSNOTIFY_ITER_TYPE_SB] =
-		fsnotify_first_mark(&sb->s_fsnotify_marks);
-	if (mnt) {
+	/*
+	 * Consider only marks that care about this type of event and marks with
+	 * an ignored mask.
+	 */
+	test_mask |= FS_HAS_IGNORED_MASK;
+	if (test_mask & sb->s_fsnotify_mask) {
+		iter_info.marks[FSNOTIFY_ITER_TYPE_SB] =
+			fsnotify_first_mark(&sb->s_fsnotify_marks);
+	}
+	if (mnt && (test_mask & mnt->mnt_fsnotify_mask)) {
 		iter_info.marks[FSNOTIFY_ITER_TYPE_VFSMOUNT] =
 			fsnotify_first_mark(&mnt->mnt_fsnotify_marks);
 	}
-	if (inode) {
+	if (inode && (test_mask & inode->i_fsnotify_mask)) {
 		iter_info.marks[FSNOTIFY_ITER_TYPE_INODE] =
 			fsnotify_first_mark(&inode->i_fsnotify_marks);
 	}
-	if (parent) {
+	if (parent && (test_mask & parent->i_fsnotify_mask)) {
 		iter_info.marks[FSNOTIFY_ITER_TYPE_PARENT] =
 			fsnotify_first_mark(&parent->i_fsnotify_marks);
 	}

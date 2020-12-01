@@ -705,6 +705,11 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	BUILD_BUG_ON(FAN_OPEN_EXEC_PERM != FS_OPEN_EXEC_PERM);
 
 	BUILD_BUG_ON(HWEIGHT32(ALL_FANOTIFY_EVENT_BITS) != 19);
+	/*
+	 * FS_HAS_IGNORED_MASK bit is reserved for internal use so should
+	 * not be exposed to fanotify uapi.
+	 */
+	BUILD_BUG_ON(ALL_FANOTIFY_EVENT_BITS & FS_HAS_IGNORED_MASK);
 
 	mask = fanotify_group_event_mask(group, iter_info, mask, data,
 					 data_type, dir);

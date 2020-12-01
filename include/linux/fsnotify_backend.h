@@ -608,6 +608,14 @@ extern void fsnotify_remove_queued_event(struct fsnotify_group *group,
 /* functions used to manipulate the marks attached to inodes */
 
 /*
+ * The FS_IN_ONESHOT control flag is set only on inotify marks, which never
+ * set the ignored mask and is not set in the object's cumulative mask.
+ * Overload the flag for the object interest mask to indicate the existence of
+ * marks on the object that have an ignored mask.
+ */
+#define FS_HAS_IGNORED_MASK	FS_IN_ONESHOT
+
+/*
  * Get mask for calculating object interest taking ignored mask into account.
  * The inotify control flags are not relevant to object interest mask.
  */
@@ -625,7 +633,7 @@ static inline __u32 fsnotify_calc_mask(struct fsnotify_mark *mark)
 	if (!(mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY))
 		mask |= FS_MODIFY;
 
-	return mask;
+	return mask | FS_HAS_IGNORED_MASK;
 }
 
 /* Get mask of events for a list of marks */
