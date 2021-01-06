@@ -232,6 +232,19 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 	if (sb->s_op->show_stats) {
 		seq_putc(m, ' ');
 		err = sb->s_op->show_stats(m, mnt_path.dentry);
+	} else if (mnt_has_stats(mnt)) {
+		/* Similar to /proc/<pid>/io */
+		seq_printf(m, "\n"
+			   "\ttimes: %lld %lld\n"
+			   "\trchar: %lld\n"
+			   "\twchar: %lld\n"
+			   "\tsyscr: %lld\n"
+			   "\tsyscw: %lld\n",
+			   r->mnt_time, ktime_get_seconds(),
+			   mnt_iostats_counter_read(r, MNTIOS_CHARS_RD),
+			   mnt_iostats_counter_read(r, MNTIOS_CHARS_WR),
+			   mnt_iostats_counter_read(r, MNTIOS_SYSCALLS_RD),
+			   mnt_iostats_counter_read(r, MNTIOS_SYSCALLS_WR));
 	}
 
 	seq_putc(m, '\n');
