@@ -764,11 +764,8 @@ finish:
 
 static void fanotify_free_group_priv(struct fsnotify_group *group)
 {
-	struct user_struct *user;
-
-	user = group->fanotify_data.user;
-	atomic_dec(&user->fanotify_listeners);
-	free_uid(user);
+	if (group->fanotify_data.ucounts)
+		dec_ucount(group->fanotify_data.ucounts, UCOUNT_FANOTIFY_LISTENERS);
 }
 
 static void fanotify_free_path_event(struct fanotify_event *event)
@@ -824,6 +821,12 @@ static void fanotify_free_event(struct fsnotify_event *fsn_event)
 	}
 }
 
+static void fanotify_freeing_mark(struct fsnotify_mark *mark,
+				  struct fsnotify_group *group)
+{
+	dec_ucount(group->fanotify_data.ucounts, UCOUNT_FANOTIFY_MARKS);
+}
+
 static void fanotify_free_mark(struct fsnotify_mark *fsn_mark)
 {
 	kmem_cache_free(fanotify_mark_cache, fsn_mark);
@@ -833,5 +836,6 @@ const struct fsnotify_ops fanotify_fsnotify_ops = {
 	.handle_event = fanotify_handle_event,
 	.free_group_priv = fanotify_free_group_priv,
 	.free_event = fanotify_free_event,
+	.freeing_mark = fanotify_freeing_mark,
 	.free_mark = fanotify_free_mark,
 };
