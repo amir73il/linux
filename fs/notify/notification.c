@@ -150,6 +150,9 @@ struct fsnotify_event *fsnotify_remove_first_event(struct fsnotify_group *group)
 
 	assert_spin_locked(&group->notification_lock);
 
+	if (fsnotify_notify_queue_is_empty(group))
+		return NULL;
+
 	pr_debug("%s: group=%p\n", __func__, group);
 
 	event = list_first_entry(&group->notification_list,
@@ -165,6 +168,9 @@ struct fsnotify_event *fsnotify_remove_first_event(struct fsnotify_group *group)
 struct fsnotify_event *fsnotify_peek_first_event(struct fsnotify_group *group)
 {
 	assert_spin_locked(&group->notification_lock);
+
+	if (fsnotify_notify_queue_is_empty(group))
+		return NULL;
 
 	return list_first_entry(&group->notification_list,
 				struct fsnotify_event, list);
