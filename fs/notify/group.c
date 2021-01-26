@@ -21,6 +21,11 @@
  */
 static void fsnotify_final_destroy_group(struct fsnotify_group *group)
 {
+	int i;
+
+	for (i = 0; i <= group->max_bucket; i++)
+		WARN_ON_ONCE(!list_empty(&group->notification_list[i]));
+
 	if (group->ops->free_group_priv)
 		group->ops->free_group_priv(group);
 
@@ -111,12 +116,20 @@ void fsnotify_put_group(struct fsnotify_group *group)
 }
 EXPORT_SYMBOL_GPL(fsnotify_put_group);
 
-static struct fsnotify_group *__fsnotify_alloc_group(
+static struct fsnotify_group *__fsnotify_alloc_group(unsigned int q_hash_bits,
 				const struct fsnotify_ops *ops, gfp_t gfp)
 {
 	struct fsnotify_group *group;
+	int i;
 
-	group = kzalloc(sizeof(struct fsnotify_group), gfp);
+#ifdef FSNOTIFY_HASHED_QUEUE
+	if (WARN_ON_ONCE(q_hash_bits > FSNOTIFY_HASHED_QUEUE_MAX_BITS))
+		q_hash_bits = FSNOTIFY_HASHED_QUEUE_MAX_BITS;
+#else
+	q_hash_bits = 0;
+#endif
+
+	group = kzalloc(fsnotify_group_size(q_hash_bits), gfp);
 	if (!group)
 		return ERR_PTR(-ENOMEM);
 
@@ -126,8 +139,12 @@ static struct fsnotify_group *__fsnotify_alloc_group(
 	atomic_set(&group->user_waits, 0);
 
 	spin_lock_init(&group->notification_lock);
-	INIT_LIST_HEAD(&group->notification_list);
 	init_waitqueue_head(&group->notification_waitq);
+	/* Initialize one or more notification lists */
+	group->q_hash_bits = q_hash_bits;
+	group->max_bucket = (1 << q_hash_bits) - 1;
+	for (i = 0; i <= group->max_bucket; i++)
+		INIT_LIST_HEAD(&group->notification_list[i]);
 	group->max_events = UINT_MAX;
 
 	mutex_init(&group->mark_mutex);
@@ -139,20 +156,24 @@ static struct fsnotify_group *__fsnotify_alloc_group(
 }
 
 /*
- * Create a new fsnotify_group and hold a reference for the group returned.
+ * Create a new fsnotify_group with no events queue.
+ * Hold a reference for the group returned.
  */
 struct fsnotify_group *fsnotify_alloc_group(const struct fsnotify_ops *ops)
 {
-	return __fsnotify_alloc_group(ops, GFP_KERNEL);
+	return __fsnotify_alloc_group(0, ops, GFP_KERNEL);
 }
 EXPORT_SYMBOL_GPL(fsnotify_alloc_group);
 
 /*
- * Create a new fsnotify_group and hold a reference for the group returned.
+ * Create a new fsnotify_group with an events queue.
+ * If @q_hash_bits > 0, the queue is shareded into several notification lists.
+ * Hold a reference for the group returned.
  */
-struct fsnotify_group *fsnotify_alloc_user_group(const struct fsnotify_ops *ops)
+struct fsnotify_group *fsnotify_alloc_user_group(unsigned int q_hash_bits,
+						 const struct fsnotify_ops *ops)
 {
-	return __fsnotify_alloc_group(ops, GFP_KERNEL_ACCOUNT);
+	return __fsnotify_alloc_group(q_hash_bits, ops, GFP_KERNEL_ACCOUNT);
 }
 EXPORT_SYMBOL_GPL(fsnotify_alloc_user_group);
 

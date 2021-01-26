@@ -160,6 +160,11 @@ struct fsnotify_ops {
 	void (*free_mark)(struct fsnotify_mark *mark);
 };
 
+#ifdef CONFIG_FANOTIFY
+#define FSNOTIFY_HASHED_QUEUE
+#define FSNOTIFY_HASHED_QUEUE_MAX_BITS 8
+#endif
+
 /*
  * all of the information about the original object we want to now send to
  * a group.  If you want to carry more info from the accessing task to the
@@ -167,7 +172,7 @@ struct fsnotify_ops {
  */
 struct fsnotify_event {
 	struct list_head list;
-	unsigned long objectid;	/* identifier for queue merges */
+	unsigned int key;		/* Key for hashed queue add/merge */
 };
 
 /*
@@ -189,12 +194,10 @@ struct fsnotify_group {
 	 */
 	refcount_t refcnt;		/* things with interest in this group */
 
-	/* needed to send notification to userspace */
-	spinlock_t notification_lock;		/* protect the notification_list */
-	struct list_head notification_list;	/* list of event_holder this group needs to send to userspace */
-	wait_queue_head_t notification_waitq;	/* read() on the notification file blocks on this waitq */
-	unsigned int q_len;			/* events on the queue */
-	unsigned int max_events;		/* maximum events allowed on the list */
+	/* needed to send notification to userspace and wait on group shutdown */
+	spinlock_t notification_lock;		/* protect the event queues */
+	wait_queue_head_t notification_waitq;	/* read() the events blocks on this waitq */
+
 	/*
 	 * Valid fsnotify group priorities.  Events are send in order from highest
 	 * priority to lowest priority.  We default to the lowest priority.
@@ -244,7 +247,35 @@ struct fsnotify_group {
 		} fanotify_data;
 #endif /* CONFIG_FANOTIFY */
 	};
+
+	/* Only relevant for groups that use events queue: */
+	unsigned int q_hash_bits;	/* >0 means hashed notification queue */
+	unsigned int max_bucket;	/* notification_list[] range is [0..max_bucket] */
+	unsigned int first_bucket;	/* List to read first event from */
+	unsigned int last_bucket;	/* List of last added event */
+	unsigned int num_events;	/* Number of events in all lists */
+	unsigned int max_events;	/* Maximum events allowed in all lists */
+	struct list_head notification_list[];	/* Queue of events sharded into several lists */
 };
+
+static inline size_t fsnotify_group_size(unsigned int q_hash_bits)
+{
+	return sizeof(struct fsnotify_group) + (sizeof(struct list_head) << q_hash_bits);
+}
+
+static inline unsigned int fsnotify_event_bucket(struct fsnotify_group *group,
+						 struct fsnotify_event *event)
+{
+	/* High bits are better for hash */
+	return (event->key >> (32 - group->q_hash_bits)) & group->max_bucket;
+}
+
+static inline struct list_head *fsnotify_event_notification_list(
+						struct fsnotify_group *group,
+						struct fsnotify_event *event)
+{
+	return &group->notification_list[fsnotify_event_bucket(group, event)];
+}
 
 /* When calling fsnotify tell it if the data is a path or inode */
 enum fsnotify_data_type {
@@ -470,7 +501,8 @@ static inline void fsnotify_update_flags(struct dentry *dentry)
 
 /* create a new group */
 extern struct fsnotify_group *fsnotify_alloc_group(const struct fsnotify_ops *ops);
-extern struct fsnotify_group *fsnotify_alloc_user_group(const struct fsnotify_ops *ops);
+extern struct fsnotify_group *fsnotify_alloc_user_group(unsigned int q_hash_bits,
+							const struct fsnotify_ops *ops);
 /* get reference to a group */
 extern void fsnotify_get_group(struct fsnotify_group *group);
 /* drop reference on a group from fsnotify_alloc_group */
@@ -495,8 +527,15 @@ static inline void fsnotify_queue_overflow(struct fsnotify_group *group)
 	fsnotify_add_event(group, group->overflow_event, NULL);
 }
 
-/* true if the group notification queue is empty */
-extern bool fsnotify_notify_queue_is_empty(struct fsnotify_group *group);
+/* True if all the group event queues are empty */
+static inline bool fsnotify_notify_queue_is_empty(struct fsnotify_group *group)
+{
+	assert_spin_locked(&group->notification_lock);
+	return group->num_events == 0;
+}
+
+/* Return the notification list of the first event */
+extern struct list_head *fsnotify_first_notification_list(struct fsnotify_group *group);
 /* return, but do not dequeue the first event on the notification queue */
 extern struct fsnotify_event *fsnotify_peek_first_event(struct fsnotify_group *group);
 /* return AND dequeue the first event on the notification queue */
@@ -577,10 +616,10 @@ extern void fsnotify_finish_user_wait(struct fsnotify_iter_info *iter_info);
 extern bool fsnotify_prepare_user_wait(struct fsnotify_iter_info *iter_info);
 
 static inline void fsnotify_init_event(struct fsnotify_event *event,
-				       unsigned long objectid)
+				       unsigned int key)
 {
 	INIT_LIST_HEAD(&event->list);
-	event->objectid = objectid;
+	event->key = key;
 }
 
 #else

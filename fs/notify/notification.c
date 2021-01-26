@@ -47,13 +47,6 @@ u32 fsnotify_get_cookie(void)
 }
 EXPORT_SYMBOL_GPL(fsnotify_get_cookie);
 
-/* return true if the notify queue is empty, false otherwise */
-bool fsnotify_notify_queue_is_empty(struct fsnotify_group *group)
-{
-	assert_spin_locked(&group->notification_lock);
-	return list_empty(&group->notification_list) ? true : false;
-}
-
 void fsnotify_destroy_event(struct fsnotify_group *group,
 			    struct fsnotify_event *event)
 {
@@ -74,10 +67,75 @@ void fsnotify_destroy_event(struct fsnotify_group *group,
 	group->ops->free_event(event);
 }
 
+/* Check and fix inconsistencies in hashed queue */
+static void fsnotify_queue_check(struct fsnotify_group *group)
+{
+#ifdef FSNOTIFY_HASHED_QUEUE
+	struct list_head *list;
+	int i, nbuckets = 0;
+	bool first_empty, last_empty;
+
+	assert_spin_locked(&group->notification_lock);
+
+	pr_debug("%s: group=%p events: num=%u max=%u buckets: first=%u last=%u max=%u\n",
+		 __func__, group, group->num_events, group->max_events,
+		 group->first_bucket, group->last_bucket, group->max_bucket);
+
+	if (fsnotify_notify_queue_is_empty(group))
+		return;
+
+	first_empty = list_empty(&group->notification_list[group->first_bucket]);
+	last_empty = list_empty(&group->notification_list[group->last_bucket]);
+
+	list = &group->notification_list[0];
+	for (i = 0; i <= group->max_bucket; i++, list++) {
+		if (list_empty(list))
+			continue;
+		if (nbuckets++)
+			continue;
+		if (first_empty)
+			group->first_bucket = i;
+		if (last_empty)
+			group->last_bucket = i;
+	}
+
+	pr_debug("%s: %u non-empty buckets\n", __func__, nbuckets);
+
+	/* All buckets are empty, but non-zero num_events? */
+	if (WARN_ON_ONCE(!nbuckets && group->num_events))
+		group->num_events = 0;
+#endif
+}
+
 /*
- * Add an event to the group notification queue.  The group can later pull this
- * event off the queue to deal with.  The function returns 0 if the event was
- * added to the queue, 1 if the event was merged with some other queued event,
+ * Add an event to the group notification queue (no merge and no failure).
+ */
+static void fsnotify_queue_event(struct fsnotify_group *group,
+				struct fsnotify_event *event)
+{
+	/* Choose list to add event to */
+	unsigned int b = fsnotify_event_bucket(group, event);
+	struct list_head *list = &group->notification_list[b];
+
+	assert_spin_locked(&group->notification_lock);
+
+	pr_debug("%s: group=%p event=%p bucket=%u\n", __func__, group, event, b);
+
+	/*
+	 * TODO: set next_bucket of last event.
+	 */
+	group->last_bucket = b;
+	if (!group->num_events)
+		group->first_bucket = b;
+	group->num_events++;
+	list_add_tail(&event->list, list);
+}
+
+/*
+ * Try to Add an event to the group notification queue.
+ * The group can later pull this event off the queue to deal with.
+ * The function returns 0 if the event was added to a queue,
+ * 1 if the event was merged with some other queued event,
  * 2 if the event was not queued - either the queue of events has overflown
  * or the group is shutting down.
  */
@@ -87,7 +145,7 @@ int fsnotify_add_event(struct fsnotify_group *group,
 				    struct fsnotify_event *))
 {
 	int ret = 0;
-	struct list_head *list = &group->notification_list;
+	struct list_head *list;
 
 	pr_debug("%s: group=%p event=%p\n", __func__, group, event);
 
@@ -99,7 +157,7 @@ int fsnotify_add_event(struct fsnotify_group *group,
 	}
 
 	if (event == group->overflow_event ||
-	    group->q_len >= group->max_events) {
+	    group->num_events >= group->max_events) {
 		ret = 2;
 		/* Queue overflow event only if it isn't already queued */
 		if (!list_empty(&group->overflow_event->list)) {
@@ -110,6 +168,7 @@ int fsnotify_add_event(struct fsnotify_group *group,
 		goto queue;
 	}
 
+	list = fsnotify_event_notification_list(group, event);
 	if (!list_empty(list) && merge) {
 		ret = merge(list, event);
 		if (ret) {
@@ -119,8 +178,7 @@ int fsnotify_add_event(struct fsnotify_group *group,
 	}
 
 queue:
-	group->q_len++;
-	list_add_tail(&event->list, list);
+	fsnotify_queue_event(group, event);
 	spin_unlock(&group->notification_lock);
 
 	wake_up(&group->notification_waitq);
@@ -137,7 +195,30 @@ void fsnotify_remove_queued_event(struct fsnotify_group *group,
 	 * check in fsnotify_add_event() works
 	 */
 	list_del_init(&event->list);
-	group->q_len--;
+	group->num_events--;
+}
+
+/* Return the notification list of the first event */
+struct list_head *fsnotify_first_notification_list(struct fsnotify_group *group)
+{
+	struct list_head *list;
+
+	assert_spin_locked(&group->notification_lock);
+
+	if (fsnotify_notify_queue_is_empty(group))
+		return NULL;
+
+	list = &group->notification_list[group->first_bucket];
+	if (likely(!list_empty(list)))
+		return list;
+
+	/*
+	 * Look for any non-empty bucket.
+	 */
+	fsnotify_queue_check(group);
+	list = &group->notification_list[group->first_bucket];
+
+	return list_empty(list) ? NULL : list;
 }
 
 /*
@@ -147,17 +228,21 @@ void fsnotify_remove_queued_event(struct fsnotify_group *group,
 struct fsnotify_event *fsnotify_remove_first_event(struct fsnotify_group *group)
 {
 	struct fsnotify_event *event;
+	struct list_head *list;
 
 	assert_spin_locked(&group->notification_lock);
 
-	if (fsnotify_notify_queue_is_empty(group))
+	list = fsnotify_first_notification_list(group);
+	if (!list)
 		return NULL;
 
-	pr_debug("%s: group=%p\n", __func__, group);
+	pr_debug("%s: group=%p bucket=%u\n", __func__, group, group->first_bucket);
 
-	event = list_first_entry(&group->notification_list,
-				 struct fsnotify_event, list);
+	event = list_first_entry(list, struct fsnotify_event, list);
 	fsnotify_remove_queued_event(group, event);
+	/*
+	 * TODO: update group->first_bucket to next_bucket in first event.
+	 */
 	return event;
 }
 
@@ -167,13 +252,15 @@ struct fsnotify_event *fsnotify_remove_first_event(struct fsnotify_group *group)
  */
 struct fsnotify_event *fsnotify_peek_first_event(struct fsnotify_group *group)
 {
+	struct list_head *list;
+
 	assert_spin_locked(&group->notification_lock);
 
-	if (fsnotify_notify_queue_is_empty(group))
+	list = fsnotify_first_notification_list(group);
+	if (!list)
 		return NULL;
 
-	return list_first_entry(&group->notification_list,
-				struct fsnotify_event, list);
+	return list_first_entry(list, struct fsnotify_event, list);
 }
 
 /*

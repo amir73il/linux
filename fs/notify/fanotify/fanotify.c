@@ -97,7 +97,7 @@ static bool fanotify_should_merge(struct fsnotify_event *old_fsn,
 	old = FANOTIFY_E(old_fsn);
 	new = FANOTIFY_E(new_fsn);
 
-	if (old_fsn->objectid != new_fsn->objectid ||
+	if (old_fsn->key != new_fsn->key ||
 	    old->type != new->type || old->pid != new->pid)
 		return false;
 
@@ -600,8 +600,9 @@ static struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 	 * Use the victim inode instead of the watching inode as the id for
 	 * event queue, so event reported on parent is merged with event
 	 * reported on child when both directory and child watches exist.
+	 * Reduce object id to 32bit hash for hashed queue merge.
 	 */
-	fanotify_init_event(event, (unsigned long)id, mask);
+	fanotify_init_event(event, hash_ptr(id, 32), mask);
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_TID))
 		event->pid = get_pid(task_pid(current));
 	else

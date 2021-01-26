@@ -635,6 +635,7 @@ static long fanotify_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 {
 	struct fsnotify_group *group;
 	struct fsnotify_event *fsn_event;
+	struct list_head *list;
 	void __user *p;
 	int ret = -ENOTTY;
 	size_t send_len = 0;
@@ -646,8 +647,15 @@ static long fanotify_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	switch (cmd) {
 	case FIONREAD:
 		spin_lock(&group->notification_lock);
-		list_for_each_entry(fsn_event, &group->notification_list, list)
-			send_len += FAN_EVENT_METADATA_LEN;
+		list = fsnotify_first_notification_list(group);
+		/*
+		 * With multi queue, send_len will be a lower bound
+		 * on total events size.
+		 */
+		if (list) {
+			list_for_each_entry(fsn_event, list, list)
+				send_len += FAN_EVENT_METADATA_LEN;
+		}
 		spin_unlock(&group->notification_lock);
 		ret = put_user(send_len, (int __user *) p);
 		break;
@@ -982,7 +990,7 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 		f_flags |= O_NONBLOCK;
 
 	/* fsnotify_alloc_group takes a ref.  Dropped in fanotify_release */
-	group = fsnotify_alloc_user_group(&fanotify_fsnotify_ops);
+	group = fsnotify_alloc_user_group(0, &fanotify_fsnotify_ops);
 	if (IS_ERR(group)) {
 		free_uid(user);
 		return PTR_ERR(group);

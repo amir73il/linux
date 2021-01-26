@@ -288,6 +288,7 @@ static long inotify_ioctl(struct file *file, unsigned int cmd,
 {
 	struct fsnotify_group *group;
 	struct fsnotify_event *fsn_event;
+	struct list_head *list;
 	void __user *p;
 	int ret = -ENOTTY;
 	size_t send_len = 0;
@@ -300,10 +301,16 @@ static long inotify_ioctl(struct file *file, unsigned int cmd,
 	switch (cmd) {
 	case FIONREAD:
 		spin_lock(&group->notification_lock);
-		list_for_each_entry(fsn_event, &group->notification_list,
-				    list) {
-			send_len += sizeof(struct inotify_event);
-			send_len += round_event_name_len(fsn_event);
+		list = fsnotify_first_notification_list(group);
+		/*
+		 * With multi queue, send_len will be a lower bound
+		 * on total events size.
+		 */
+		if (list) {
+			list_for_each_entry(fsn_event, list, list) {
+				send_len += sizeof(struct inotify_event);
+				send_len += round_event_name_len(fsn_event);
+			}
 		}
 		spin_unlock(&group->notification_lock);
 		ret = put_user(send_len, (int __user *) p);
@@ -631,7 +638,7 @@ static struct fsnotify_group *inotify_new_group(unsigned int max_events)
 	struct fsnotify_group *group;
 	struct inotify_event_info *oevent;
 
-	group = fsnotify_alloc_user_group(&inotify_fsnotify_ops);
+	group = fsnotify_alloc_user_group(0, &inotify_fsnotify_ops);
 	if (IS_ERR(group))
 		return group;
 
