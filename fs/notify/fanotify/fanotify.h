@@ -115,6 +115,11 @@ static inline void fanotify_info_init(struct fanotify_info *info)
 	info->name_len = 0;
 }
 
+static inline unsigned int fanotify_info_len(struct fanotify_info *info)
+{
+	return info->dir_fh_totlen + info->file_fh_totlen + info->name_len;
+}
+
 static inline void fanotify_info_copy_name(struct fanotify_info *info,
 					   const struct qstr *name)
 {
@@ -138,7 +143,10 @@ enum fanotify_event_type {
 };
 
 struct fanotify_event {
-	struct fsnotify_event fse;
+	union {
+		struct fsnotify_event fse;
+		unsigned int info_hash;
+	};
 	u32 mask;
 	enum fanotify_event_type type;
 	struct pid *pid;
@@ -154,7 +162,10 @@ static inline void fanotify_init_event(struct fanotify_event *event,
 
 struct fanotify_fid_event {
 	struct fanotify_event fae;
-	__kernel_fsid_t fsid;
+	union {
+		__kernel_fsid_t fsid;
+		void *fskey;	/* 64 or 32 bits of fsid used for salt */
+	};
 	struct fanotify_fh object_fh;
 	/* Reserve space in object_fh.buf[] - access with fanotify_fh_buf() */
 	unsigned char _inline_fh_buf[FANOTIFY_INLINE_FH_LEN];
@@ -168,7 +179,10 @@ FANOTIFY_FE(struct fanotify_event *event)
 
 struct fanotify_name_event {
 	struct fanotify_event fae;
-	__kernel_fsid_t fsid;
+	union {
+		__kernel_fsid_t fsid;
+		void *fskey;	/* 64 or 32 bits of fsid used for salt */
+	};
 	struct fanotify_info info;
 };
 

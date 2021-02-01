@@ -14,6 +14,7 @@
 #include <linux/audit.h>
 #include <linux/sched/mm.h>
 #include <linux/statfs.h>
+#include <linux/stringhash.h>
 
 #include "fanotify.h"
 
@@ -443,6 +444,10 @@ static struct fanotify_event *fanotify_alloc_path_event(const struct path *path,
 	pevent->path = *path;
 	path_get(path);
 
+	/* Mix path info into event merge key */
+	pevent->fae.info_hash = hash_ptr(path->dentry, 32) ^
+				hash_ptr(path->mnt, 32);
+
 	return &pevent->fae;
 }
 
@@ -461,6 +466,9 @@ static struct fanotify_event *fanotify_alloc_perm_event(const struct path *path,
 	pevent->path = *path;
 	path_get(path);
 
+	/* Permission events are not merged */
+	pevent->fae.info_hash = 0;
+
 	return &pevent->fae;
 }
 
@@ -469,6 +477,7 @@ static struct fanotify_event *fanotify_alloc_fid_event(struct inode *id,
 						       gfp_t gfp)
 {
 	struct fanotify_fid_event *ffe;
+	struct fanotify_fh *fh;
 
 	ffe = kmem_cache_alloc(fanotify_fid_event_cachep, gfp);
 	if (!ffe)
@@ -476,8 +485,11 @@ static struct fanotify_event *fanotify_alloc_fid_event(struct inode *id,
 
 	ffe->fae.type = FANOTIFY_EVENT_TYPE_FID;
 	ffe->fsid = *fsid;
-	fanotify_encode_fh(&ffe->object_fh, id, fanotify_encode_fh_len(id),
-			   gfp);
+	fh = &ffe->object_fh;
+	fanotify_encode_fh(fh, id, fanotify_encode_fh_len(id), gfp);
+
+	/* Mix fsid+fid info into event merge key */
+	ffe->fae.info_hash = full_name_hash(ffe->fskey, fanotify_fh_buf(fh), fh->len);
 
 	return &ffe->fae;
 }
@@ -517,6 +529,9 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *id,
 	if (file_name)
 		fanotify_info_copy_name(info, file_name);
 
+	/* Mix fsid+dfid+name+fid info into event merge key */
+	fne->fae.info_hash = full_name_hash(fne->fskey, info->buf, fanotify_info_len(info));
+
 	pr_debug("%s: ino=%lu size=%u dir_fh_len=%u child_fh_len=%u name_len=%u name='%.*s'\n",
 		 __func__, id->i_ino, size, dir_fh_len, child_fh_len,
 		 info->name_len, info->name_len, fanotify_info_name(info));
@@ -539,6 +554,8 @@ static struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 	struct mem_cgroup *old_memcg;
 	struct inode *child = NULL;
 	bool name_event = false;
+	unsigned int hash = 0;
+	struct pid *pid;
 
 	if ((fid_mode & FAN_REPORT_DIR_FID) && dirid) {
 		/*
@@ -606,13 +623,17 @@ static struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 	 * Use the victim inode instead of the watching inode as the id for
 	 * event queue, so event reported on parent is merged with event
 	 * reported on child when both directory and child watches exist.
-	 * Reduce object id to 32bit hash for hashed queue merge.
+	 * Reduce object id and event info to 32bit hash for hashed queue merge.
 	 */
-	fanotify_init_event(event, hash_ptr(id, 32), mask);
+	hash = event->info_hash ^ hash_ptr(id, 32);
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_TID))
-		event->pid = get_pid(task_pid(current));
+		pid = get_pid(task_pid(current));
 	else
-		event->pid = get_pid(task_tgid(current));
+		pid = get_pid(task_tgid(current));
+	/* Mix pid info into event merge key */
+	hash ^= hash_ptr(pid, 32);
+	fanotify_init_event(event, hash, mask);
+	event->pid = pid;
 
 out:
 	set_active_memcg(old_memcg);
