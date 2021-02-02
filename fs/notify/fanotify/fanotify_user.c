@@ -29,6 +29,11 @@
 #define FANOTIFY_DEFAULT_MAX_EVENTS	16384
 #define FANOTIFY_DEFAULT_MAX_MARKS	8192
 #define FANOTIFY_DEFAULT_MAX_LISTENERS	128
+/*
+ * 128 hash buckets for fast events merge.
+ * With the default queue size, that leads to avg. list size of 128.
+ */
+#define FANOTIFY_NOTIF_Q_HASH_BITS	7
 
 /*
  * All flags that may be specified in parameter event_f_flags of fanotify_init.
@@ -941,6 +946,7 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	struct user_struct *user;
 	unsigned int fid_mode = flags & FANOTIFY_FID_BITS;
 	unsigned int class = flags & FANOTIFY_CLASS_BITS;
+	unsigned int q_hash_bits = 0;
 
 	pr_debug("%s: flags=%x event_f_flags=%x\n",
 		 __func__, flags, event_f_flags);
@@ -989,8 +995,17 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if (flags & FAN_NONBLOCK)
 		f_flags |= O_NONBLOCK;
 
+	/*
+	 * When fanotify permission event is canceled, event can be removed
+	 * from the middle of the queue and that can break the read order of
+	 * events in a hashed queue.  For now, we do not support hashed queue
+	 * with any classes that supports permission events.
+	 */
+	if (class == FAN_CLASS_NOTIF)
+		q_hash_bits = FANOTIFY_NOTIF_Q_HASH_BITS;
+
 	/* fsnotify_alloc_group takes a ref.  Dropped in fanotify_release */
-	group = fsnotify_alloc_user_group(0, &fanotify_fsnotify_ops);
+	group = fsnotify_alloc_user_group(q_hash_bits, &fanotify_fsnotify_ops);
 	if (IS_ERR(group)) {
 		free_uid(user);
 		return PTR_ERR(group);
