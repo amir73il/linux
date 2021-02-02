@@ -72,8 +72,11 @@ static void fsnotify_queue_check(struct fsnotify_group *group)
 {
 #ifdef FSNOTIFY_HASHED_QUEUE
 	struct list_head *list;
+	unsigned int bitmap[8];
 	int i, nbuckets = 0;
 	bool first_empty, last_empty;
+
+	BUILD_BUG_ON((1 << FSNOTIFY_HASHED_QUEUE_MAX_BITS) > 32 * 8);
 
 	assert_spin_locked(&group->notification_lock);
 
@@ -87,10 +90,14 @@ static void fsnotify_queue_check(struct fsnotify_group *group)
 	first_empty = WARN_ON_ONCE(list_empty(&group->notification_list[group->first_bucket]));
 	last_empty = WARN_ON_ONCE(list_empty(&group->notification_list[group->last_bucket]));
 
+	for (i = 0; i < 8; i++)
+		bitmap[i] = 0;
+
 	list = &group->notification_list[0];
 	for (i = 0; i <= group->max_bucket; i++, list++) {
 		if (list_empty(list))
 			continue;
+		bitmap[i / 32] |= 1 << (i % 32);
 		if (nbuckets++)
 			continue;
 		if (first_empty)
@@ -99,7 +106,9 @@ static void fsnotify_queue_check(struct fsnotify_group *group)
 			group->last_bucket = i;
 	}
 
-	pr_debug("%s: %u non-empty buckets\n", __func__, nbuckets);
+	pr_debug("%s: %u non-empty buckets %x %x %x %x %x %x %x %x\n", __func__, nbuckets,
+		 bitmap[0], bitmap[1], bitmap[2], bitmap[3],
+		 bitmap[4], bitmap[5], bitmap[6], bitmap[7]);
 
 	/* All buckets are empty, but non-zero num_events? */
 	if (WARN_ON_ONCE(!nbuckets && group->num_events))
@@ -175,6 +184,8 @@ int fsnotify_add_event(struct fsnotify_group *group,
 			spin_unlock(&group->notification_lock);
 			return ret;
 		}
+		/* Run debug sanity checks on full queue */
+		fsnotify_queue_check(group);
 		event = group->overflow_event;
 		goto queue;
 	}
