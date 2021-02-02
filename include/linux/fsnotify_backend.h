@@ -161,8 +161,11 @@ struct fsnotify_ops {
 };
 
 #ifdef CONFIG_FANOTIFY
+#if BITS_PER_LONG == 64
+/* Use available 32bit of event for hashed queue support */
 #define FSNOTIFY_HASHED_QUEUE
 #define FSNOTIFY_HASHED_QUEUE_MAX_BITS 8
+#endif
 #endif
 
 /*
@@ -173,6 +176,9 @@ struct fsnotify_ops {
 struct fsnotify_event {
 	struct list_head list;
 	unsigned int key;		/* Key for hashed queue add/merge */
+#ifdef FSNOTIFY_HASHED_QUEUE
+	unsigned int next_bucket;	/* Bucket to read next event from */
+#endif
 };
 
 /*
@@ -276,6 +282,41 @@ static inline struct list_head *fsnotify_event_notification_list(
 {
 	return &group->notification_list[fsnotify_event_bucket(group, event)];
 }
+
+#ifdef FSNOTIFY_HASHED_QUEUE
+static inline bool fsnotify_notify_queue_is_hashed(struct fsnotify_group *group)
+{
+	return group->max_bucket > 0;
+}
+
+static inline unsigned int fsnotify_event_next_bucket(struct fsnotify_event *event)
+{
+	return event->next_bucket;
+}
+
+static inline void fsnotify_event_set_next_bucket(struct fsnotify_event *event,
+						  unsigned int b)
+{
+	event->next_bucket = b;
+}
+
+#else
+static inline bool fsnotify_notify_queue_is_hashed(struct fsnotify_group *group)
+{
+	return false;
+}
+
+static inline unsigned int fsnotify_event_next_bucket(struct fsnotify_event *event)
+{
+	return 0;
+}
+
+static inline void fsnotify_event_set_next_bucket(struct fsnotify_event *event,
+						  unsigned int b)
+{
+}
+
+#endif
 
 /* When calling fsnotify tell it if the data is a path or inode */
 enum fsnotify_data_type {
@@ -620,6 +661,7 @@ static inline void fsnotify_init_event(struct fsnotify_event *event,
 {
 	INIT_LIST_HEAD(&event->list);
 	event->key = key;
+	fsnotify_event_set_next_bucket(event, 0);
 }
 
 #else

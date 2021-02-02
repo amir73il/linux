@@ -84,8 +84,8 @@ static void fsnotify_queue_check(struct fsnotify_group *group)
 	if (fsnotify_notify_queue_is_empty(group))
 		return;
 
-	first_empty = list_empty(&group->notification_list[group->first_bucket]);
-	last_empty = list_empty(&group->notification_list[group->last_bucket]);
+	first_empty = WARN_ON_ONCE(list_empty(&group->notification_list[group->first_bucket]));
+	last_empty = WARN_ON_ONCE(list_empty(&group->notification_list[group->last_bucket]));
 
 	list = &group->notification_list[0];
 	for (i = 0; i <= group->max_bucket; i++, list++) {
@@ -121,12 +121,23 @@ static void fsnotify_queue_event(struct fsnotify_group *group,
 
 	pr_debug("%s: group=%p event=%p bucket=%u\n", __func__, group, event, b);
 
-	/*
-	 * TODO: set next_bucket of last event.
-	 */
-	group->last_bucket = b;
-	if (!group->num_events)
-		group->first_bucket = b;
+	if (fsnotify_notify_queue_is_hashed(group)) {
+		/*
+		 * On first insert, set this event's list as the list to read first event.
+		 * Otherwise, point from last event to this event's list.
+		 */
+		struct list_head *last_l = &group->notification_list[group->last_bucket];
+
+		if (!group->num_events) {
+			group->first_bucket = b;
+		} else if (!WARN_ON_ONCE(list_empty(last_l))) {
+			struct fsnotify_event *last_e;
+
+			last_e = list_last_entry(last_l, struct fsnotify_event, list);
+			fsnotify_event_set_next_bucket(last_e, b);
+		}
+		group->last_bucket = b;
+	}
 	group->num_events++;
 	list_add_tail(&event->list, list);
 }
@@ -186,8 +197,8 @@ queue:
 	return ret;
 }
 
-void fsnotify_remove_queued_event(struct fsnotify_group *group,
-				  struct fsnotify_event *event)
+static void __fsnotify_remove_queued_event(struct fsnotify_group *group,
+					   struct fsnotify_event *event)
 {
 	assert_spin_locked(&group->notification_lock);
 	/*
@@ -196,6 +207,17 @@ void fsnotify_remove_queued_event(struct fsnotify_group *group,
 	 */
 	list_del_init(&event->list);
 	group->num_events--;
+}
+
+void fsnotify_remove_queued_event(struct fsnotify_group *group,
+				  struct fsnotify_event *event)
+{
+	/*
+	 * if called for removal of event in the middle of a hashed queue,
+	 * events may be read not in insertion order.
+	 */
+	WARN_ON_ONCE(fsnotify_notify_queue_is_hashed(group));
+	__fsnotify_remove_queued_event(group, event);
 }
 
 /* Return the notification list of the first event */
@@ -213,6 +235,7 @@ struct list_head *fsnotify_first_notification_list(struct fsnotify_group *group)
 		return list;
 
 	/*
+	 * Oops... first bucket is not supposed to be empty.
 	 * Look for any non-empty bucket.
 	 */
 	fsnotify_queue_check(group);
@@ -239,10 +262,12 @@ struct fsnotify_event *fsnotify_remove_first_event(struct fsnotify_group *group)
 	pr_debug("%s: group=%p bucket=%u\n", __func__, group, group->first_bucket);
 
 	event = list_first_entry(list, struct fsnotify_event, list);
-	fsnotify_remove_queued_event(group, event);
+	__fsnotify_remove_queued_event(group, event);
 	/*
-	 * TODO: update group->first_bucket to next_bucket in first event.
+	 * Removed event points to the next list to read from.
 	 */
+	group->first_bucket = fsnotify_event_next_bucket(event);
+
 	return event;
 }
 
