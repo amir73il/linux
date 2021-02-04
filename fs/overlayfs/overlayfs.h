@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/uuid.h>
 #include <linux/fs.h>
+#include <linux/xattr.h>
 #include "ovl_entry.h"
 
 #undef pr_fmt
@@ -615,3 +616,20 @@ int ovl_set_origin(struct ovl_fs *ofs, struct dentry *lower,
 
 /* export.c */
 extern const struct export_operations ovl_export_operations;
+
+#ifdef CONFIG_OVERLAY_FS_WATCH
+/* fsnotify.c */
+int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs);
+void ovl_free_watch(struct ovl_fs *ofs);
+int __init ovl_fsnotify_init(void);
+void ovl_fsnotify_destroy(void);
+#else
+static inline int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs)
+{
+	return -ENOTSUPP;
+}
+
+static inline void ovl_free_watch(struct ovl_fs *ofs) { }
+static inline int ovl_fsnotify_init(void) { return 0; }
+static inline void ovl_fsnotify_destroy(void) { }
+#endif
