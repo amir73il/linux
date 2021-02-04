@@ -124,3 +124,13 @@ config OVERLAY_FS_METACOPY
 	  that doesn't support this feature will have unexpected results.
 
 	  If unsure, say N.
+
+config OVERLAY_FS_WATCH
+	bool "Overlayfs: change tracking support (Experimental)"
+	depends on OVERLAY_FS
+	depends on FSNOTIFY
+	help
+	  This enables experimental support for overlayfs persistent change
+	  tracking snapshot.
+
+	  If unsure, say N.

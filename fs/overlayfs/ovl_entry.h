@@ -5,6 +5,8 @@
  * Copyright (C) 2016 Red Hat, Inc.
  */
 
+#include <linux/fsnotify_backend.h>
+
 struct ovl_config {
 	char *lowerdir;
 	char *upperdir;
@@ -60,6 +62,8 @@ struct ovl_fs {
 	struct dentry *workdir;
 	/* index directory listing overlay inodes by origin file handle */
 	struct dentry *indexdir;
+	/* fsnotify group to watch lower fs modification events */
+	struct fsnotify_group *watch;
 	long namelen;
 	/* pathnames of lower and upper dirs, for show_options */
 	struct ovl_config config;
