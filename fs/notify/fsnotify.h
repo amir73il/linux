@@ -67,4 +67,10 @@ extern void fsnotify_destroy_event_holder(struct fsnotify_event_holder *holder);
 
 extern struct kmem_cache *fsnotify_mark_connector_cachep;
 
+#ifdef CONFIG_SECURITY
+extern __init void fsnotify_add_security_hooks(void);
+#else
+static inline void fsnotify_add_security_hooks(void) { }
+#endif
+
 #endif	/* __FS_NOTIFY_FSNOTIFY_H_ */
