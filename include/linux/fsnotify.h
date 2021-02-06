@@ -19,6 +19,7 @@
 
 #define FS_EVENT_TYPE(m) ((struct fsnotify_event_type) { .mask = (m) })
 
+
 /*
  * Notify this @dir inode about a change in a child directory entry.
  * The directory entry may have turned positive or negative or its inode may
