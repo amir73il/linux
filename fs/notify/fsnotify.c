@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/mount.h>
 #include <linux/srcu.h>
+#include <linux/lsm_hooks.h>
 
 #include <linux/fsnotify_backend.h>
 #include "fsnotify.h"
@@ -582,6 +583,10 @@ static __init int fsnotify_init(void)
 
 	fsnotify_mark_connector_cachep = KMEM_CACHE(fsnotify_mark_connector,
 						    SLAB_PANIC);
+
+#ifdef CONFIG_FANOTIFY_ACCESS_PERMISSIONS
+	fsnotify_add_security_hooks();
+#endif
 
 	return 0;
 }

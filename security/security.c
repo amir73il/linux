@@ -21,7 +21,6 @@
 #include <linux/integrity.h>
 #include <linux/ima.h>
 #include <linux/evm.h>
-#include <linux/fsnotify.h>
 #include <linux/mman.h>
 #include <linux/mount.h>
 #include <linux/personality.h>
@@ -1443,13 +1442,7 @@ int security_kernfs_init_security(struct kernfs_node *kn_dir,
 
 int security_file_permission(struct file *file, int mask)
 {
-	int ret;
-
-	ret = call_int_hook(file_permission, 0, file, mask);
-	if (ret)
-		return ret;
-
-	return fsnotify_perm(file, mask);
+	return call_int_hook(file_permission, 0, file, mask);
 }
 
 int security_file_alloc(struct file *file)
@@ -1571,13 +1564,7 @@ int security_file_receive(struct file *file)
 
 int security_file_open(struct file *file)
 {
-	int ret;
-
-	ret = call_int_hook(file_open, 0, file);
-	if (ret)
-		return ret;
-
-	return fsnotify_perm(file, MAY_OPEN);
+	return call_int_hook(file_open, 0, file);
 }
 
 int security_task_alloc(struct task_struct *task, unsigned long clone_flags)
