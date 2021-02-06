@@ -673,12 +673,14 @@ static __kernel_fsid_t fanotify_get_fsid(struct fsnotify_iter_info *iter_info)
 	return fsid;
 }
 
-static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
+static int fanotify_handle_event(struct fsnotify_group *group,
+				 struct fsnotify_event_type event_type,
 				 const void *data, int data_type,
 				 struct inode *dir,
 				 const struct qstr *file_name, u32 cookie,
 				 struct fsnotify_iter_info *iter_info)
 {
+	u32 mask = event_type.mask;
 	int ret = 0;
 	struct fanotify_event *event;
 	struct fsnotify_event *fsn_event;

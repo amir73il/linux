@@ -17,6 +17,8 @@
 #include <linux/slab.h>
 #include <linux/bug.h>
 
+#define FS_EVENT_TYPE(m) ((struct fsnotify_event_type) { .mask = (m) })
+
 /*
  * Notify this @dir inode about a change in a child directory entry.
  * The directory entry may have turned positive or negative or its inode may
@@ -30,13 +32,14 @@ static inline int fsnotify_name(__u32 mask, const void *data, int data_type,
 				struct inode *dir, const struct qstr *name,
 				u32 cookie)
 {
-	return fsnotify(mask, data, data_type, dir, name, NULL, cookie);
+	return fsnotify(FS_EVENT_TYPE(mask), data, data_type, dir, name, NULL, cookie);
 }
 
 static inline void fsnotify_dirent(struct inode *dir, struct dentry *dentry,
 				   __u32 mask)
 {
-	fsnotify_name(mask, dentry, FSNOTIFY_EVENT_DENTRY, dir, &dentry->d_name, 0);
+	fsnotify(FS_EVENT_TYPE(mask), dentry, FSNOTIFY_EVENT_DENTRY, dir,
+		 &dentry->d_name, NULL, 0);
 }
 
 static inline void fsnotify_inode(struct inode *inode, __u32 mask)
@@ -44,17 +47,18 @@ static inline void fsnotify_inode(struct inode *inode, __u32 mask)
 	if (S_ISDIR(inode->i_mode))
 		mask |= FS_ISDIR;
 
-	fsnotify(mask, inode, FSNOTIFY_EVENT_INODE, NULL, NULL, inode, 0);
+	fsnotify(FS_EVENT_TYPE(mask), inode, FSNOTIFY_EVENT_INODE, NULL, NULL, inode, 0);
 }
 
 /* Notify this dentry's parent about a child's events. */
-static inline int fsnotify_parent(struct dentry *dentry, __u32 mask,
+static inline int fsnotify_parent(struct dentry *dentry,
+				  struct fsnotify_event_type event_type,
 				  const void *data, int data_type)
 {
 	struct inode *inode = d_inode(dentry);
 
 	if (S_ISDIR(inode->i_mode)) {
-		mask |= FS_ISDIR;
+		event_type.mask |= FS_ISDIR;
 
 		/* sb/mount marks are not interested in name of directory */
 		if (!(dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED))
@@ -65,10 +69,10 @@ static inline int fsnotify_parent(struct dentry *dentry, __u32 mask,
 	if (IS_ROOT(dentry))
 		goto notify_child;
 
-	return __fsnotify_parent(dentry, mask, data, data_type);
+	return __fsnotify_parent(dentry, event_type, data, data_type);
 
 notify_child:
-	return fsnotify(mask, data, data_type, NULL, NULL, inode, 0);
+	return fsnotify(event_type, data, data_type, NULL, NULL, inode, 0);
 }
 
 /*
@@ -77,7 +81,7 @@ notify_child:
  */
 static inline void fsnotify_dentry(struct dentry *dentry, __u32 mask)
 {
-	fsnotify_parent(dentry, mask, dentry, FSNOTIFY_EVENT_DENTRY);
+	fsnotify_parent(dentry, FS_EVENT_TYPE(mask), dentry, FSNOTIFY_EVENT_DENTRY);
 }
 
 static inline int fsnotify_file(struct file *file, __u32 mask)
@@ -87,7 +91,7 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 	if (file->f_mode & FMODE_NONOTIFY)
 		return 0;
 
-	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
+	return fsnotify_parent(path->dentry, FS_EVENT_TYPE(mask), path, FSNOTIFY_EVENT_PATH);
 }
 
 /* Simple call site for access decisions */

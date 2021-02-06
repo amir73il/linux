@@ -121,12 +121,25 @@ struct fsnotify_iter_info;
 struct mem_cgroup;
 
 /*
+ * This struct is used to define the type of the generated event.
+ * Only the mask part is matched against the object interest mask
+ * (i.e. i_fsnotify_mask).  The sub_type part is optional and can provide
+ * extra information to backends for certain event types.
+ */
+struct fsnotify_event_type {
+	u32 mask;
+#if BITS_PER_LONG == 64
+	u32 sub_type;
+#endif
+};
+
+/*
  * Each group much define these ops.  The fsnotify infrastructure will call
  * these operations for each relevant group.
  *
  * handle_event - main call for a group to handle an fs event
  * @group:	group to notify
- * @mask:	event type and flags
+ * @event_type:	event type and optional flags and sub type
  * @data:	object that event happened on
  * @data_type:	type of object for fanotify_data_XXX() accessors
  * @dir:	optional directory associated with event -
@@ -154,7 +167,8 @@ struct mem_cgroup;
  *		userspace messages that marks have been removed.
  */
 struct fsnotify_ops {
-	int (*handle_event)(struct fsnotify_group *group, u32 mask,
+	int (*handle_event)(struct fsnotify_group *group,
+			    struct fsnotify_event_type event_type,
 			    const void *data, int data_type, struct inode *dir,
 			    const struct qstr *file_name, u32 cookie,
 			    struct fsnotify_iter_info *iter_info);
@@ -519,11 +533,13 @@ struct fsnotify_mark {
 /* called from the vfs helpers */
 
 /* main fsnotify call to send events */
-extern int fsnotify(__u32 mask, const void *data, int data_type,
+extern int fsnotify(struct fsnotify_event_type event_type,
+		    const void *data, int data_type,
 		    struct inode *dir, const struct qstr *name,
 		    struct inode *inode, u32 cookie);
-extern int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
-			   int data_type);
+extern int __fsnotify_parent(struct dentry *dentry,
+			     struct fsnotify_event_type event_type,
+			     const void *data, int data_type);
 extern void __fsnotify_inode_delete(struct inode *inode);
 extern void __fsnotify_vfsmount_delete(struct vfsmount *mnt);
 extern void fsnotify_sb_delete(struct super_block *sb);
@@ -725,15 +741,17 @@ static inline void fsnotify_init_event(struct fsnotify_event *event,
 
 #else
 
-static inline int fsnotify(__u32 mask, const void *data, int data_type,
+static inline int fsnotify(struct fsnotify_event_type event_type,
+			   const void *data, int data_type,
 			   struct inode *dir, const struct qstr *name,
 			   struct inode *inode, u32 cookie)
 {
 	return 0;
 }
 
-static inline int __fsnotify_parent(struct dentry *dentry, __u32 mask,
-				  const void *data, int data_type)
+static inline int __fsnotify_parent(struct dentry *dentry,
+				    struct fsnotify_event_type event_type,
+				    const void *data, int data_type)
 {
 	return 0;
 }
