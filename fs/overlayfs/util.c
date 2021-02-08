@@ -66,13 +66,13 @@ struct dentry *ovl_indexdir(struct super_block *sb)
 	return ofs->indexdir;
 }
 
-/* Index all files on copy up. For now only enabled for NFS export */
+/* Index all files on copy up. Enabled for NFS export and watch */
 bool ovl_index_all(struct ovl_fs *ofs)
 {
-	return ofs->config.nfs_export;
+	return ofs->config.nfs_export || ofs->config.watch;
 }
 
-/* Verify lower origin on lookup. For now only enabled for NFS export */
+/* Verify lower origin on lookup. Enabled for NFS export and watch */
 bool ovl_verify_lower(struct super_block *sb)
 {
 	return ovl_index_all(OVL_FS(sb));

@@ -9,6 +9,7 @@
 
 #include <linux/fs.h>
 #include <linux/fsnotify.h>
+#include "../mount.h"
 #include "overlayfs.h"
 
 #define OVL_FSNOTIFY_MASK (FS_MOVE_PERM | FS_MODIFY_PERM | FS_MODIFY_DIR_PERM)
@@ -20,22 +21,114 @@ struct ovl_mark {
 	/* TBD */
 };
 
+/*
+ * Deny move of visible lower directories.
+ *
+ * Called with lock_rename() locks held.
+ */
+static int ovl_handle_move_perm(struct super_block *sb, u32 mask,
+				struct dentry *lowerdir)
+{
+	if (!(mask & FS_ISDIR))
+		return 0;
+
+	/* TODO: allow move of covered lower directory (whiteout index) */
+
+	return -EPERM;
+}
+
 static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 			    const void *data, int data_type, struct inode *dir,
 			    const struct qstr *name, u32 cookie,
 			    struct fsnotify_iter_info *iter_info)
 {
 	struct super_block *sb = group->private;
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct dentry *dentry = fsnotify_data_dentry(data, data_type);
+	struct dentry *lowerdir = NULL;
+	int ret = 0;
 
 	if (WARN_ON_ONCE(!(mask & OVL_FSNOTIFY_MASK)))
 		return 0;
+
+	if (WARN_ON_ONCE(!dentry))
+		return 0;
+
+	pr_debug("%s: %pd2 mask=%x\n", __func__, dentry, mask);
 
 	/* Don't handle events before overlay mount is done */
 	if (!(sb->s_flags & SB_BORN))
 		return 0;
 	smp_rmb();
 
-	return 0;
+	lowerdir = d_is_dir(dentry) ? dget(dentry) : dget_parent(dentry);
+	/* Not interested in events from non-dir with no parent */
+	if (unlikely(!d_is_dir(lowerdir)))
+		goto out;
+
+	if (!is_subdir(lowerdir, ofs->layers[1].mnt->mnt_root)) {
+		/* Not interested in events on objects outside lower rootdir */
+		ret = 1;
+	} else if (mask & FS_MOVE_PERM) {
+		ret = ovl_handle_move_perm(sb, mask, lowerdir);
+	} else if (sb_rdonly(sb)) {
+		/* Deny all modification to lower when overlay watch is ro */
+		ret = -EROFS;
+	}
+
+	if (ret > 0) {
+		/* TODO: add ignored mark for dirs outside lower rootdir */
+		ret = 0;
+	}
+out:
+	dput(lowerdir);
+
+	return ret ? -EPERM : 0;
+}
+
+static int ovl_add_sb_mark(struct fsnotify_group *group,
+			   struct vfsmount *lowermnt, bool watch_mnt)
+{
+	struct ovl_mark *ovm;
+	int err;
+
+	ovm = kmem_cache_alloc(ovl_mark_cachep, GFP_KERNEL);
+	if (!ovm)
+		return -ENOMEM;
+
+	fsnotify_init_mark(&ovm->fsn_mark, group);
+	ovm->fsn_mark.mask = OVL_FSNOTIFY_MASK;
+	if (watch_mnt) {
+		err = fsnotify_add_mark(&ovm->fsn_mark,
+					&real_mount(lowermnt)->mnt_fsnotify_marks,
+					FSNOTIFY_OBJ_TYPE_VFSMOUNT, 0, NULL);
+		if (err)
+			goto out;
+
+		/*
+		 * A mount mark does not get FS_MOVE_PERM events, so add another
+		 * sb mark to get the move permission events.
+		 * It means we will allow all lower changes from another mount
+		 * except for directory renames, which have the most potential
+		 * for damage.
+		 */
+		fsnotify_put_mark(&ovm->fsn_mark);
+		ovm = kmem_cache_alloc(ovl_mark_cachep, GFP_KERNEL);
+		if (!ovm)
+			return -ENOMEM;
+
+		fsnotify_init_mark(&ovm->fsn_mark, group);
+		ovm->fsn_mark.mask = FS_MOVE_PERM;
+	}
+
+	err = fsnotify_add_mark(&ovm->fsn_mark,
+				&lowermnt->mnt_sb->s_fsnotify_marks,
+				FSNOTIFY_OBJ_TYPE_SB, 0, NULL);
+
+out:
+	fsnotify_put_mark(&ovm->fsn_mark);
+
+	return err;
 }
 
 static void ovl_free_mark(struct fsnotify_mark *mark)
@@ -52,9 +145,25 @@ static const struct fsnotify_ops ovl_fsnotify_ops = {
 	.free_mark = ovl_free_mark,
 };
 
-int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs)
+int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs, struct path *lowerpath)
 {
 	struct fsnotify_group *group;
+	int err;
+
+	if (!ofs->config.upperdir || !ofs->workdir || !ofs->config.index) {
+		pr_err("option \"watch\" requires upperdir,workdir and index=on.\n");
+		return -EINVAL;
+	}
+
+	if (ofs->numlayer > 2) {
+		pr_err("option \"watch\" is not supported with multi lower layers.\n");
+		return -EINVAL;
+	}
+
+	if (ofs->numfs > 1 && ofs->config.watch == OVL_WATCH_SB) {
+		pr_warn("option \"watch\" requires lowerdir and upperdir on the same fs.\n");
+		return -EINVAL;
+	}
 
 	group = fsnotify_alloc_group(&ovl_fsnotify_ops);
 	if (IS_ERR(group)) {
@@ -65,7 +174,14 @@ int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs)
 	ofs->watch = group;
 	group->private = sb;
 
-	return 0;
+	/* Create a mark on lower sb/mnt */
+	err = ovl_add_sb_mark(group, lowerpath->mnt,
+			      ofs->config.watch == OVL_WATCH_MNT);
+
+	if (err)
+		pr_err("failed to add fsnotify sb mark (err=%i)\n", err);
+
+	return err;
 }
 
 void ovl_free_watch(struct ovl_fs *ofs)

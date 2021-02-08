@@ -60,6 +60,12 @@ enum {
 	OVL_XINO_ON,
 };
 
+enum {
+	OVL_WATCH_OFF,
+	OVL_WATCH_SB,
+	OVL_WATCH_MNT,
+};
+
 /*
  * The tuple (fh,uuid) is a universal unique identifier for a copy up origin,
  * where:
@@ -528,7 +534,7 @@ extern const struct export_operations ovl_export_operations;
 
 #ifdef CONFIG_OVERLAY_FS_WATCH
 /* fsnotify.c */
-int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs);
+int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs, struct path *lowerpath);
 void ovl_free_watch(struct ovl_fs *ofs);
 int __init ovl_fsnotify_init(void);
 void ovl_fsnotify_destroy(void);
