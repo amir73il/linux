@@ -556,7 +556,7 @@ int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index)
 	 * Verifying directory index entries are not stale is expensive, so
 	 * only verify stale dir index if NFS export is enabled.
 	 */
-	if (d_is_dir(index) && !ofs->config.nfs_export)
+	if (d_is_dir(index) && !ovl_index_all(ofs))
 		goto out;
 
 	/*
@@ -1048,7 +1048,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		origin = stack[0].dentry;
 
 	if (origin && ovl_indexdir(dentry->d_sb) &&
-	    (!d.is_dir || ovl_index_all(dentry->d_sb))) {
+	    (!d.is_dir || ovl_index_all(ofs))) {
 		index = ovl_lookup_index(ofs, upperdentry, origin, true);
 		if (IS_ERR(index)) {
 			err = PTR_ERR(index);

@@ -1205,7 +1205,7 @@ int ovl_indexdir_cleanup(struct ovl_fs *ofs)
 			 * of memory.
 			 */
 			break;
-		} else if (ofs->config.nfs_export) {
+		} else if (ovl_index_all(ofs)) {
 			/*
 			 * Whiteout orphan index to block future open by
 			 * handle after overlay nlink dropped to zero.
