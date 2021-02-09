@@ -2766,11 +2766,13 @@ static inline bool execute_ok(struct inode *inode)
 	return (inode->i_mode & S_IXUGO) || S_ISDIR(inode->i_mode);
 }
 
+extern int __file_start_write(struct file *file);
+
 static inline void file_start_write(struct file *file)
 {
 	if (!S_ISREG(file_inode(file)->i_mode))
 		return;
-	sb_start_write(file_inode(file)->i_sb);
+	__file_start_write(file);
 }
 
 static inline bool file_start_write_trylock(struct file *file)
