@@ -163,6 +163,84 @@ static int ovl_fsync_indexdir(struct ovl_fs *ofs)
 }
 
 /*
+ * Make a directory index entry whiteout before moving a lower dir.
+ */
+static int ovl_whiteout_lowerdir_index(struct super_block *sb,
+				       struct dentry *lowerdir)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct inode *dir = d_inode(ofs->indexdir);
+	const struct cred *old_cred;
+	struct dentry *index;
+	int err;
+
+	err = mnt_want_write(ovl_upper_mnt(ofs));
+	if (err)
+		return err;
+
+	old_cred = ovl_override_creds(sb);
+	inode_lock_nested(dir, I_MUTEX_PARENT);
+
+	index = ovl_lookup_lowerdir_index_locked(ofs, lowerdir);
+	if (IS_ERR(index)) {
+		err = PTR_ERR(index);
+		index = NULL;
+	} else if (ovl_is_whiteout(index)) {
+		err = -EEXIST;
+	} else {
+		err = ovl_cleanup_and_whiteout(ofs, dir, index);
+	}
+	dput(index);
+
+	pr_debug("%s: whiteout index of %pd2 %s\n", __func__, lowerdir,
+		 !err ? "created" : err == -EEXIST ? "exists" : "failed");
+
+	inode_unlock(dir);
+	revert_creds(old_cred);
+	mnt_drop_write(ovl_upper_mnt(ofs));
+
+	return err;
+}
+
+/*
+ * Check if lower object about to be moved is a directory.
+ *
+ * Deny move of a directory unless its index entry is a whiteout.
+ *
+ * Return NULL if moved object is not a directory.
+ * Return dentry of directory to move if a whiteout index exists or was created.
+ */
+static struct dentry *ovl_handle_want_move(struct super_block *sb,
+					   struct dentry *lowerdir,
+					   const struct qstr *name)
+{
+	struct dentry *movedir = ovl_lookup_lower_unlocked(sb, lowerdir, name);
+	int err = 0;
+
+	/*
+	 * This hook is called before the mover took any vfs locks, so
+	 * do not error if we couldn't find the moved object.
+	 * Perhaps the object was already moved by another thread, which
+	 * also took care of indexing.
+	 */
+	if (IS_ERR(movedir))
+		return NULL;
+
+	if (!d_is_dir(movedir))
+		goto out;
+
+	/* Create a white index entry for the directory to be moved */
+	err = ovl_whiteout_lowerdir_index(sb, movedir);
+	if (!err || err == -EEXIST)
+		return movedir;
+
+out:
+	dput(movedir);
+
+	return ERR_PTR(err);
+}
+
+/*
  * Record change in index before lower modification.
  */
 static int ovl_create_ancestry_indices(struct super_block *sb,
@@ -272,7 +350,12 @@ static int ovl_handle_move_perm(struct super_block *sb, u32 mask,
 	if (!(mask & FS_ISDIR))
 		return 0;
 
-	/* TODO: allow move of covered lower directory (whiteout index) */
+	/*
+	 * Move of covered lower directory (whiteout index) should not
+	 * get here because handle on the mnt_want_rename() hook that is
+	 * called before fsnotify_inode_rename() hook should add an ingnored
+	 * mask for FS_MOVE_PERM events on the moved lower dir.
+	 */
 
 	return -EPERM;
 }
@@ -319,6 +402,7 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 	struct ovl_fs *ofs = sb->s_fs_info;
 	struct dentry *dentry = fsnotify_data_dentry(data, data_type);
 	struct dentry *lowerdir = NULL;
+	struct dentry *movedir = NULL;
 	int ret = 0;
 
 	if (WARN_ON_ONCE(!(mask & OVL_FSNOTIFY_MASK)))
@@ -353,7 +437,16 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 			goto out;
 
 		if (cookie) {
-			/* TODO: handle want_rename */
+			/* Deny move of dir unless index is a whiteout */
+			movedir = ovl_handle_want_move(sb, lowerdir, name);
+		}
+
+		if (IS_ERR(movedir)) {
+			ret = PTR_ERR(movedir);
+			goto out;
+		} else if (movedir) {
+			ovl_add_ignored_mark(group, movedir, OVL_FSNOTIFY_MASK);
+			dput(movedir);
 		}
 	}
 
