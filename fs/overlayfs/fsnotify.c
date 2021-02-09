@@ -8,6 +8,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/file.h>
 #include <linux/fsnotify.h>
 #include <linux/namei.h>
 #include <linux/ratelimit.h>
@@ -93,6 +94,118 @@ fail:
 }
 
 /*
+ * Lookup index entry for lower dir.
+ *
+ * Caller must hold index dir lock.
+ */
+static struct dentry *ovl_lookup_lowerdir_index_locked(struct ovl_fs *ofs,
+						       struct dentry *lowerdir)
+{
+	struct dentry *index;
+	struct qstr name;
+	int err;
+
+	err = ovl_get_index_name(ofs, lowerdir, &name);
+	if (err)
+		return ERR_PTR(err);
+
+	index = lookup_one_len(name.name, ofs->indexdir, name.len);
+	kfree(name.name);
+
+	return index;
+}
+
+/*
+ * Create index entry for lower dir.
+ *
+ * Caller must hold index dir lock.
+ */
+static int ovl_create_lowerdir_index_locked(struct ovl_fs *ofs,
+					    struct inode *dir,
+					    struct dentry *lowerdir)
+{
+	struct dentry *index = ovl_lookup_lowerdir_index_locked(ofs, lowerdir);
+	int err;
+
+	if (IS_ERR(index)) {
+		err = PTR_ERR(index);
+		index = NULL;
+	} else if (d_is_positive(index)) {
+		err = -EEXIST;
+	} else {
+		err = ovl_do_mkdir(dir, index, S_IFDIR);
+	}
+	dput(index);
+
+	pr_debug("%s: index of %pd2 %s\n", __func__, lowerdir,
+		 !err ? "created" : err == -EEXIST ? "exists" : "failed");
+
+	return err;
+}
+
+static int ovl_fsync_indexdir(struct ovl_fs *ofs)
+{
+	struct path indexpath = {
+		.mnt = ovl_upper_mnt(ofs),
+		.dentry = ofs->indexdir,
+	};
+	struct file *file;
+	int err;
+
+	file = dentry_open(&indexpath, O_RDONLY, current_cred());
+	if (IS_ERR(file))
+		return PTR_ERR(file);
+
+	err = vfs_fsync(file, 0);
+	fput(file);
+
+	return err;
+}
+
+/*
+ * Record change in index before lower modification.
+ */
+static int ovl_create_ancestry_indices(struct super_block *sb,
+				       struct dentry *lowerdir, bool fsync)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct dentry *indexdir = ofs->indexdir;
+	struct inode *dir = indexdir->d_inode;
+	const struct cred *old_cred;
+	int err;
+
+	err = mnt_want_write(ovl_upper_mnt(ofs));
+	if (err)
+		return err;
+
+	old_cred = ovl_override_creds(sb);
+	inode_lock_nested(dir, I_MUTEX_PARENT);
+
+	/*
+	 * TODO: Create directory index entries for all ancestors.
+	 */
+	err = ovl_create_lowerdir_index_locked(ofs, dir, lowerdir);
+	if (err == -EEXIST)
+		err = 0;
+	if (err)
+		goto fail;
+
+	if (fsync)
+		err = ovl_fsync_indexdir(ofs);
+out:
+	inode_unlock(dir);
+	revert_creds(old_cred);
+	mnt_drop_write(ovl_upper_mnt(ofs));
+
+	return err;
+
+fail:
+	pr_warn_ratelimited("failed to record lowerdir change in index (%pd2, err=%i)\n",
+			    lowerdir, err);
+	goto out;
+}
+
+/*
  * Record change in index if needed before lower modification.
  *
  * Returns 0 if change is recorded in index
@@ -132,8 +245,15 @@ static int ovl_handle_want_write(struct super_block *sb, u32 mask,
 		err = PTR_ERR(index);
 		index = NULL;
 	} else if (d_is_negative(index)) {
-		/* Deny modification unless change is recorded in index */
-		err = -ENOENT;
+		/*
+		 * Deny modification unless change is recorded in index.
+		 * We need to fsync indexdir before allowing lower data
+		 * modification, because data writes can be flushed before
+		 * the index changes are committed to disk.
+		 */
+		bool fsync = (mask & FS_MODIFY_PERM) && !(mask & FS_ISDIR);
+
+		err = ovl_create_ancestry_indices(sb, lowerdir, fsync);
 	}
 
 	dput(index);
