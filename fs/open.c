@@ -175,12 +175,12 @@ long do_ftruncate(struct file *file, loff_t length, int small)
 	/* Check IS_APPEND on real upper inode */
 	if (IS_APPEND(file_inode(file)))
 		return -EPERM;
-	sb_start_write(inode->i_sb);
+	file_start_write(file);
 	error = security_file_truncate(file);
 	if (!error)
 		error = do_truncate(file_mnt_idmap(file), dentry, length,
 				    ATTR_MTIME | ATTR_CTIME, file);
-	sb_end_write(inode->i_sb);
+	file_end_write(file);
 
 	return error;
 }
