@@ -97,9 +97,19 @@
 			     FS_DELETE_SELF | FS_MOVE_SELF | FS_DN_RENAME | \
 			     FS_UNMOUNT | FS_Q_OVERFLOW | FS_IN_IGNORED)
 
+/* Extra flags that control handling of inotify events */
+#define ALL_INOTIFY_CONTROL_FLAGS	(FS_EXCL_UNLINK | FS_IN_ONESHOT)
+
+/* Extra flags that control handling of events */
+#define ALL_FSNOTIFY_CONTROL_FLAGS	(ALL_INOTIFY_CONTROL_FLAGS | \
+					 FS_DN_MULTISHOT)
+
+/* Extra flags that may be reported with event */
+#define ALL_FSNOTIFY_REPORT_FLAGS	(FS_ISDIR | FS_EVENT_ON_CHILD)
+
 /* Extra flags that may be reported with event or control handling of events */
-#define ALL_FSNOTIFY_FLAGS  (FS_EXCL_UNLINK | FS_ISDIR | FS_IN_ONESHOT | \
-			     FS_DN_MULTISHOT | FS_EVENT_ON_CHILD)
+#define ALL_FSNOTIFY_FLAGS  (ALL_FSNOTIFY_CONTROL_FLAGS | \
+			     ALL_FSNOTIFY_REPORT_FLAGS)
 
 #define ALL_FSNOTIFY_BITS   (ALL_FSNOTIFY_EVENTS | ALL_FSNOTIFY_FLAGS)
 
@@ -597,10 +607,16 @@ extern void fsnotify_remove_queued_event(struct fsnotify_group *group,
 
 /* functions used to manipulate the marks attached to inodes */
 
-/* Get mask for calculating object interest taking ignored mask into account */
+/*
+ * Get mask for calculating object interest taking ignored mask into account.
+ * The inotify control flags are not relevant to object interest mask.
+ */
 static inline __u32 fsnotify_calc_mask(struct fsnotify_mark *mark)
 {
 	__u32 mask = mark->mask;
+
+	if (mask & FS_IN_IGNORED)
+		mask &= ~ALL_INOTIFY_CONTROL_FLAGS;
 
 	if (!mark->ignored_mask)
 		return mask;
