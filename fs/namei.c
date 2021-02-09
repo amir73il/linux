@@ -3164,7 +3164,7 @@ static const char *open_last_lookups(struct nameidata *nd,
 	}
 
 	if (open_flag & (O_CREAT | O_TRUNC | O_WRONLY | O_RDWR)) {
-		error = mnt_want_write(nd->path.mnt);
+		error = mnt_want_write_name(&nd->path, &nd->last);
 		if (!error)
 			got_write = true;
 		/*
@@ -3244,7 +3244,7 @@ static int do_open(struct nameidata *nd,
 		open_flag &= ~O_TRUNC;
 		acc_mode = 0;
 	} else if (d_is_reg(nd->path.dentry) && open_flag & O_TRUNC) {
-		error = mnt_want_write(nd->path.mnt);
+		error = mnt_want_write_path(&nd->path);
 		if (error)
 			return error;
 		do_truncate = true;
@@ -3461,7 +3461,7 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 		goto out;
 
 	/* don't fail immediately if it's r/o, at least try to report other errors */
-	err2 = mnt_want_write(path->mnt);
+	err2 = mnt_want_write_name(path, &last);
 	/*
 	 * Do the final lookup.
 	 */
@@ -3757,7 +3757,7 @@ retry:
 		goto exit1;
 	}
 
-	error = mnt_want_write(path.mnt);
+	error = mnt_want_write_name(&path, &last);
 	if (error)
 		goto exit1;
 
@@ -3878,7 +3878,7 @@ retry:
 	if (type != LAST_NORM)
 		goto exit1;
 
-	error = mnt_want_write(path.mnt);
+	error = mnt_want_write_name(&path, &last);
 	if (error)
 		goto exit1;
 retry_deleg:
@@ -4399,7 +4399,7 @@ retry:
 	if (new_type != LAST_NORM)
 		goto exit2;
 
-	error = mnt_want_write(old_path.mnt);
+	error = mnt_want_write_rename(&old_path, &old_last, &new_path, &new_last);
 	if (error)
 		goto exit2;
 

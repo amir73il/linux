@@ -320,4 +320,61 @@ static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
 		fsnotify_dentry(dentry, mask);
 }
 
+/*
+ * Pre mnt_want_write() permission hooks
+ *
+ * These event may block and are intended for internal kernel listeners only.
+ *
+ * Caller must NOT hold any filesystem locks, because backend may need to
+ * write to filesystem.
+ */
+
+/*
+ * fsnotify_want_write_path - object at path is about to be modified
+ */
+static inline int fsnotify_want_write_path(const struct path *path)
+{
+	return fsnotify_parent(path->dentry, FS_MODIFY_PERM, path,
+			       FSNOTIFY_EVENT_PATH);
+}
+
+/*
+ * fsnotify_want_write_name - object at path/name is about to be linked/unlinked
+ *
+ * The object at path/name could already exist or is about to be created.
+ */
+static inline int fsnotify_want_write_name(const struct path *path,
+					   const struct qstr *name)
+{
+	return fsnotify_name(FS_MODIFY_DIR_PERM, path, FSNOTIFY_EVENT_PATH,
+			     d_inode(path->dentry), name, 0);
+}
+
+/*
+ * fsnotify_want_write_rename - object is about to be renamed
+ *
+ * The object at new_path/new_name could be negative.  If positive, it
+ * could be overwritten or exchanged with old_path/old_name.
+ *
+ * Backends will get two events that are similar to the two events they
+ * would get from delete old + create new.  The only difference for backends
+ * is the rename cookie.
+ */
+static inline int fsnotify_want_write_rename(const struct path *old_path,
+					     const struct qstr *old_name,
+					     const struct path *new_path,
+					     const struct qstr *new_name)
+{
+	u32 cookie = fsnotify_get_cookie();
+	int ret;
+
+	ret = fsnotify_name(FS_MODIFY_DIR_PERM, old_path, FSNOTIFY_EVENT_PATH,
+			    d_inode(old_path->dentry), old_name, cookie);
+	if (ret)
+		return ret;
+
+	return fsnotify_name(FS_MODIFY_DIR_PERM, new_path, FSNOTIFY_EVENT_PATH,
+			     d_inode(new_path->dentry), new_name, cookie);
+}
+
 #endif	/* _LINUX_FS_NOTIFY_H */

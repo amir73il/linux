@@ -51,6 +51,8 @@
 /*
  * Permission hooks for use by kernel internal backends only.
  */
+#define FS_MODIFY_PERM		0x01000000	/* Permission hook before modify data/metadata */
+#define FS_MODIFY_DIR_PERM	0x02000000	/* Permission hook before create/delete/rename */
 #define FS_MOVE_PERM		0x04000000	/* Permission hook before move */
 /* Move permission event overloads inotify control flag */
 #define FS_EXCL_UNLINK		0x04000000	/* do not send events if object is unlinked */
@@ -77,7 +79,8 @@
 #define ALL_FSNOTIFY_DIRENT_EVENTS	(FS_CREATE | FS_DELETE | FS_MOVE)
 
 #define ALL_FSNOTIFY_PERM_EVENTS (FS_OPEN_PERM | FS_ACCESS_PERM | \
-				  FS_OPEN_EXEC_PERM | FS_MOVE_PERM)
+				  FS_OPEN_EXEC_PERM | FS_MOVE_PERM | \
+				  FS_MODIFY_DIR_PERM | FS_MODIFY_PERM)
 
 /*
  * This is a list of all events that may get sent to a parent that is watching

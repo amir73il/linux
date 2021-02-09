@@ -76,9 +76,14 @@ struct vfsmount {
 
 struct file; /* forward dec */
 struct path;
+struct qstr;
 
 extern int mnt_want_write(struct vfsmount *mnt);
 extern int mnt_want_write_file(struct file *file);
+extern int mnt_want_write_path(const struct path *path);
+extern int mnt_want_write_name(const struct path *path, const struct qstr *name);
+extern int mnt_want_write_rename(const struct path *oldpath, const struct qstr *oldname,
+				 const struct path *newpath, const struct qstr *newname);
 extern int mnt_clone_write(struct vfsmount *mnt);
 extern void mnt_drop_write(struct vfsmount *mnt);
 extern void mnt_drop_write_file(struct file *file);
