@@ -467,17 +467,43 @@ int __mnt_want_write_file(struct file *file)
 }
 
 /**
+ * __file_start_write - get freeze protection to a file's superblock
+ * @file: the file whose super we write to
+ *
+ * In addition to getting freeze protection, it is also used to notify
+ * listeners on an intent to make a modification in the filesystem.
+ */
+int __file_start_write(struct file *file)
+{
+	int ret = fsnotify_want_write_file(file);
+
+	if (unlikely(ret))
+		return ret;
+
+	sb_start_write(file_inode(file)->i_sb);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(__file_start_write);
+
+/**
  * mnt_want_write_file - get write access to a file's mount
  * @file: the file who's mount on which to take a write
  *
  * This is like mnt_want_write, but it takes a file and can
  * do some optimisations if the file is open for write already
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
  */
 int mnt_want_write_file(struct file *file)
 {
 	int ret;
 
-	sb_start_write(file_inode(file)->i_sb);
+	ret = __file_start_write(file);
+	if (ret)
+		return ret;
+
 	ret = __mnt_want_write_file(file);
 	if (ret)
 		sb_end_write(file_inode(file)->i_sb);
