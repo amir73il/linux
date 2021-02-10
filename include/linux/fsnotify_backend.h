@@ -775,7 +775,7 @@ static inline __u32 fsnotify_calc_mask(struct fsnotify_mark *mark)
 
 	/*
 	 * If mark is interested in ignoring events on children, the object must
-	 * show interest in those events for fsnotify_parent() to notice it.
+	 * show interest in those events for fsnotify() to notice it.
 	 */
 	return mask | mark->ignore_mask;
 }

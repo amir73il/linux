@@ -571,7 +571,6 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	if (inode2)
 		marks_mask |= READ_ONCE(inode2->i_fsnotify_mask);
 
-
 	/*
 	 * If this is a modify event we may need to clear some ignore masks.
 	 * In that case, the object with ignore masks will have the FS_MODIFY
@@ -584,19 +583,22 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 
 	iter_info.srcu_idx = srcu_read_lock(&fsnotify_mark_srcu);
 
-	if (sbinfo) {
+	/*
+	 * Consider only marks on objects that care about this event.
+	 */
+	if (sbinfo && test_mask & sb->s_fsnotify_mask) {
 		iter_info.marks[FSNOTIFY_ITER_TYPE_SB] =
 			fsnotify_first_mark(&sbinfo->sb_marks);
 	}
-	if (mnt) {
+	if (mnt && (test_mask & mnt->mnt_fsnotify_mask)) {
 		iter_info.marks[FSNOTIFY_ITER_TYPE_VFSMOUNT] =
 			fsnotify_first_mark(&mnt->mnt_fsnotify_marks);
 	}
-	if (inode) {
+	if (inode && (test_mask & inode->i_fsnotify_mask)) {
 		iter_info.marks[FSNOTIFY_ITER_TYPE_INODE] =
 			fsnotify_first_mark(&inode->i_fsnotify_marks);
 	}
-	if (inode2) {
+	if (inode2 && (test_mask & inode2->i_fsnotify_mask)) {
 		iter_info.marks[inode2_type] =
 			fsnotify_first_mark(&inode2->i_fsnotify_marks);
 	}
