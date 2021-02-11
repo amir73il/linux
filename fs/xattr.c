@@ -653,7 +653,7 @@ retry:
 	error = user_path_at(AT_FDCWD, pathname, lookup_flags, &path);
 	if (error)
 		goto out;
-	error = mnt_want_write(path.mnt);
+	error = mnt_want_write_path(&path);
 	if (!error) {
 		error = do_setxattr(mnt_idmap(path.mnt), path.dentry, &ctx);
 		mnt_drop_write(path.mnt);
@@ -923,7 +923,7 @@ retry:
 	error = user_path_at(AT_FDCWD, pathname, lookup_flags, &path);
 	if (error)
 		return error;
-	error = mnt_want_write(path.mnt);
+	error = mnt_want_write_path(&path);
 	if (!error) {
 		error = removexattr(mnt_idmap(path.mnt), path.dentry, kname);
 		mnt_drop_write(path.mnt);
