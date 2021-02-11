@@ -21,6 +21,8 @@ struct ovl_config {
 	bool metacopy;
 	bool userxattr;
 	bool ovl_volatile;
+	/* Watching lowerdir modifications */
+	int watch;
 };
 
 struct ovl_sb {

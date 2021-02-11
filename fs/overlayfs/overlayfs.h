@@ -100,6 +100,12 @@ enum {
 	OVL_VERITY_REQUIRE,
 };
 
+enum {
+	OVL_WATCH_OFF,
+	OVL_WATCH_MNT,
+	OVL_WATCH_SB,
+};
+
 /*
  * The tuple (fh,uuid) is a universal unique identifier for a copy up origin,
  * where:
@@ -666,7 +672,7 @@ static inline struct dentry *ovl_indexdir(struct super_block *sb)
 /* If indexing is enabled, index all files and directories */
 static inline bool ovl_index_all(struct ovl_fs *ofs)
 {
-	return ofs->config.nfs_export;
+	return ofs->config.nfs_export || ofs->config.watch;
 }
 
 /* Verify lower origin on lookup */
@@ -912,12 +918,14 @@ ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size);
 
 #ifdef CONFIG_OVERLAY_FS_WATCH
 /* fsnotify.c */
-int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs);
+int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs,
+		  struct path *lowerpath);
 void ovl_free_watch(struct ovl_fs *ofs);
 int __init ovl_fsnotify_init(void);
 void ovl_fsnotify_destroy(void);
 #else
-static inline int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs)
+static inline int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs,
+				struct path *lowerpath)
 {
 	return -ENOTSUPP;
 }

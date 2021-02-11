@@ -52,6 +52,8 @@ enum ovl_opt {
 	Opt_default_permissions,
 	Opt_redirect_dir,
 	Opt_index,
+	Opt_watch,
+	Opt_watch_type,
 	Opt_uuid,
 	Opt_nfs_export,
 	Opt_userxattr,
@@ -66,6 +68,22 @@ static const struct constant_table ovl_parameter_bool[] = {
 	{ "off",	false },
 	{}
 };
+
+static const struct constant_table ovl_parameter_watch[] = {
+	{ "off",	OVL_WATCH_OFF	},
+	{ "mnt",	OVL_WATCH_MNT	},
+	{ "sb",		OVL_WATCH_SB	},
+};
+
+static const char *ovl_watch_mode(struct ovl_config *config)
+{
+	return ovl_parameter_watch[config->watch].name;
+}
+
+static int ovl_watch_def(void)
+{
+	return OVL_WATCH_OFF;
+}
 
 static const struct constant_table ovl_parameter_uuid[] = {
 	{ "off",	OVL_UUID_OFF  },
@@ -148,6 +166,8 @@ const struct fs_parameter_spec ovl_parameter_spec[] = {
 	fsparam_flag("default_permissions", Opt_default_permissions),
 	fsparam_enum("redirect_dir",        Opt_redirect_dir, ovl_parameter_redirect_dir),
 	fsparam_enum("index",               Opt_index, ovl_parameter_bool),
+	fsparam_flag("watch",               Opt_watch),
+	fsparam_enum("watch",               Opt_watch_type, ovl_parameter_watch),
 	fsparam_enum("uuid",                Opt_uuid, ovl_parameter_uuid),
 	fsparam_enum("nfs_export",          Opt_nfs_export, ovl_parameter_bool),
 	fsparam_flag("userxattr",           Opt_userxattr),
@@ -573,6 +593,14 @@ static int ovl_parse_param(struct fs_context *fc, struct fs_parameter *param)
 		config->index = result.uint_32;
 		ctx->set.index = true;
 		break;
+#ifdef CONFIG_OVERLAY_FS_WATCH
+	case Opt_watch:
+		config->watch = OVL_WATCH_SB;
+		break;
+	case Opt_watch_type:
+		config->watch = result.uint_32;
+		break;
+#endif
 	case Opt_uuid:
 		config->uuid = result.uint_32;
 		break;
@@ -698,6 +726,7 @@ int ovl_init_fs_context(struct fs_context *fc)
 
 	ofs->config.redirect_mode	= ovl_redirect_mode_def();
 	ofs->config.index		= ovl_index_def;
+	ofs->config.watch		= ovl_watch_def();
 	ofs->config.uuid		= ovl_uuid_def();
 	ofs->config.nfs_export		= ovl_nfs_export_def;
 	ofs->config.xino		= ovl_xino_def();
@@ -771,6 +800,9 @@ int ovl_fs_params_verify(const struct ovl_fs_context *ctx,
 			set.index = false;
 		}
 		config->index = false;
+	} else if (config->watch && !set.index) {
+		/* Auto-enable index for lowerdir change tracking */
+		config->index = true;
 	}
 
 	if (!config->upperdir && config->ovl_volatile) {
@@ -850,18 +882,20 @@ int ovl_fs_params_verify(const struct ovl_fs_context *ctx,
 		}
 	}
 
-	/* Resolve nfs_export -> !metacopy && !verity dependency */
-	if (config->nfs_export && config->metacopy) {
-		if (set.nfs_export && set.metacopy) {
-			pr_err("conflicting options: nfs_export=on,metacopy=on\n");
+	/* Resolve nfs_export -> !metacopy && !watch dependency */
+	if (config->nfs_export && (config->metacopy || config->watch)) {
+		const char *opt = config->watch ? "watch" : "metacopy=on";
+
+		if (set.nfs_export && (set.metacopy || config->watch)) {
+			pr_err("conflicting options: nfs_export=on,%s\n", opt);
 			return -EINVAL;
 		}
-		if (set.metacopy) {
+		if (set.metacopy || config->watch) {
 			/*
 			 * There was an explicit metacopy=on that resulted
 			 * in this conflict.
 			 */
-			pr_info("disabling nfs_export due to metacopy=on\n");
+			pr_info("disabling nfs_export due to %s\n", opt);
 			config->nfs_export = false;
 		} else if (config->verity_mode) {
 			/*
@@ -880,7 +914,6 @@ int ovl_fs_params_verify(const struct ovl_fs_context *ctx,
 			config->metacopy = false;
 		}
 	}
-
 
 	/* Resolve userxattr -> !redirect && !metacopy && !verity dependency */
 	if (config->userxattr) {
@@ -991,6 +1024,8 @@ int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 			   ovl_redirect_mode(&ofs->config));
 	if (ofs->config.index != ovl_index_def)
 		seq_printf(m, ",index=%s", ofs->config.index ? "on" : "off");
+	if (ofs->config.watch)
+		seq_printf(m, ",watch=%s", ovl_watch_mode(&ofs->config));
 	if (ofs->config.uuid != ovl_uuid_def())
 		seq_printf(m, ",uuid=%s", ovl_uuid_mode(&ofs->config));
 	if (ofs->config.nfs_export != ovl_nfs_export_def)

@@ -1418,6 +1418,13 @@ int ovl_fill_super(struct super_block *sb, struct fs_context *fc)
 			sb->s_flags |= SB_RDONLY;
 	}
 
+	/* Setup an fsnotify watch on lowerpath */
+	if (ofs->config.watch) {
+		err = ovl_get_watch(sb, ofs, &ctx->lower[0].path);
+		if (err)
+			goto out_free_oe;
+	}
+
 	err = ovl_check_overlapping_layers(sb, ofs);
 	if (err)
 		goto out_free_oe;
