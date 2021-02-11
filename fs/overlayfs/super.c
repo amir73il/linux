@@ -338,6 +338,12 @@ static inline int ovl_xino_def(void)
 	return ovl_xino_auto_def ? OVL_XINO_AUTO : OVL_XINO_OFF;
 }
 
+static const char * const ovl_watch_str[] = {
+	"off",		/* OVL_WATCH_OFF (not shown) */
+	"mnt",		/* OVL_WATCH_MNT */
+	"sb",		/* OVL_WATCH_SB */
+};
+
 /**
  * ovl_show_options
  *
@@ -350,6 +356,8 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 	struct ovl_fs *ofs = sb->s_fs_info;
 
 	seq_show_option(m, "lowerdir", ofs->config.lowerdir);
+	if (ofs->config.watch)
+		seq_printf(m, ",watch=%s", ovl_watch_str[ofs->config.watch]);
 	if (ofs->config.upperdir) {
 		seq_show_option(m, "upperdir", ofs->config.upperdir);
 		seq_show_option(m, "workdir", ofs->config.workdir);
@@ -409,6 +417,9 @@ static const struct super_operations ovl_super_operations = {
 };
 
 enum {
+	OPT_WATCH,
+	OPT_WATCH_SB,
+	OPT_WATCH_MNT,
 	OPT_LOWERDIR,
 	OPT_UPPERDIR,
 	OPT_WORKDIR,
@@ -431,6 +442,9 @@ enum {
 };
 
 static const match_table_t ovl_tokens = {
+	{OPT_WATCH,			"watch"},
+	{OPT_WATCH_SB,			"watch=sb"},
+	{OPT_WATCH_MNT,			"watch=mnt"},
 	{OPT_LOWERDIR,			"lowerdir=%s"},
 	{OPT_UPPERDIR,			"upperdir=%s"},
 	{OPT_WORKDIR,			"workdir=%s"},
@@ -524,6 +538,18 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 			if (!config->upperdir)
 				return -ENOMEM;
 			break;
+
+#ifdef CONFIG_OVERLAY_FS_WATCH
+		case OPT_WATCH:
+			fallthrough;
+		case OPT_WATCH_MNT:
+			config->watch = OVL_WATCH_MNT;
+			break;
+
+		case OPT_WATCH_SB:
+			config->watch = OVL_WATCH_SB;
+			break;
+#endif
 
 		case OPT_LOWERDIR:
 			kfree(config->lowerdir);
@@ -1745,7 +1771,8 @@ out:
 
 static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
 				const char *lower, unsigned int numlower,
-				struct ovl_fs *ofs, struct ovl_layer *layers)
+				struct ovl_fs *ofs, struct ovl_layer *layers,
+				struct path *lowerpath)
 {
 	int err;
 	struct path *stack = NULL;
@@ -1792,7 +1819,8 @@ static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
 	}
 
 out:
-	for (i = 0; i < numlower; i++)
+	*lowerpath = stack[0];
+	for (i = 1; i < numlower; i++)
 		path_put(&stack[i]);
 	kfree(stack);
 
@@ -1915,6 +1943,7 @@ static struct dentry *ovl_get_root(struct super_block *sb,
 static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct path upperpath = { };
+	struct path lowerpath = { };
 	struct dentry *root_dentry;
 	struct ovl_entry *oe;
 	struct ovl_fs *ofs;
@@ -2010,10 +2039,19 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 		sb->s_time_gran = ovl_upper_mnt(ofs)->mnt_sb->s_time_gran;
 
 	}
-	oe = ovl_get_lowerstack(sb, splitlower, numlower, ofs, layers);
+	oe = ovl_get_lowerstack(sb, splitlower, numlower, ofs, layers,
+				&lowerpath);
 	err = PTR_ERR(oe);
 	if (IS_ERR(oe))
 		goto out_err;
+
+	/* Setup an fsnotify watch on lowerpath */
+	if (ofs->config.watch) {
+		err = ovl_get_watch(sb, ofs, &lowerpath);
+		if (err)
+			goto out_free_oe;
+	}
+	path_put_init(&lowerpath);
 
 	/* If the upper fs is nonexistent, we mark overlayfs r/o too */
 	if (!ovl_upper_mnt(ofs))
@@ -2083,6 +2121,7 @@ out_free_oe:
 out_err:
 	kfree(splitlower);
 	path_put(&upperpath);
+	path_put(&lowerpath);
 	ovl_free_fs(ofs);
 out:
 	return err;
