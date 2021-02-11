@@ -49,6 +49,12 @@
 #define FS_OPEN_EXEC_PERM	0x00040000	/* open/exec event in a permission hook */
 
 /*
+ * Permission hooks for use by kernel internal backends only.
+ */
+#define FS_MODIFY_PERM		0x01000000	/* Permission hook before modify data/metadata */
+#define FS_MODIFY_DIR_PERM	0x02000000	/* Permission hook before create/delete/rename */
+
+/*
  * Set on inode mark that cares about things that happen to its children.
  * Always set for dnotify and inotify.
  * Set on inode/sb/mount marks that care about parent/name info.
@@ -76,7 +82,8 @@
 #define ALL_FSNOTIFY_DIRENT_EVENTS	(FS_CREATE | FS_DELETE | FS_MOVE)
 
 #define ALL_FSNOTIFY_PERM_EVENTS (FS_OPEN_PERM | FS_ACCESS_PERM | \
-				  FS_OPEN_EXEC_PERM)
+				  FS_OPEN_EXEC_PERM | \
+				  FS_MODIFY_DIR_PERM | FS_MODIFY_PERM)
 
 /*
  * This is a list of all events that may get sent to a parent that is watching
