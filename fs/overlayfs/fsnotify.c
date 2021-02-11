@@ -9,6 +9,8 @@
 
 #include <linux/fs.h>
 #include <linux/fsnotify.h>
+#include <linux/namei.h>
+#include <linux/ratelimit.h>
 #include "../mount.h"
 #include "overlayfs.h"
 
@@ -20,6 +22,124 @@ struct ovl_mark {
 	struct fsnotify_mark fsn_mark;
 	/* TBD */
 };
+
+static struct dentry *ovl_lookup_lower_unlocked(struct super_block *sb,
+						struct dentry *lowerdir,
+						const struct qstr *name)
+{
+	const struct cred *old_cred = ovl_override_creds(sb);
+	struct dentry *dentry;
+
+	dentry = lookup_one_len_unlocked(name->name, lowerdir, name->len);
+	revert_creds(old_cred);
+
+	return dentry;
+}
+
+/*
+ * Check if lower dir needs to be indexed.
+ *
+ * We lookup the @lowerdir index entry.
+ * If found negative, we may want to make it positive.
+ * If found postive, we may want to make it a whiteout.
+ * If found whiteout, we have nothing more to do.
+ *
+ * Returns error if failed to lookup index entry.
+ * Returns NULL if found a whiteout index dentry.
+ * Returns the found index entry otherwise.
+ */
+static struct dentry *ovl_lookup_lowerdir_index(struct super_block *sb,
+						struct dentry *lowerdir)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct dentry *index;
+	struct qstr name;
+	int err;
+
+	err = ovl_get_index_name(ofs, lowerdir, &name);
+	if (err)
+		return ERR_PTR(err);
+
+	index = ovl_lookup_lower_unlocked(sb, ofs->indexdir, &name);
+	if (IS_ERR(index)) {
+		err = PTR_ERR(index);
+		goto fail;
+	}
+
+	if (d_is_dir(index) || d_is_negative(index)) {
+		/* Return found positive/negative index entry for hit/miss */
+	} else if (ovl_is_whiteout(index)) {
+		/* Whiteout index returns NULL for noop */
+		dput(index);
+		index = NULL;
+	} else {
+		dput(index);
+		err = -ENOTDIR;
+		goto fail;
+	}
+
+	pr_debug("%s: %pd2 is %s\n", __func__, lowerdir,
+		 !index ? "covered" : d_is_dir(index) ? "indexed" : "unchanged");
+out:
+	kfree(name.name);
+
+	return index;
+
+fail:
+	pr_warn_ratelimited("failed lowerdir index lookup (ino=%lu, key=%.*s, err=%i)\n",
+			    d_inode(lowerdir)->i_ino, name.len, name.name, err);
+	index = ERR_PTR(err);
+	goto out;
+}
+
+/*
+ * Record change in index if needed before lower modification.
+ *
+ * Returns 0 if change is recorded in index
+ * Returns >0 if dir or ancestor are whiteout in index
+ * Returns <0 on failure to record the change in index
+ *
+ * Called without any filesystem locks held.
+ */
+static int ovl_handle_want_write(struct super_block *sb, u32 mask,
+				 struct dentry *lowerdir)
+{
+	struct dentry *index;
+	int err = 0;
+
+	/*
+	 * Event is on dir itself or on a non-dir child -
+	 * record change in dir.
+	 *
+	 * We get here from a call to either file_start_write() or
+	 * mnt_want_write_path().
+	 *
+	 * If event is on a non-dir child, we need to get the unstable
+	 * parent because event data is the dentry of the non-dir child,
+	 * not of the parent.
+	 *
+	 * If a rename came in between the pre-modify event and now and
+	 * moved child away from its parent, the rename itself should
+	 * have generated pre-modify events that would have already
+	 * recorded the change in the old and new parents, so it does
+	 * not matter if we get the old or new parent.
+	 */
+	index = ovl_lookup_lowerdir_index(sb, lowerdir);
+	if (!index) {
+		/* Allow modification of covered lower */
+		err = 1;
+	} else if (IS_ERR(index)) {
+		err = PTR_ERR(index);
+		index = NULL;
+	} else if (d_is_negative(index)) {
+		/* Deny modification unless change is recorded in index */
+		err = -ENOENT;
+	}
+
+	dput(index);
+
+	return err;
+}
 
 static void ovl_add_ignored_mark(struct fsnotify_group *group,
 				 struct dentry *lowerdir, u32 mask)
@@ -89,6 +209,14 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 	} else if (!ovl_indexdir(sb)) {
 		/* Deny all modification to lower when indexing is disabled */
 		ret = -EROFS;
+	} else {
+		ret = ovl_handle_want_write(sb, mask, lowerdir);
+		if (ret < 0)
+			goto out;
+
+		if (cookie) {
+			/* TODO: handle move */
+		}
 	}
 
 	if (ret > 0) {
