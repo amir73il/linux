@@ -790,6 +790,8 @@ extern void fsnotify_init_mark(struct fsnotify_mark *mark,
 struct fsnotify_mark *fsnotify_find_mark(void *obj, unsigned int obj_type,
 					 struct fsnotify_group *group);
 /* attach the mark to the object */
+#define FSNOTIFY_ADD_MARK_UPDATE_MASKS	0x1
+
 int fsnotify_add_mark(struct fsnotify_mark *mark, void *obj,
 		      unsigned int obj_type, int add_flags);
 int fsnotify_add_mark_locked(struct fsnotify_mark *mark, void *obj,

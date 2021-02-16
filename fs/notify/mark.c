@@ -756,6 +756,15 @@ restart:
 		    (lmark->flags & FSNOTIFY_MARK_FLAG_ATTACHED) &&
 		    !(mark->group->flags & FSNOTIFY_GROUP_DUPS)) {
 			err = -EEXIST;
+			if (add_flags & FSNOTIFY_ADD_MARK_UPDATE_MASKS) {
+				lmark->mask |= mark->mask;
+				lmark->ignore_mask |= mark->ignore_mask;
+				/*
+				 * Return -EEXIST to recalc object mask and
+				 * release the new mark
+				 */
+				goto added;
+			}
 			goto out_err;
 		}
 
@@ -793,7 +802,7 @@ int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 			     int add_flags)
 {
 	struct fsnotify_group *group = mark->group;
-	int ret = 0;
+	int err, ret;
 
 	fsnotify_group_assert_locked(group);
 
@@ -810,15 +819,23 @@ int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 	fsnotify_get_mark(mark); /* for g_list */
 	spin_unlock(&mark->lock);
 
-	ret = fsnotify_add_mark_list(mark, obj, obj_type, add_flags);
-	if (ret)
-		goto err;
+	err = fsnotify_add_mark_list(mark, obj, obj_type, add_flags);
+	ret = err;
+	/*
+	 * After update of existing mark masks, recalc object mask, release
+	 * the new mark and return 0.
+	 */
+	if ((add_flags & FSNOTIFY_ADD_MARK_UPDATE_MASKS) && err == -EEXIST)
+		ret = 0;
 
-	fsnotify_recalc_mask(mark->connector);
+	if (!ret)
+		fsnotify_recalc_mask(mark->connector);
 
-	return ret;
-err:
+	if (!err)
+		return 0;
+
 	spin_lock(&mark->lock);
+	WRITE_ONCE(mark->connector, NULL);
 	mark->flags &= ~(FSNOTIFY_MARK_FLAG_ALIVE |
 			 FSNOTIFY_MARK_FLAG_ATTACHED);
 	list_del_init(&mark->g_list);
