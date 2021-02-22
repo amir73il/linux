@@ -233,6 +233,79 @@ static int ovl_create_lowerdir_index_locked(struct ovl_fs *ofs,
 }
 
 /*
+ * Test if need to create index entry for lower dir.
+ *
+ * Returns >0 if lower dir index needs to be created.
+ * Returns  0 if no need to index lowerdir.
+ * Returns <0 on failure.
+ *
+ * Caller must hold index dir lock.
+ */
+static int ovl_test_lowerdir_index_locked(struct ovl_fs *ofs,
+					  struct dentry *lowerdir)
+{
+	return ovl_create_lowerdir_index_locked(ofs, NULL, lowerdir);
+}
+
+/*
+ * Record one ancestor in index before lower modification.
+ *
+ * Returns >0 if an ancestor index was created.
+ * Returns  0 if lowerdir itself is indexed.
+ * Returns <0 on failure.
+ */
+static int ovl_create_ancestor_index(struct ovl_fs *ofs,
+				     struct inode *dir,
+				     struct dentry *lowerdir)
+{
+	struct dentry *root = ofs->layers[1].mnt->mnt_root;
+	struct dentry *next, *parent = NULL;
+	int err;
+
+	err = ovl_test_lowerdir_index_locked(ofs, lowerdir);
+	if (err <= 0)
+		return err;
+
+	next = dget(lowerdir);
+	/* Find the topmost ancestor not yet indexed */
+	for (;;) {
+		parent = dget_parent(next);
+		if (next == root) {
+			err = 0;
+			break;
+		} else if (next == parent) {
+			/*
+			 * We already checked that lowerdir is connected and
+			 * that lowerdir is subdir of lower layer root, but we
+			 * got to fs root without seeing lower layer root.
+			 * This means that an ancestor was moved out of lower
+			 * layer root, so we bail out.
+			 */
+			err = -EXDEV;
+			break;
+		}
+
+		err = ovl_test_lowerdir_index_locked(ofs, parent);
+		if (err <= 0)
+			break;
+
+		dput(next);
+		next = parent;
+	}
+
+	if (err >= 0) {
+		err = ovl_create_lowerdir_index_locked(ofs, dir, next);
+		if (err >= 0)
+			err = (next != lowerdir);
+	}
+
+	dput(parent);
+	dput(next);
+
+	return err;
+}
+
+/*
  * Record change in index before lower modification.
  */
 static int ovl_create_ancestry_indices(struct super_block *sb,
@@ -252,9 +325,12 @@ static int ovl_create_ancestry_indices(struct super_block *sb,
 	inode_lock_nested(dir, I_MUTEX_PARENT);
 
 	/*
-	 * TODO: Create directory index entries for all ancestors.
+	 * Create directory index entries for all ancestors and for
+	 * lowerdir itself.
 	 */
-	err = ovl_create_lowerdir_index_locked(ofs, dir, lowerdir);
+	do {
+		err = ovl_create_ancestor_index(ofs, dir, lowerdir);
+	} while (err > 0);
 	if (err < 0)
 		goto fail;
 
