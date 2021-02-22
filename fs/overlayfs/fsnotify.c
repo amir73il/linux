@@ -21,6 +21,39 @@ struct ovl_mark {
 	/* TBD */
 };
 
+static void ovl_add_ignored_mark(struct fsnotify_group *group,
+				 struct dentry *lowerdir, u32 mask)
+{
+	struct inode *inode = d_inode(lowerdir);
+	struct ovl_mark *ovm;
+	int add_flags = FSNOTIFY_ADD_MARK_NO_IREF;
+	int err = -ENOMEM;
+
+	ovm = kmem_cache_alloc(ovl_mark_cachep, GFP_KERNEL);
+	if (!ovm)
+		goto out;
+
+	pr_debug("%s: %pd2 group=%p mark=%p mask=%x\n", __func__,
+		 lowerdir, group, ovm, mask);
+
+	fsnotify_init_mark(&ovm->fsn_mark, group);
+	/* Set the mark mask, so fsnotify_parent() will find this mark */
+	ovm->fsn_mark.mask = mask | FS_EVENT_ON_CHILD;
+	ovm->fsn_mark.ignored_mask = mask;
+	ovm->fsn_mark.flags = FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY;
+	err = fsnotify_add_mark(&ovm->fsn_mark, &inode->i_fsnotify_marks,
+				FSNOTIFY_OBJ_TYPE_INODE, add_flags, NULL);
+	fsnotify_put_mark(&ovm->fsn_mark);
+
+out:
+	if (!err)
+		return;
+
+	/* Adding ignored mask is an optimization so just warn */
+	pr_warn_ratelimited("failed add ignored mask (%pd2 ino=%lu, err=%i)\n",
+			    lowerdir, inode ? inode->i_ino : 0, err);
+}
+
 static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 			    const void *data, int data_type, struct inode *dir,
 			    const struct qstr *name, u32 cookie,
@@ -58,6 +91,7 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 
 	/* Not interested in events on objects outside lower rootdir */
 	if (!is_subdir(lowerdir, ofs->layers[1].mnt->mnt_root)) {
+		ovl_add_ignored_mark(group, lowerdir, OVL_FSNOTIFY_MASK);
 		goto out;
 	}
 
