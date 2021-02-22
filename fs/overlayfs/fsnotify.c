@@ -23,6 +23,59 @@ struct ovl_mark {
 	/* TBD */
 };
 
+/* Get inode birth time in seconds if available */
+static struct timespec64 ovl_get_btime(struct path *path)
+{
+	struct kstat stat;
+	struct timespec64 btime = {};
+	int err;
+
+	err = vfs_getattr(path, &stat, STATX_BTIME, AT_STATX_DONT_SYNC);
+	if (!err && stat.result_mask & STATX_BTIME)
+		btime = stat.btime;
+
+	return btime;
+}
+
+/* Get index dir birth time if available */
+static struct timespec64 ovl_get_indexdir_btime(struct ovl_fs *ofs)
+{
+	struct timespec64 btime = {};
+	struct path indexpath = {
+		.mnt = ovl_upper_mnt(ofs),
+		.dentry = ofs->indexdir,
+	};
+
+	if (!ofs->indexdir)
+	       return btime;
+
+	return ovl_get_btime(&indexpath);
+}
+
+/* Check if lower dir should be indexed before changes */
+static bool ovl_should_index_lowerdir(struct ovl_fs *ofs,
+				      struct dentry *lowerdir)
+{
+	struct timespec64 btime;
+	struct path lowerpath = {
+		.mnt = ofs->layers[1].mnt,
+		.dentry = lowerdir,
+	};
+
+	if (!ofs->indexdir_btime.tv_sec)
+	       return true;
+
+	btime = ovl_get_btime(&lowerpath);
+
+	/*
+	 * We only record changes if lower dir was created before index dir,
+	 * because for directories created after index dir we assume that
+	 * everything under them is new.  We may treat unchanged files moved
+	 * into a new directory as changed, but we won't miss any changed files.
+	 */
+	return timespec64_compare(&btime, &ofs->indexdir_btime) < 0;
+}
+
 static struct dentry *ovl_lookup_lower_unlocked(struct super_block *sb,
 						struct dentry *lowerdir,
 						const struct qstr *name)
@@ -52,9 +105,12 @@ static struct dentry *ovl_lookup_lowerdir_index(struct super_block *sb,
 						struct dentry *lowerdir)
 {
 	struct ovl_fs *ofs = sb->s_fs_info;
-	struct dentry *index;
+	struct dentry *index = NULL;
 	struct qstr name = {};
 	int err;
+
+	if (!ovl_should_index_lowerdir(ofs, lowerdir))
+		goto out;
 
 	err = ovl_get_index_name(ofs, lowerdir, &name);
 	if (err)
@@ -78,8 +134,10 @@ static struct dentry *ovl_lookup_lowerdir_index(struct super_block *sb,
 		goto fail;
 	}
 
+out:
 	pr_debug("%s: %pd2 is %s\n", __func__, lowerdir,
-		 !index ? "moved" : d_is_dir(index) ? "indexed" : "unchanged");
+		 !index ? (name.name ? "moved" : "new") :
+		 d_is_dir(index) ? "indexed" : "unchanged");
 	kfree(name.name);
 
 	return index;
@@ -282,6 +340,11 @@ int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs, struct path *lower
 
 	ofs->watch = group;
 	group->private = sb;
+	ofs->indexdir_btime = ovl_get_indexdir_btime(ofs);
+
+	pr_debug("%s: %pd2 watch=%d index=%d index_btime=%llu\n",
+		 __func__, lowerpath->dentry, ofs->config.watch,
+		 !!ofs->indexdir, ofs->indexdir_btime.tv_sec);
 
 	/* Create a mark on lower sb/mnt */
 	err = ovl_add_sb_mark(group, lowerpath->mnt,

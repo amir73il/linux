@@ -64,6 +64,8 @@ struct ovl_fs {
 	struct dentry *workdir;
 	/* index directory listing overlay inodes by origin file handle */
 	struct dentry *indexdir;
+	/* birth time of the index dir if available */
+	struct timespec64 indexdir_btime;
 	/* fsnotify group to watch lower fs modification events */
 	struct fsnotify_group *watch;
 	long namelen;
