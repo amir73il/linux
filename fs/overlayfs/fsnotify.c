@@ -305,6 +305,80 @@ static int ovl_handle_want_write(struct super_block *sb, u32 mask,
 	return err;
 }
 
+/*
+ * Record a whiteout in index before lower dir move.
+ *
+ * Returns >0 if move is recorded in index
+ * Returns  0 if no need to record the move in index
+ * Returns <0 on failure.
+ */
+static int ovl_whiteout_lowerdir_index(struct super_block *sb,
+				       struct dentry *lowerdir)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct inode *dir = d_inode(ofs->indexdir);
+	const struct cred *old_cred;
+	struct dentry *index;
+	int err;
+
+	err = mnt_want_write(ovl_upper_mnt(ofs));
+	if (err)
+		return err;
+
+	old_cred = ovl_override_creds(sb);
+	inode_lock_nested(dir, I_MUTEX_PARENT);
+
+	index = ovl_lookup_lowerdir_index_locked(ofs, lowerdir);
+	if (IS_ERR_OR_NULL(index)) {
+		err = PTR_ERR(index);
+		index = NULL;
+	} else if (!ovl_is_whiteout(index)) {
+		err = ovl_cleanup_and_whiteout(ofs, dir, index);
+		if (!err)
+			err = 1;
+	}
+	dput(index);
+
+	pr_debug("%s: whiteout index of %pd2 %s\n", __func__, lowerdir,
+		!err ? (index ? "exists" : "new") :
+			err > 0 ? "created" : "failed");
+
+	inode_unlock(dir);
+	revert_creds(old_cred);
+	mnt_drop_write(ovl_upper_mnt(ofs));
+
+	return err;
+}
+
+/*
+ * Record a whiteout in index if needed before lower subdir move.
+ */
+static int ovl_handle_want_move(struct super_block *sb, struct dentry *lowerdir,
+				const struct qstr *name)
+{
+	struct dentry *moved = ovl_lookup_lower_unlocked(sb, lowerdir, name);
+	int err = 0;
+
+	/*
+	 * This hook is called before the mover took any vfs locks, so
+	 * do not error if we couldn't find the moved object.
+	 * Perhaps the object was already moved by another thread, which
+	 * also took care of indexing.
+	 */
+	if (IS_ERR(moved))
+		return 0;
+
+	if (d_is_dir(moved) &&
+	    ovl_should_index_lowerdir(OVL_FS(sb), moved)) {
+		/* Create a white index entry for the moved subdir */
+		err = ovl_whiteout_lowerdir_index(sb, moved);
+	}
+
+	dput(moved);
+
+	return err;
+}
+
 static void ovl_add_ignored_mark(struct fsnotify_group *group,
 				 struct dentry *lowerdir, u32 mask)
 {
@@ -390,7 +464,8 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 		goto out;
 
 	if (mask & FS_MOVE_INTENT) {
-		/* TODO: whiteout index before move of lower */
+		/* Whiteout index before move of lower subdir */
+		ret = ovl_handle_want_move(sb, lowerdir, name);
 	} else {
 		u32 ignored_mask = OVL_FSNOTIFY_MASK & ~FS_MOVE_INTENT;
 
