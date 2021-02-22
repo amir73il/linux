@@ -180,7 +180,7 @@ static void ovl_add_ignored_mark(struct fsnotify_group *group,
 {
 	struct inode *inode = d_inode(lowerdir);
 	struct ovl_mark *ovm;
-	int add_flags = FSNOTIFY_ADD_MARK_NO_IREF;
+	int add_flags = FSNOTIFY_ADD_MARK_NO_IREF | FSNOTIFY_ADD_MARK_UPDATE_MASKS;
 	int err = -ENOMEM;
 
 	ovm = kmem_cache_alloc(ovl_mark_cachep, GFP_KERNEL);
@@ -261,8 +261,16 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 
 	if (mask & FS_MOVE_INTENT) {
 		/* TODO: whiteout index before move of lower */
-	}
+	} else {
+		u32 ignored_mask = OVL_FSNOTIFY_MASK & ~FS_MOVE_INTENT;
 
+		/*
+		 * Add ignored mark for indexed lowerdir.
+		 * Exclude pre move event from ignored mask, because we need to
+		 * handle pre move events to index moved subdirs.
+		 */
+		ovl_add_ignored_mark(group, lowerdir, ignored_mask);
+	}
 out:
 	dput(lowerdir);
 
