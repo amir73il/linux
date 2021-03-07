@@ -214,7 +214,7 @@ int __vfs_setxattr_noperm(struct user_namespace *mnt_userns,
 		error = __vfs_setxattr(mnt_userns, dentry, inode, name, value,
 				       size, flags);
 		if (!error) {
-			fsnotify_xattr(dentry);
+			fsnotify_xattr(mnt_userns, dentry);
 			security_inode_post_setxattr(dentry, name, value,
 						     size, flags);
 		}
@@ -231,7 +231,7 @@ int __vfs_setxattr_noperm(struct user_namespace *mnt_userns,
 			error = security_inode_setsecurity(inode, suffix, value,
 							   size, flags);
 			if (!error)
-				fsnotify_xattr(dentry);
+				fsnotify_xattr(mnt_userns, dentry);
 		}
 	}
 
@@ -501,7 +501,7 @@ __vfs_removexattr_locked(struct user_namespace *mnt_userns,
 	error = __vfs_removexattr(mnt_userns, dentry, name);
 
 	if (!error) {
-		fsnotify_xattr(dentry);
+		fsnotify_xattr(mnt_userns, dentry);
 		evm_inode_post_removexattr(dentry, name);
 	}
 

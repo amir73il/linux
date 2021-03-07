@@ -2912,7 +2912,7 @@ int vfs_create(struct user_namespace *mnt_userns, struct inode *dir,
 		return error;
 	error = dir->i_op->create(mnt_userns, dir, dentry, mode, want_excl);
 	if (!error)
-		fsnotify_create(dir, dentry);
+		fsnotify_ns_create(mnt_userns, dir, dentry);
 	return error;
 }
 EXPORT_SYMBOL(vfs_create);
@@ -3287,8 +3287,10 @@ static const char *open_last_lookups(struct nameidata *nd,
 	else
 		inode_lock_shared(dir->d_inode);
 	dentry = lookup_open(nd, file, op, got_write);
-	if (!IS_ERR(dentry) && (file->f_mode & FMODE_CREATED))
-		fsnotify_create(dir->d_inode, dentry);
+	if (!IS_ERR(dentry) && (file->f_mode & FMODE_CREATED)) {
+		fsnotify_ns_create(mnt_user_ns(nd->path.mnt), dir->d_inode,
+				   dentry);
+	}
 	if (open_flag & O_CREAT)
 		inode_unlock(dir->d_inode);
 	else
@@ -3697,7 +3699,7 @@ int vfs_mknod(struct user_namespace *mnt_userns, struct inode *dir,
 
 	error = dir->i_op->mknod(mnt_userns, dir, dentry, mode, dev);
 	if (!error)
-		fsnotify_create(dir, dentry);
+		fsnotify_ns_create(mnt_userns, dir, dentry);
 	return error;
 }
 EXPORT_SYMBOL(vfs_mknod);
@@ -3816,7 +3818,7 @@ int vfs_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
 
 	error = dir->i_op->mkdir(mnt_userns, dir, dentry, mode);
 	if (!error)
-		fsnotify_mkdir(dir, dentry);
+		fsnotify_ns_mkdir(mnt_userns, dir, dentry);
 	return error;
 }
 EXPORT_SYMBOL(vfs_mkdir);
@@ -3904,7 +3906,7 @@ int vfs_rmdir(struct user_namespace *mnt_userns, struct inode *dir,
 	dentry->d_inode->i_flags |= S_DEAD;
 	dont_mount(dentry);
 	detach_mounts(dentry);
-	fsnotify_rmdir(dir, dentry);
+	fsnotify_ns_rmdir(mnt_userns, dir, dentry);
 
 out:
 	inode_unlock(dentry->d_inode);
@@ -4030,7 +4032,7 @@ int vfs_unlink(struct user_namespace *mnt_userns, struct inode *dir,
 			if (!error) {
 				dont_mount(dentry);
 				detach_mounts(dentry);
-				fsnotify_unlink(dir, dentry);
+				fsnotify_ns_unlink(mnt_userns, dir, dentry);
 			}
 		}
 	}
@@ -4175,7 +4177,7 @@ int vfs_symlink(struct user_namespace *mnt_userns, struct inode *dir,
 
 	error = dir->i_op->symlink(mnt_userns, dir, dentry, oldname);
 	if (!error)
-		fsnotify_create(dir, dentry);
+		fsnotify_ns_create(mnt_userns, dir, dentry);
 	return error;
 }
 EXPORT_SYMBOL(vfs_symlink);
@@ -4311,7 +4313,7 @@ int vfs_link(struct dentry *old_dentry, struct user_namespace *mnt_userns,
 	}
 	inode_unlock(inode);
 	if (!error)
-		fsnotify_link(dir, inode, new_dentry);
+		fsnotify_ns_link(mnt_userns, dir, inode, new_dentry);
 	return error;
 }
 EXPORT_SYMBOL(vfs_link);
@@ -4575,11 +4577,17 @@ out:
 		inode_unlock(target);
 	dput(new_dentry);
 	if (!error) {
-		fsnotify_move(old_dir, new_dir, &old_name.name, is_dir,
-			      !(flags & RENAME_EXCHANGE) ? target : NULL, old_dentry);
+		fsnotify_ns_move(rd, &old_name.name);
 		if (flags & RENAME_EXCHANGE) {
-			fsnotify_move(new_dir, old_dir, &old_dentry->d_name,
-				      new_is_dir, NULL, new_dentry);
+			struct renamedata rd2 = {
+				.new_dir	= rd->old_dir,
+				.new_dentry	= rd->old_dentry,
+				.new_mnt_userns	= rd->old_mnt_userns,
+				.old_dir	= rd->new_dir,
+				.old_dentry	= rd->new_dentry,
+				.old_mnt_userns	= rd->new_mnt_userns,
+			};
+			fsnotify_ns_move(&rd2, &old_dentry->d_name);
 		}
 	}
 	release_dentry_name_snapshot(&old_name);

@@ -400,7 +400,7 @@ int notify_change(struct user_namespace *mnt_userns, struct dentry *dentry,
 		error = simple_setattr(mnt_userns, dentry, attr);
 
 	if (!error) {
-		fsnotify_change(dentry, ia_valid);
+		fsnotify_change(mnt_userns, dentry, ia_valid);
 		ima_inode_post_setattr(mnt_userns, dentry);
 		evm_inode_post_setattr(dentry, ia_valid);
 	}
