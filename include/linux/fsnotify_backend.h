@@ -113,19 +113,35 @@ struct fsnotify_iter_info;
 struct mem_cgroup;
 
 /*
+ * Event info args passed to fsnotify() and to backends on handle_event():
+ * @data:	object that event happened on
+ * @data_type:	type of object for fanotify_data_XXX() accessors
+ * @dir:	optional directory associated with event -
+ *		if @name is not NULL, this is the directory that
+ *		@name is relative to
+ * @name:	optional file name associated with event
+ * @inode:	optional inode associated with event -
+ *		either @dir or @inode must be non-NULL.
+ *		if both are non-NULL event may be reported to both.
+ * @cookie:	inotify rename cookie
+ */
+struct fsnotify_event_info {
+	const void *data;
+	int data_type;
+	struct inode *dir;
+	const struct qstr *name;
+	struct inode *inode;
+	u32 cookie;
+};
+
+/*
  * Each group much define these ops.  The fsnotify infrastructure will call
  * these operations for each relevant group.
  *
  * handle_event - main call for a group to handle an fs event
  * @group:	group to notify
  * @mask:	event type and flags
- * @data:	object that event happened on
- * @data_type:	type of object for fanotify_data_XXX() accessors
- * @dir:	optional directory associated with event -
- *		if @file_name is not NULL, this is the directory that
- *		@file_name is relative to
- * @file_name:	optional file name associated with event
- * @cookie:	inotify rename cookie
+ * @event_info: information attached to the event
  * @iter_info:	array of marks from this group that are interested in the event
  *
  * handle_inode_event - simple variant of handle_event() for groups that only
@@ -147,8 +163,7 @@ struct mem_cgroup;
  */
 struct fsnotify_ops {
 	int (*handle_event)(struct fsnotify_group *group, u32 mask,
-			    const void *data, int data_type, struct inode *dir,
-			    const struct qstr *file_name, u32 cookie,
+			    const struct fsnotify_event_info *event_info,
 			    struct fsnotify_iter_info *iter_info);
 	int (*handle_inode_event)(struct fsnotify_mark *mark, u32 mask,
 			    struct inode *inode, struct inode *dir,
@@ -262,6 +277,12 @@ static inline struct inode *fsnotify_data_inode(const void *data, int data_type)
 	}
 }
 
+static inline struct inode *fsnotify_event_info_inode(
+				const struct fsnotify_event_info *event_info)
+{
+	return fsnotify_data_inode(event_info->data, event_info->data_type);
+}
+
 static inline const struct path *fsnotify_data_path(const void *data,
 						    int data_type)
 {
@@ -271,6 +292,12 @@ static inline const struct path *fsnotify_data_path(const void *data,
 	default:
 		return NULL;
 	}
+}
+
+static inline const struct path *fsnotify_event_info_path(
+				const struct fsnotify_event_info *event_info)
+{
+	return fsnotify_data_path(event_info->data, event_info->data_type);
 }
 
 enum fsnotify_obj_type {
@@ -409,11 +436,22 @@ struct fsnotify_mark {
 /* called from the vfs helpers */
 
 /* main fsnotify call to send events */
-extern int fsnotify(__u32 mask, const void *data, int data_type,
-		    struct inode *dir, const struct qstr *name,
-		    struct inode *inode, u32 cookie);
-extern int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
-			   int data_type);
+extern int __fsnotify(__u32 mask,
+		      const struct fsnotify_event_info *event_info);
+extern int __fsnotify_parent(struct dentry *dentry, __u32 mask,
+			     const void *data, int data_type);
+
+static inline int fsnotify(__u32 mask, const void *data, int data_type,
+			   struct inode *dir, const struct qstr *name,
+			   struct inode *inode, u32 cookie)
+{
+	return __fsnotify(mask, &(struct fsnotify_event_info) {
+				.data = data, .data_type = data_type,
+				.dir = dir, .name = name, .inode = inode,
+				.cookie = cookie,
+				});
+}
+
 extern void __fsnotify_inode_delete(struct inode *inode);
 extern void __fsnotify_vfsmount_delete(struct vfsmount *mnt);
 extern void fsnotify_sb_delete(struct super_block *sb);
@@ -588,15 +626,14 @@ static inline void fsnotify_init_event(struct fsnotify_event *event)
 
 #else
 
-static inline int fsnotify(__u32 mask, const void *data, int data_type,
-			   struct inode *dir, const struct qstr *name,
-			   struct inode *inode, u32 cookie)
+static inline int fsnotify(__u32 mask,
+			   const struct fsnotify_event_info *event_info)
 {
 	return 0;
 }
 
 static inline int __fsnotify_parent(struct dentry *dentry, __u32 mask,
-				  const void *data, int data_type)
+				    const void *data, int data_type)
 {
 	return 0;
 }
