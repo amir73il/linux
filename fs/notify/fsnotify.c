@@ -177,8 +177,8 @@ static bool fsnotify_event_needs_parent(struct inode *inode, struct mount *mnt,
  * Notify only the child without name info if parent is not watching and
  * inode/sb/mount are not interested in events with parent and name info.
  */
-int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
-		      int data_type)
+int __fsnotify_parent(struct dentry *dentry, __u32 mask,
+		      const void *data, int data_type)
 {
 	const struct path *path = fsnotify_data_path(data, data_type);
 	struct mount *mnt = path ? real_mount(path->mnt) : NULL;
@@ -229,7 +229,11 @@ int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 	}
 
 notify:
-	ret = fsnotify(mask, data, data_type, p_inode, file_name, inode, 0);
+	ret = __fsnotify(mask, &(struct fsnotify_event_info) {
+				.data = data, .data_type = data_type,
+				.dir = p_inode, .name = file_name,
+				.inode = inode,
+				});
 
 	if (file_name)
 		release_dentry_name_snapshot(&name);
@@ -240,13 +244,11 @@ notify:
 EXPORT_SYMBOL_GPL(__fsnotify_parent);
 
 static int fsnotify_handle_inode_event(struct fsnotify_group *group,
-				       struct fsnotify_mark *inode_mark,
-				       u32 mask, const void *data, int data_type,
-				       struct inode *dir, const struct qstr *name,
-				       u32 cookie)
+			       struct fsnotify_mark *inode_mark, u32 mask,
+			       const struct fsnotify_event_info *event_info)
 {
-	const struct path *path = fsnotify_data_path(data, data_type);
-	struct inode *inode = fsnotify_data_inode(data, data_type);
+	const struct path *path = fsnotify_event_info_path(event_info);
+	struct inode *inode = fsnotify_event_info_inode(event_info);
 	const struct fsnotify_ops *ops = group->ops;
 
 	if (WARN_ON_ONCE(!ops->handle_inode_event))
@@ -260,16 +262,17 @@ static int fsnotify_handle_inode_event(struct fsnotify_group *group,
 	if (!(mask & inode_mark->mask & ALL_FSNOTIFY_EVENTS))
 		return 0;
 
-	return ops->handle_inode_event(inode_mark, mask, inode, dir, name, cookie);
+	return ops->handle_inode_event(inode_mark, mask, inode, event_info->dir,
+				       event_info->name, event_info->cookie);
 }
 
 static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
-				 const void *data, int data_type,
-				 struct inode *dir, const struct qstr *name,
-				 u32 cookie, struct fsnotify_iter_info *iter_info)
+				 const struct fsnotify_event_info *event_info,
+				 struct fsnotify_iter_info *iter_info)
 {
 	struct fsnotify_mark *inode_mark = fsnotify_iter_inode_mark(iter_info);
 	struct fsnotify_mark *parent_mark = fsnotify_iter_parent_mark(iter_info);
+	struct fsnotify_event_info child_event_info = { };
 	int ret;
 
 	if (WARN_ON_ONCE(fsnotify_iter_sb_mark(iter_info)) ||
@@ -284,8 +287,8 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 		 * interested in this event?
 		 */
 		if (parent_mark->mask & FS_EVENT_ON_CHILD) {
-			ret = fsnotify_handle_inode_event(group, parent_mark, mask,
-							  data, data_type, dir, name, 0);
+			ret = fsnotify_handle_inode_event(group, parent_mark,
+							  mask, event_info);
 			if (ret)
 				return ret;
 		}
@@ -302,18 +305,22 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 		 * The child watcher is expecting an event without a file name
 		 * and without the FS_EVENT_ON_CHILD flag.
 		 */
+		if (WARN_ON_ONCE(!event_info->inode))
+			return 0;
+
 		mask &= ~FS_EVENT_ON_CHILD;
-		dir = NULL;
-		name = NULL;
+		child_event_info = *event_info;
+		child_event_info.dir = NULL;
+		child_event_info.name = NULL;
+		event_info = &child_event_info;
 	}
 
-	return fsnotify_handle_inode_event(group, inode_mark, mask, data, data_type,
-					   dir, name, cookie);
+	return fsnotify_handle_inode_event(group, inode_mark, mask, event_info);
 }
 
-static int send_to_group(__u32 mask, const void *data, int data_type,
-			 struct inode *dir, const struct qstr *file_name,
-			 u32 cookie, struct fsnotify_iter_info *iter_info)
+static int send_to_group(__u32 mask,
+			 const struct fsnotify_event_info *event_info,
+			 struct fsnotify_iter_info *iter_info)
 {
 	struct fsnotify_group *group = NULL;
 	__u32 test_mask = (mask & ALL_FSNOTIFY_EVENTS);
@@ -351,18 +358,18 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 
 	pr_debug("%s: group=%p mask=%x marks_mask=%x marks_ignored_mask=%x data=%p data_type=%d dir=%p cookie=%d\n",
 		 __func__, group, mask, marks_mask, marks_ignored_mask,
-		 data, data_type, dir, cookie);
+		 event_info->data, event_info->data_type, event_info->dir,
+		 event_info->cookie);
 
 	if (!(test_mask & marks_mask & ~marks_ignored_mask))
 		return 0;
 
 	if (group->ops->handle_event) {
-		return group->ops->handle_event(group, mask, data, data_type, dir,
-						file_name, cookie, iter_info);
+		return group->ops->handle_event(group, mask, event_info,
+						iter_info);
 	}
 
-	return fsnotify_handle_event(group, mask, data, data_type, dir,
-				     file_name, cookie, iter_info);
+	return fsnotify_handle_event(group, mask, event_info, iter_info);
 }
 
 static struct fsnotify_mark *fsnotify_first_mark(struct fsnotify_mark_connector **connp)
@@ -448,21 +455,22 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
  * in whatever means they feel necessary.
  *
  * @mask:	event type and flags
+ * Input args in struct fsnotify_event_info:
  * @data:	object that event happened on
  * @data_type:	type of object for fanotify_data_XXX() accessors
  * @dir:	optional directory associated with event -
- *		if @file_name is not NULL, this is the directory that
- *		@file_name is relative to
- * @file_name:	optional file name associated with event
+ *		if @name is not NULL, this is the directory that
+ *		@name is relative to
+ * @name:	optional file name associated with event
  * @inode:	optional inode associated with event -
  *		either @dir or @inode must be non-NULL.
  *		if both are non-NULL event may be reported to both.
  * @cookie:	inotify rename cookie
  */
-int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
-	     const struct qstr *file_name, struct inode *inode, u32 cookie)
+int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 {
-	const struct path *path = fsnotify_data_path(data, data_type);
+	const struct path *path = fsnotify_event_info_path(event_info);
+	struct inode *inode = event_info->inode;
 	struct fsnotify_iter_info iter_info = {};
 	struct super_block *sb;
 	struct mount *mnt = NULL;
@@ -475,13 +483,13 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 
 	if (!inode) {
 		/* Dirent event - report on TYPE_INODE to dir */
-		inode = dir;
+		inode = event_info->dir;
 	} else if (mask & FS_EVENT_ON_CHILD) {
 		/*
 		 * Event on child - report on TYPE_PARENT to dir if it is
 		 * watching children and on TYPE_INODE to child.
 		 */
-		parent = dir;
+		parent = event_info->dir;
 	}
 	sb = inode->i_sb;
 
@@ -538,8 +546,7 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	 * That's why this traversal is so complicated...
 	 */
 	while (fsnotify_iter_select_report_types(&iter_info)) {
-		ret = send_to_group(mask, data, data_type, dir, file_name,
-				    cookie, &iter_info);
+		ret = send_to_group(mask, event_info, &iter_info);
 
 		if (ret && (mask & ALL_FSNOTIFY_PERM_EVENTS))
 			goto out;
@@ -552,7 +559,7 @@ out:
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(fsnotify);
+EXPORT_SYMBOL_GPL(__fsnotify);
 
 static __init int fsnotify_init(void)
 {
