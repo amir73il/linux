@@ -371,6 +371,47 @@ static __kernel_fsid_t fanotify_get_fsid(struct fsnotify_iter_info *iter_info)
 	return fsid;
 }
 
+/*
+ * our acceptability function.
+ * if NOSUBTREECHECK, accept anything
+ * if not, require that we can walk up to exp->ex_dentry
+ * doing some checks on the 'x' bits
+ */
+static int fanotify_subtree_check(struct fsnotify_group *group,
+				  const void *data, int data_type)
+{
+#if 0
+	struct svc_export *exp = expv;
+	int rv;
+	struct dentry *tdentry;
+	struct dentry *parent;
+
+	if (exp->ex_flags & NFSEXP_NOSUBTREECHECK)
+		return 1;
+
+	tdentry = dget(dentry);
+	while (tdentry != exp->ex_path.dentry && !IS_ROOT(tdentry)) {
+		/* make sure parents give x permission to user */
+		int err;
+		parent = dget_parent(tdentry);
+		err = inode_permission(&init_user_ns,
+				       d_inode(parent), MAY_EXEC);
+		if (err < 0) {
+			dput(parent);
+			break;
+		}
+		dput(tdentry);
+		tdentry = parent;
+	}
+	if (tdentry != exp->ex_path.dentry)
+		dprintk("nfsd_acceptable failed at %p %pd\n", tdentry, tdentry);
+	rv = (tdentry == exp->ex_path.dentry);
+	dput(tdentry);
+	return rv;
+#endif
+	return 0;
+}
+
 static int fanotify_handle_event(struct fsnotify_group *group,
 				 struct inode *inode,
 				 u32 mask, const void *data, int data_type,
@@ -426,6 +467,12 @@ static int fanotify_handle_event(struct fsnotify_group *group,
 		/* Racing with mark destruction or creation? */
 		if (!fsid.val[0] && !fsid.val[1])
 			return 0;
+	}
+
+	if (FAN_GROUP_FLAG(group, FAN_SUBTREE_CHECK) &&
+	    !fanotify_subtree_check(group, data, data_type)) {
+		/* Group is not allowed to get events on object */
+		return 0;
 	}
 
 	event = fanotify_alloc_event(group, inode, mask, data, data_type,
