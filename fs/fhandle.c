@@ -136,47 +136,40 @@ static int vfs_dentry_acceptable(void *context, struct dentry *dentry)
 	return 1;
 }
 
-static int do_handle_to_path(int mountdirfd, struct file_handle *handle,
-			     struct path *path)
+static int do_handle_to_path(struct file_handle *handle, struct path *path)
 {
-	int retval = 0;
 	int handle_dwords;
 
-	path->mnt = get_vfsmount_from_fd(mountdirfd);
-	if (IS_ERR(path->mnt)) {
-		retval = PTR_ERR(path->mnt);
-		goto out_err;
-	}
 	/* change the handle size to multiple of sizeof(u32) */
 	handle_dwords = handle->handle_bytes >> 2;
 	path->dentry = exportfs_decode_fh(path->mnt,
 					  (struct fid *)handle->f_handle,
 					  handle_dwords, handle->handle_type,
 					  vfs_dentry_acceptable, NULL);
-	if (IS_ERR(path->dentry)) {
-		retval = PTR_ERR(path->dentry);
-		goto out_mnt;
-	}
+	if (IS_ERR(path->dentry))
+		return PTR_ERR(path->dentry);
+
 	return 0;
-out_mnt:
-	mntput(path->mnt);
-out_err:
-	return retval;
 }
 
 static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
-		   struct path *path)
+			  struct path *path)
 {
 	int retval = 0;
 	struct file_handle f_handle;
 	struct file_handle *handle = NULL;
 
+	path->mnt = get_vfsmount_from_fd(mountdirfd);
+	if (IS_ERR(path->mnt)) {
+		return PTR_ERR(path->mnt);
+	}
 	/*
-	 * With handle we don't look at the execute bit on the
-	 * directory. Ideally we would like CAP_DAC_SEARCH.
-	 * But we don't have that
+	 * With open by handle we don't look at the execute bit of the parents,
+	 * so we require that user has CAP_DAC_READ_SEARCH in the userns where
+	 * the filesystem was mounted.
+	 * Ideally, we would like CAP_DAC_SEARCH but we don't have that.
 	 */
-	if (!capable(CAP_DAC_READ_SEARCH)) {
+	if (!ns_capable(path->mnt->mnt_sb->s_user_ns, CAP_DAC_READ_SEARCH)) {
 		retval = -EPERM;
 		goto out_err;
 	}
@@ -204,11 +197,14 @@ static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
 		goto out_handle;
 	}
 
-	retval = do_handle_to_path(mountdirfd, handle, path);
+	retval = do_handle_to_path(handle, path);
 
 out_handle:
 	kfree(handle);
 out_err:
+	if (retval)
+		mntput(path->mnt);
+
 	return retval;
 }
 
