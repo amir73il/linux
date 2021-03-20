@@ -50,7 +50,7 @@ const struct cred *ovl_override_creds(struct super_block *sb)
  */
 int ovl_can_decode_fh(struct super_block *sb)
 {
-	if (!capable(CAP_DAC_READ_SEARCH))
+	if (!ns_capable(sb->s_user_ns, CAP_DAC_READ_SEARCH))
 		return 0;
 
 	if (!sb->s_export_op || !sb->s_export_op->fh_to_dentry)
