@@ -790,7 +790,7 @@ xfs_fs_statfs(
 	struct xfs_mount	*mp = XFS_M(dentry->d_sb);
 	xfs_sb_t		*sbp = &mp->m_sb;
 	struct xfs_inode	*ip = XFS_I(d_inode(dentry));
-	uint64_t		fakeinos, id;
+	uint64_t		fakeinos;
 	uint64_t		icount;
 	uint64_t		ifree;
 	uint64_t		fdblocks;
@@ -800,8 +800,8 @@ xfs_fs_statfs(
 	statp->f_type = XFS_SUPER_MAGIC;
 	statp->f_namelen = MAXNAMELEN - 1;
 
-	id = huge_encode_dev(mp->m_ddev_targp->bt_dev);
-	statp->f_fsid = u64_to_fsid(id);
+	statp->f_fsid.val[0] = mp->m_fixedfsid[0];
+	statp->f_fsid.val[1] = mp->m_fixedfsid[1];
 
 	icount = percpu_counter_sum(&mp->m_icount);
 	ifree = percpu_counter_sum(&mp->m_ifree);
