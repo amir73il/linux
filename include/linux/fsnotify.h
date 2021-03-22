@@ -33,6 +33,7 @@ static inline void fsnotify_name(struct user_namespace *userns,
 {
 	__fsnotify(mask, &(struct fsnotify_event_info) {
 			.data = child, .data_type = FSNOTIFY_EVENT_INODE,
+			.fs_userns = userns,
 			.dir = dir, .name = name, .cookie = cookie,
 			});
 }
@@ -51,12 +52,14 @@ static inline void fsnotify_inode(struct inode *inode, __u32 mask)
 
 	__fsnotify(mask, &(struct fsnotify_event_info) {
 			.data = inode, .data_type = FSNOTIFY_EVENT_INODE,
+			.fs_userns = inode->i_sb->s_user_ns,
 			.inode = inode,
 			});
 }
 
 /* Notify this dentry's parent about a child's events. */
-static inline int fsnotify_parent(struct dentry *dentry, __u32 mask,
+static inline int fsnotify_parent(struct user_namespace *userns,
+				  struct dentry *dentry, __u32 mask,
 				  const void *data, int data_type)
 {
 	struct inode *inode = d_inode(dentry);
@@ -73,11 +76,12 @@ static inline int fsnotify_parent(struct dentry *dentry, __u32 mask,
 	if (IS_ROOT(dentry))
 		goto notify_child;
 
-	return __fsnotify_parent(dentry, mask, data, data_type);
+	return __fsnotify_parent(userns, dentry, mask, data, data_type);
 
 notify_child:
 	return __fsnotify(mask, &(struct fsnotify_event_info) {
 				.data = data, .data_type = data_type,
+				.fs_userns = userns,
 				.inode = inode,
 				});
 }
@@ -89,7 +93,8 @@ notify_child:
 static inline void fsnotify_dentry(struct user_namespace *userns,
 				   struct dentry *dentry, __u32 mask)
 {
-	fsnotify_parent(dentry, mask, d_inode(dentry), FSNOTIFY_EVENT_INODE);
+	fsnotify_parent(userns, dentry, mask, d_inode(dentry),
+			FSNOTIFY_EVENT_INODE);
 }
 
 static inline int fsnotify_file(struct file *file, __u32 mask)
@@ -99,7 +104,8 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 	if (file->f_mode & FMODE_NONOTIFY)
 		return 0;
 
-	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
+	return fsnotify_parent(path->mnt->mnt_userns, path->dentry, mask,
+			       path, FSNOTIFY_EVENT_PATH);
 }
 
 /* Simple call site for access decisions */

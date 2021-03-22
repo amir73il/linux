@@ -116,6 +116,7 @@ struct mem_cgroup;
  * Event info args passed to fsnotify() and to backends on handle_event():
  * @data:	object that event happened on
  * @data_type:	type of object for fanotify_data_XXX() accessors
+ * @fs_userns:	userns of the mount or sb where event happened
  * @dir:	optional directory associated with event -
  *		if @name is not NULL, this is the directory that
  *		@name is relative to
@@ -126,6 +127,7 @@ struct mem_cgroup;
  * @cookie:	inotify rename cookie
  */
 struct fsnotify_event_info {
+	struct user_namespace *fs_userns;
 	const void *data;
 	int data_type;
 	struct inode *dir;
@@ -429,6 +431,7 @@ struct fsnotify_mark {
 #define FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY	0x01
 #define FSNOTIFY_MARK_FLAG_ALIVE		0x02
 #define FSNOTIFY_MARK_FLAG_ATTACHED		0x04
+#define FSNOTIFY_MARK_FLAG_IN_USERNS		0x08
 	unsigned int flags;		/* flags [mark->lock] */
 };
 
@@ -439,7 +442,8 @@ struct fsnotify_mark {
 /* main fsnotify call to send events */
 extern int __fsnotify(__u32 mask,
 		      const struct fsnotify_event_info *event_info);
-extern int __fsnotify_parent(struct dentry *dentry, __u32 mask,
+extern int __fsnotify_parent(struct user_namespace *userns,
+			     struct dentry *dentry, __u32 mask,
 			     const void *data, int data_type);
 
 static inline int fsnotify(__u32 mask, const void *data, int data_type,
@@ -633,7 +637,8 @@ static inline int fsnotify(__u32 mask,
 	return 0;
 }
 
-static inline int __fsnotify_parent(struct dentry *dentry, __u32 mask,
+static inline int __fsnotify_parent(struct user_namespace *userns,
+				    struct dentry *dentry, __u32 mask,
 				    const void *data, int data_type)
 {
 	return 0;

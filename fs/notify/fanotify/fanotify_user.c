@@ -897,6 +897,8 @@ static __u32 fanotify_mark_add_to_mask(struct fsnotify_mark *fsn_mark,
 		fsn_mark->ignored_mask |= mask;
 		if (flags & FAN_MARK_IGNORED_SURV_MODIFY)
 			fsn_mark->flags |= FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY;
+		if (flags & FANOTIFY_MARK_FLAG_IN_USERNS)
+			fsn_mark->flags |= FSNOTIFY_MARK_FLAG_IN_USERNS;
 	}
 	spin_unlock(&fsn_mark->lock);
 
@@ -1368,7 +1370,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		 * user is capable in the user ns where the group was created.
 		 * The user also needs to be capable either in the user ns
 		 * associated with the marked filesystem or in the user ns
-		 * associated with an idmapped mount (when marking a mount).
+		 * associated with an idmapped mount.
 		 */
 		ret = -EPERM;
 		if (!ns_capable(group->user_ns, CAP_SYS_ADMIN))
@@ -1376,9 +1378,16 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 
 		mnt = path.mnt;
 		if (!ns_capable(mnt->mnt_sb->s_user_ns, CAP_SYS_ADMIN)) {
-			if (mark_type == FAN_MARK_FILESYSTEM ||
-			    !ns_capable(mnt->mnt_userns, CAP_SYS_ADMIN))
+			if (!ns_capable(mnt->mnt_userns, CAP_SYS_ADMIN))
 				goto path_put_and_out;
+
+			/*
+			 * For sb marks of a group created inside userns, report
+			 * only events generated via mount that is idmapped
+			 * inside the group's user ns.
+			 */
+			if (mark_type == FAN_MARK_FILESYSTEM)
+				flags |= FANOTIFY_MARK_FLAG_IN_USERNS;
 		}
 	}
 
@@ -1474,6 +1483,7 @@ static int __init fanotify_user_setup(void)
 
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 10);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 9);
+	BUILD_BUG_ON(FANOTIFY_MARK_FLAGS & FANOTIFY_INTERNAL_MARK_FLAGS);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);

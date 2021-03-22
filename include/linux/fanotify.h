@@ -64,6 +64,11 @@ extern struct ctl_table fanotify_table[]; /* for sysctl */
 				 FAN_MARK_IGNORED_MASK | \
 				 FAN_MARK_IGNORED_SURV_MODIFY)
 
+/* Internal kernel flags */
+#define FANOTIFY_MARK_FLAG_IN_USERNS	0x10000000 /* Filter in_userns() */
+
+#define FANOTIFY_INTERNAL_MARK_FLAGS	(FANOTIFY_MARK_FLAG_IN_USERNS)
+
 /*
  * Events that can be reported with data type FSNOTIFY_EVENT_PATH.
  * Note that FAN_MODIFY can also be reported with data type

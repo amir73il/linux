@@ -177,7 +177,8 @@ static bool fsnotify_event_needs_parent(struct inode *inode, struct mount *mnt,
  * Notify only the child without name info if parent is not watching and
  * inode/sb/mount are not interested in events with parent and name info.
  */
-int __fsnotify_parent(struct dentry *dentry, __u32 mask,
+int __fsnotify_parent(struct user_namespace *userns,
+		      struct dentry *dentry, __u32 mask,
 		      const void *data, int data_type)
 {
 	const struct path *path = fsnotify_data_path(data, data_type);
@@ -231,6 +232,7 @@ int __fsnotify_parent(struct dentry *dentry, __u32 mask,
 notify:
 	ret = __fsnotify(mask, &(struct fsnotify_event_info) {
 				.data = data, .data_type = data_type,
+				.fs_userns = userns,
 				.dir = p_inode, .name = file_name,
 				.inode = inode,
 				});
@@ -349,11 +351,18 @@ static int send_to_group(__u32 mask,
 			continue;
 		mark = iter_info->marks[type];
 		/* does the object mark tell us to do something? */
-		if (mark) {
-			group = mark->group;
-			marks_mask |= mark->mask;
-			marks_ignored_mask |= mark->ignored_mask;
-		}
+		if (!mark)
+			continue;
+
+		/* Is this mark restricted to events in its group's user ns? */
+		group = mark->group;
+		if ((mark->flags & FSNOTIFY_MARK_FLAG_IN_USERNS) &&
+		    (!event_info->fs_userns ||
+		     !in_userns(group->user_ns, event_info->fs_userns)))
+			continue;
+
+		marks_mask |= mark->mask;
+		marks_ignored_mask |= mark->ignored_mask;
 	}
 
 	pr_debug("%s: group=%p mask=%x marks_mask=%x marks_ignored_mask=%x data=%p data_type=%d dir=%p cookie=%d\n",
