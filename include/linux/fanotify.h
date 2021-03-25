@@ -69,7 +69,7 @@ extern struct ctl_table fanotify_table[]; /* for sysctl */
  * Note that FAN_MODIFY can also be reported with data type
  * FSNOTIFY_EVENT_INODE.
  */
-#define FANOTIFY_PATH_EVENTS	(FAN_ACCESS | FAN_MODIFY | \
+#define FANOTIFY_PATH_EVENTS	(FAN_ACCESS | FAN_MODIFY | FAN_LINK | \
 				 FAN_CLOSE | FAN_OPEN | FAN_OPEN_EXEC)
 
 /*

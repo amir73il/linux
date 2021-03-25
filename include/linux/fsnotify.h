@@ -212,6 +212,20 @@ static inline void fsnotify_inoderemove(struct inode *inode)
 }
 
 /*
+ * fsnotify_link_at - an inode was linked to namespace
+ *
+ * Unlike fsnotify_link(), this hook is called for any type of inode linked via
+ * any syscall, not only link(). This hook also carries the mount context so
+ * the FS_LINK event can be added to a mount mark.
+ */
+static inline void fsnotify_link_at(struct vfsmount *mnt, struct dentry *dentry)
+{
+	fsnotify_parent(mnt->mnt_userns, dentry, FS_LINK,
+			&(struct path){.mnt = mnt, .dentry = dentry},
+			FSNOTIFY_EVENT_PATH);
+}
+
+/*
  * fsnotify_create - 'name' was linked in
  */
 static inline void fsnotify_ns_create(struct user_namespace *userns,

@@ -3290,6 +3290,7 @@ static const char *open_last_lookups(struct nameidata *nd,
 	if (!IS_ERR(dentry) && (file->f_mode & FMODE_CREATED)) {
 		fsnotify_ns_create(mnt_user_ns(nd->path.mnt), dir->d_inode,
 				   dentry);
+		fsnotify_link_at(nd->path.mnt, dentry);
 	}
 	if (open_flag & O_CREAT)
 		inode_unlock(dir->d_inode);
@@ -3643,6 +3644,9 @@ EXPORT_SYMBOL(kern_path_create);
 
 void done_path_create(struct path *path, struct dentry *dentry)
 {
+	if (dentry->d_inode)
+		fsnotify_link_at(path->mnt, dentry);
+
 	dput(dentry);
 	inode_unlock(path->dentry->d_inode);
 	mnt_drop_write(path->mnt);
