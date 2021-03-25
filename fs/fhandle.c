@@ -131,13 +131,13 @@ static struct vfsmount *get_vfsmount_from_fd(int fd)
 	return mnt;
 }
 
-static int vfs_dentry_acceptable(void *context, struct dentry *dentry)
+static int vfs_dentry_acceptable(void *root, struct dentry *dentry)
 {
-	return 1;
+	return root ? is_subdir(dentry, root) : 1;
 }
 
 static int do_handle_to_path(int mountdirfd, struct file_handle *handle,
-			     struct path *path)
+			     struct path *path, struct dentry *root)
 {
 	int handle_dwords;
 
@@ -146,7 +146,7 @@ static int do_handle_to_path(int mountdirfd, struct file_handle *handle,
 	path->dentry = exportfs_decode_fh(path->mnt,
 					  (struct fid *)handle->f_handle,
 					  handle_dwords, handle->handle_type,
-					  vfs_dentry_acceptable, NULL);
+					  vfs_dentry_acceptable, root);
 	if (IS_ERR(path->dentry))
 		return PTR_ERR(path->dentry);
 
@@ -159,20 +159,26 @@ static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
 	int retval = 0;
 	struct file_handle f_handle;
 	struct file_handle *handle = NULL;
+	struct dentry *root = NULL;
 
 	/*
 	 * With open by handle we don't look at the execute bit of the parents.
 	 * Ideally, we would like CAP_DAC_SEARCH but we don't have that.
 	 * A userns capabale user is allowed to open by handle in a filesystem
-	 * that was mounted in that userns.
+	 * that was mounted in that userns. The user is also allowed to open by
+	 * handle in an idmapped mount, mapped to the userns, but only as long
+	 * as the resolved path is under the root of the idmapped mount.
 	 */
 	path->mnt = get_vfsmount_from_fd(mountdirfd);
 	if (IS_ERR(path->mnt)) {
 		return PTR_ERR(path->mnt);
 	}
 	if (!ns_capable(path->mnt->mnt_sb->s_user_ns, CAP_DAC_READ_SEARCH)) {
-		retval = -EPERM;
-		goto out_err;
+		root = path->mnt->mnt_root;
+		if (!ns_capable(path->mnt->mnt_userns, CAP_DAC_READ_SEARCH)) {
+			retval = -EPERM;
+			goto out_err;
+		}
 	}
 	if (copy_from_user(&f_handle, ufh, sizeof(struct file_handle))) {
 		retval = -EFAULT;
@@ -198,7 +204,7 @@ static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
 		goto out_handle;
 	}
 
-	retval = do_handle_to_path(mountdirfd, handle, path);
+	retval = do_handle_to_path(mountdirfd, handle, path, root);
 
 out_handle:
 	kfree(handle);
