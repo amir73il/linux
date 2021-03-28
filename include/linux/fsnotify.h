@@ -180,11 +180,39 @@ static inline void fsnotify_inoderemove(struct inode *inode)
 }
 
 /*
+ * fsnotify_path_create - an inode was linked to namespace
+ *
+ * This higher level hook is called in addition to fsnotify_create(),
+ * fsnotify_mkdir() and fsnotify_link() vfs hooks when the mount context is
+ * available, so that FS_CREATE event can be added to a mount mark mask.
+ *
+ * In that case the, DCACHE_PATH_CREATE flag is set to suppress the FS_CREATE
+ * event in the lower level vfs hooks.
+ */
+static inline void fsnotify_path_create(struct path *path,
+					struct dentry *child)
+{
+	struct inode *dir = path->dentry->d_inode;
+	__u32 mask = FS_CREATE;
+
+	WARN_ON_ONCE(!inode_is_locked(dir));
+
+	if (S_ISDIR(d_inode(child)->i_mode))
+		mask |= FS_ISDIR;
+
+	fsnotify(mask, path, FSNOTIFY_EVENT_PATH, dir, &child->d_name, NULL, 0);
+}
+
+/*
  * fsnotify_create - 'name' was linked in
  */
 static inline void fsnotify_create(struct inode *inode, struct dentry *dentry)
 {
 	audit_inode_child(inode, dentry, AUDIT_TYPE_CHILD_CREATE);
+
+	/* fsnotify_path_create() will be called */
+	if (dentry->d_flags & DCACHE_PATH_CREATE)
+		return;
 
 	fsnotify_dirent(inode, dentry, FS_CREATE);
 }
@@ -199,6 +227,10 @@ static inline void fsnotify_link(struct inode *dir, struct inode *inode,
 {
 	fsnotify_link_count(inode);
 	audit_inode_child(dir, new_dentry, AUDIT_TYPE_CHILD_CREATE);
+
+	/* fsnotify_path_create() will be called */
+	if (new_dentry->d_flags & DCACHE_PATH_CREATE)
+		return;
 
 	fsnotify_name(dir, FS_CREATE, inode, &new_dentry->d_name, 0);
 }
@@ -222,6 +254,10 @@ static inline void fsnotify_unlink(struct inode *dir, struct dentry *dentry)
 static inline void fsnotify_mkdir(struct inode *inode, struct dentry *dentry)
 {
 	audit_inode_child(inode, dentry, AUDIT_TYPE_CHILD_CREATE);
+
+	/* fsnotify_path_create() will be called */
+	if (dentry->d_flags & DCACHE_PATH_CREATE)
+		return;
 
 	fsnotify_dirent(inode, dentry, FS_CREATE | FS_ISDIR);
 }

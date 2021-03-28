@@ -65,10 +65,10 @@ extern struct ctl_table fanotify_table[]; /* for sysctl */
 
 /*
  * Events that can be reported with data type FSNOTIFY_EVENT_PATH.
- * Note that FAN_MODIFY can also be reported with data type
+ * Note that FAN_MODIFY and FAN_CREATE can also be reported with data type
  * FSNOTIFY_EVENT_INODE.
  */
-#define FANOTIFY_PATH_EVENTS	(FAN_ACCESS | FAN_MODIFY | \
+#define FANOTIFY_PATH_EVENTS	(FAN_ACCESS | FAN_MODIFY | FAN_CREATE | \
 				 FAN_CLOSE | FAN_OPEN | FAN_OPEN_EXEC)
 
 /*
@@ -78,8 +78,8 @@ extern struct ctl_table fanotify_table[]; /* for sysctl */
 #define FANOTIFY_DIRENT_EVENTS	(FAN_MOVE | FAN_CREATE | FAN_DELETE)
 
 /* Events that can only be reported with data type FSNOTIFY_EVENT_INODE */
-#define FANOTIFY_INODE_EVENTS	(FANOTIFY_DIRENT_EVENTS | \
-				 FAN_ATTRIB | FAN_MOVE_SELF | FAN_DELETE_SELF)
+#define FANOTIFY_INODE_EVENTS	(FAN_MOVE | FAN_DELETE | FAN_ATTRIB | \
+				 FAN_MOVE_SELF | FAN_DELETE_SELF)
 
 /* Events that user can request to be notified on */
 #define FANOTIFY_EVENTS		(FANOTIFY_PATH_EVENTS | \

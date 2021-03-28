@@ -213,7 +213,7 @@ struct dentry_operations {
 #define DCACHE_SYMLINK_TYPE		0x00600000 /* Symlink (or fallthru to such) */
 
 #define DCACHE_MAY_FREE			0x00800000
-/* Was #define DCACHE_FALLTHRU			0x01000000 */
+#define DCACHE_PATH_CREATE		0x01000000 /* "path_create" context */
 #define DCACHE_NOKEY_NAME		0x02000000 /* Encrypted name encoded without key */
 #define DCACHE_OP_REAL			0x04000000
 

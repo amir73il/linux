@@ -3288,7 +3288,7 @@ static const char *open_last_lookups(struct nameidata *nd,
 		inode_lock_shared(dir->d_inode);
 	dentry = lookup_open(nd, file, op, got_write);
 	if (!IS_ERR(dentry) && (file->f_mode & FMODE_CREATED))
-		fsnotify_create(dir->d_inode, dentry);
+		fsnotify_path_create(&nd->path, dentry);
 	if (open_flag & O_CREAT)
 		inode_unlock(dir->d_inode);
 	else
@@ -3560,6 +3560,20 @@ struct file *do_file_open_root(struct dentry *dentry, struct vfsmount *mnt,
 	return file;
 }
 
+static void d_set_path_create(struct dentry *dentry)
+{
+	spin_lock(&dentry->d_lock);
+	dentry->d_flags |= DCACHE_PATH_CREATE;
+	spin_unlock(&dentry->d_lock);
+}
+
+static void d_clear_path_create(struct dentry *dentry)
+{
+	spin_lock(&dentry->d_lock);
+	dentry->d_flags &= ~DCACHE_PATH_CREATE;
+	spin_unlock(&dentry->d_lock);
+}
+
 static struct dentry *filename_create(int dfd, struct filename *name,
 				struct path *path, unsigned int lookup_flags)
 {
@@ -3617,6 +3631,8 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 		goto fail;
 	}
 	putname(name);
+	/* Start "path create" context that ends in done_path_create() */
+	d_set_path_create(dentry);
 	return dentry;
 fail:
 	dput(dentry);
@@ -3641,6 +3657,9 @@ EXPORT_SYMBOL(kern_path_create);
 
 void done_path_create(struct path *path, struct dentry *dentry)
 {
+	if (d_inode(dentry))
+		fsnotify_path_create(path, dentry);
+	d_clear_path_create(dentry);
 	dput(dentry);
 	inode_unlock(path->dentry->d_inode);
 	mnt_drop_write(path->mnt);
