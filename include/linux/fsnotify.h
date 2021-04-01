@@ -128,30 +128,47 @@ static inline void fsnotify_link_count(struct inode *inode)
  */
 static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
 				 const struct qstr *old_name,
-				 int isdir, struct inode *target,
-				 struct dentry *moved)
+				 struct inode *target, struct dentry *moved)
 {
 	struct inode *source = moved->d_inode;
-	u32 fs_cookie = fsnotify_get_cookie();
-	__u32 old_dir_mask = FS_MOVED_FROM;
-	__u32 new_dir_mask = FS_MOVED_TO;
-	const struct qstr *new_name = &moved->d_name;
+	u32 cookie = fsnotify_get_cookie();
+	__u32 old_mask = FS_MOVED_FROM;
+	__u32 new_mask = FS_MOVED_TO;
 
 	if (old_dir == new_dir)
-		old_dir_mask |= FS_DN_RENAME;
+		old_mask |= FS_DN_RENAME;
 
-	if (isdir) {
-		old_dir_mask |= FS_ISDIR;
-		new_dir_mask |= FS_ISDIR;
+	if (S_ISDIR(source->i_mode)) {
+		old_mask |= FS_ISDIR;
+		new_mask |= FS_ISDIR;
 	}
 
-	fsnotify_name(old_dir, old_dir_mask, source, old_name, fs_cookie);
-	fsnotify_name(new_dir, new_dir_mask, source, new_name, fs_cookie);
+	fsnotify_name(old_dir, old_mask, source, old_name, cookie);
+	fsnotify_name(new_dir, new_mask, source, &moved->d_name, cookie);
 
 	if (target)
 		fsnotify_link_count(target);
-	fsnotify_inode(source, FS_MOVE_SELF);
+
 	audit_inode_child(new_dir, moved, AUDIT_TYPE_CHILD_CREATE);
+
+	fsnotify_inode(source, FS_MOVE_SELF);
+}
+
+/*
+ * fsnotify_rename - old_name was moved to or exchanged with new_name
+ */
+static inline void fsnotify_rename(struct renamedata *rd,
+				   const struct qstr *old_name)
+{
+	bool exchange = rd->flags & RENAME_EXCHANGE;
+	struct inode *target = !exchange ? rd->new_dentry->d_inode : NULL;
+
+	fsnotify_move(rd->old_dir, rd->new_dir, old_name, target,
+		      rd->old_dentry);
+	if (exchange) {
+		fsnotify_move(rd->new_dir, rd->old_dir, &rd->old_dentry->d_name,
+			      NULL, rd->new_dentry);
+	}
 }
 
 /*
