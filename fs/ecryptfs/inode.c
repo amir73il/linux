@@ -1056,6 +1056,8 @@ ecryptfs_setxattr(struct dentry *dentry, struct inode *inode,
 	}
 	inode_lock(lower_inode);
 	rc = __vfs_setxattr_locked(&init_user_ns, lower_dentry, name, value, size, flags, NULL);
+	if (!rc)
+		fsnotify_xattr(lower_dentry);
 	inode_unlock(lower_inode);
 	if (!rc && inode)
 		fsstack_copy_attr_all(inode, lower_inode);
@@ -1122,6 +1124,8 @@ static int ecryptfs_removexattr(struct dentry *dentry, struct inode *inode,
 	}
 	inode_lock(lower_inode);
 	rc = __vfs_removexattr(&init_user_ns, lower_dentry, name);
+	if (!rc)
+		fsnotify_xattr(lower_dentry);
 	inode_unlock(lower_inode);
 out:
 	return rc;

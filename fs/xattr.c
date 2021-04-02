@@ -213,11 +213,9 @@ int __vfs_setxattr_noperm(struct user_namespace *mnt_userns,
 	if (inode->i_opflags & IOP_XATTR) {
 		error = __vfs_setxattr(mnt_userns, dentry, inode, name, value,
 				       size, flags);
-		if (!error) {
-			fsnotify_xattr(dentry);
+		if (!error)
 			security_inode_post_setxattr(dentry, name, value,
 						     size, flags);
-		}
 	} else {
 		if (unlikely(is_bad_inode(inode)))
 			return -EIO;
@@ -230,8 +228,6 @@ int __vfs_setxattr_noperm(struct user_namespace *mnt_userns,
 
 			error = security_inode_setsecurity(inode, suffix, value,
 							   size, flags);
-			if (!error)
-				fsnotify_xattr(dentry);
 		}
 	}
 
@@ -299,6 +295,8 @@ retry_deleg:
 	inode_lock(inode);
 	error = __vfs_setxattr_locked(mnt_userns, dentry, name, value, size,
 				      flags, &delegated_inode);
+	if (!error)
+		fsnotify_xattr(dentry);
 	inode_unlock(inode);
 
 	if (delegated_inode) {
@@ -500,10 +498,8 @@ __vfs_removexattr_locked(struct user_namespace *mnt_userns,
 
 	error = __vfs_removexattr(mnt_userns, dentry, name);
 
-	if (!error) {
-		fsnotify_xattr(dentry);
+	if (!error)
 		evm_inode_post_removexattr(dentry, name);
-	}
 
 out:
 	return error;
@@ -522,6 +518,8 @@ retry_deleg:
 	inode_lock(inode);
 	error = __vfs_removexattr_locked(mnt_userns, dentry,
 					 name, &delegated_inode);
+	if (!error)
+		fsnotify_xattr(dentry);
 	inode_unlock(inode);
 
 	if (delegated_inode) {
