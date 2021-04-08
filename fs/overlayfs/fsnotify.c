@@ -54,8 +54,7 @@ static struct timespec64 ovl_get_indexdir_btime(struct ovl_fs *ofs)
 }
 
 /* Check if lower dir should be indexed before changes */
-static bool ovl_should_index_lowerdir(struct ovl_fs *ofs,
-				      struct dentry *lowerdir)
+bool ovl_should_index_lowerdir(struct ovl_fs *ofs, struct dentry *lowerdir)
 {
 	struct timespec64 btime;
 	struct path lowerpath = {

@@ -150,13 +150,13 @@ void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *realdentry)
 }
 
 void ovl_dentry_init_reval(struct dentry *dentry, struct dentry *upperdentry,
-			   struct ovl_entry *oe)
+			   struct dentry *index, struct ovl_entry *oe)
 {
-	return ovl_dentry_init_flags(dentry, upperdentry, oe, OVL_D_REVALIDATE);
+	return ovl_dentry_init_flags(dentry, upperdentry, index, oe, OVL_D_REVALIDATE);
 }
 
 void ovl_dentry_init_flags(struct dentry *dentry, struct dentry *upperdentry,
-			   struct ovl_entry *oe, unsigned int mask)
+			   struct dentry *index, struct ovl_entry *oe, unsigned int mask)
 {
 	struct ovl_path *lowerstack = ovl_lowerstack(oe);
 	unsigned int i, flags = 0;
@@ -165,6 +165,11 @@ void ovl_dentry_init_flags(struct dentry *dentry, struct dentry *upperdentry,
 		flags |= upperdentry->d_flags;
 	for (i = 0; i < ovl_numlower(oe) && lowerstack[i].dentry; i++)
 		flags |= lowerstack[i].dentry->d_flags;
+
+	/* Need to reval non-indexed dir inode in case it has been indexed */
+	if (OVL_FS(dentry->d_sb)->config.watch && !upperdentry && !index &&
+	    ovl_numlower(oe) == 1 && d_is_dir(lowerstack[0].dentry))
+		flags |= DCACHE_OP_REVALIDATE;
 
 	spin_lock(&dentry->d_lock);
 	dentry->d_flags &= ~mask;

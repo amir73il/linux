@@ -1345,7 +1345,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			ovl_set_flag(OVL_HAS_DIGEST, inode);
 	}
 
-	ovl_dentry_init_reval(dentry, upperdentry, OVL_I_E(inode));
+	ovl_dentry_init_reval(dentry, upperdentry, index, OVL_I_E(inode));
 
 	revert_creds(old_cred);
 	if (origin_path) {
