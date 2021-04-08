@@ -131,6 +131,36 @@ static struct vfsmount *get_vfsmount_from_fd(int fd)
 	return mnt;
 }
 
+/*
+ * Walk back from @dentry to @path and return an ancestor from which @dentry
+ * is accessible to user.
+ *
+ * Note that false positives are possible due to race with parent renames.
+ * If caller cares about the ancestry stability, caller should take rename_lock.
+ */
+struct dentry *vfs_acceptable_ancestor(struct path *path, struct dentry *dentry)
+{
+	struct user_namespace *mnt_userns = mnt_user_ns(path->mnt);
+	struct dentry *d, *parent;
+	int err;
+
+	d = dget(dentry);
+	while (d != path->dentry && !IS_ROOT(d)) {
+		/* make sure parents give x permission to user */
+		parent = dget_parent(d);
+		err = inode_permission(mnt_userns, d_inode(parent), MAY_EXEC);
+		if (err < 0) {
+			dput(parent);
+			break;
+		}
+		dput(d);
+		d = parent;
+	}
+
+	return d;
+}
+EXPORT_SYMBOL(vfs_acceptable_ancestor);
+
 static int vfs_dentry_acceptable(void *context, struct dentry *dentry)
 {
 	return 1;

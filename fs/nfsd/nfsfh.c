@@ -30,25 +30,11 @@ static int nfsd_acceptable(void *expv, struct dentry *dentry)
 	struct svc_export *exp = expv;
 	int rv;
 	struct dentry *tdentry;
-	struct dentry *parent;
 
 	if (exp->ex_flags & NFSEXP_NOSUBTREECHECK)
 		return 1;
 
-	tdentry = dget(dentry);
-	while (tdentry != exp->ex_path.dentry && !IS_ROOT(tdentry)) {
-		/* make sure parents give x permission to user */
-		int err;
-		parent = dget_parent(tdentry);
-		err = inode_permission(&init_user_ns,
-				       d_inode(parent), MAY_EXEC);
-		if (err < 0) {
-			dput(parent);
-			break;
-		}
-		dput(tdentry);
-		tdentry = parent;
-	}
+	tdentry = vfs_acceptable_ancestor(&exp->ex_path, dentry);
 	if (tdentry != exp->ex_path.dentry)
 		dprintk("nfsd_acceptable failed at %p %pd\n", tdentry, tdentry);
 	rv = (tdentry == exp->ex_path.dentry);

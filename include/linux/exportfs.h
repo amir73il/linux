@@ -247,4 +247,8 @@ extern struct dentry *generic_fh_to_parent(struct super_block *sb,
 	struct fid *fid, int fh_len, int fh_type,
 	struct inode *(*get_inode) (struct super_block *sb, u64 ino, u32 gen));
 
+struct path;
+extern struct dentry *vfs_acceptable_ancestor(struct path *root_path,
+					      struct dentry *dentry);
+
 #endif /* LINUX_EXPORTFS_H */
