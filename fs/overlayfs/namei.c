@@ -156,7 +156,7 @@ struct dentry *ovl_decode_real_fh(struct ovl_fs *ofs, struct ovl_fh *fh,
 	struct dentry *real;
 	int bytes;
 
-	if (!capable(CAP_DAC_READ_SEARCH))
+	if (!ns_capable(mnt->mnt_sb->s_user_ns, CAP_DAC_READ_SEARCH))
 		return NULL;
 
 	/*
