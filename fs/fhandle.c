@@ -116,7 +116,7 @@ SYSCALL_DEFINE5(name_to_handle_at, int, dfd, const char __user *, name,
 	return err;
 }
 
-static struct vfsmount *get_vfsmount_from_fd(int fd)
+static struct vfsmount *get_vfsmount_from_fd(int fd, bool *connectable)
 {
 	struct vfsmount *mnt;
 
@@ -126,39 +126,95 @@ static struct vfsmount *get_vfsmount_from_fd(int fd)
 		mnt = mntget(fs->pwd.mnt);
 		spin_unlock(&fs->lock);
 	} else {
-		struct fd f = fdget(fd);
+		struct fd f = fdget_raw(fd);
 		if (!f.file)
 			return ERR_PTR(-EBADF);
 		mnt = mntget(f.file->f_path.mnt);
+		/* Use O_PATH mount fd as a hint for decoding connected path */
+		if (f.file->f_mode & FMODE_PATH)
+			*connectable = true;
 		fdput(f);
 	}
 	return mnt;
 }
 
+/*
+ * Check that @dentry is connected to @root path and that user has
+ * x permissions in all ancestors.
+ *
+ * Note that false positives are possible due to race with parent renames.
+ * If caller cares about the ancestry stability, caller should take rename_lock.
+ */
+static int vfs_acceptable_ancestor(struct dentry *root, struct dentry *dentry)
+{
+	struct dentry *d, *parent;
+	int err;
+
+	d = dget(dentry);
+	while (d != root && !IS_ROOT(d)) {
+		/* make sure parents give x permission to user */
+		parent = dget_parent(d);
+		err = inode_permission(&init_user_ns, d_inode(parent), MAY_EXEC);
+		if (err < 0) {
+			dput(parent);
+			break;
+		}
+		dput(d);
+		d = parent;
+	}
+	dput(d);
+
+	return d == root;
+}
+
+/*
+ * If @root is NULL, accept anything.
+ * Otherwise, accept only connected dentry.
+ */
 static int vfs_dentry_acceptable(void *context, struct dentry *dentry)
 {
-	return 1;
+	struct dentry *root = (struct dentry *)context;
+
+	if (!root || root == dentry)
+		return 1;
+
+	return vfs_acceptable_ancestor(root, dentry);
+
+}
+
+static struct dentry *do_handle_to_connected_path(struct file_handle *handle,
+						  struct path *root_path)
+{
+	/* change the handle size to multiple of sizeof(u32) */
+	int handle_dwords = handle->handle_bytes >> 2;
+
+	return exportfs_decode_fh(root_path->mnt,
+				  (struct fid *)handle->f_handle,
+				  handle_dwords, handle->handle_type,
+				  vfs_dentry_acceptable, root_path->dentry);
 }
 
 static int do_handle_to_path(int mountdirfd, struct file_handle *handle,
 			     struct path *path)
 {
 	int retval = 0;
-	int handle_dwords;
+	bool connectable = false;
 
-	path->mnt = get_vfsmount_from_fd(mountdirfd);
+	path->mnt = get_vfsmount_from_fd(mountdirfd, &connectable);
 	if (IS_ERR(path->mnt)) {
 		retval = PTR_ERR(path->mnt);
 		goto out_err;
 	}
-	/* change the handle size to multiple of sizeof(u32) */
-	handle_dwords = handle->handle_bytes >> 2;
-	path->dentry = exportfs_decode_fh(path->mnt,
-					  (struct fid *)handle->f_handle,
-					  handle_dwords, handle->handle_type,
-					  vfs_dentry_acceptable, NULL);
+retry:
+	path->dentry = connectable ? path->mnt->mnt_root : NULL;
+	path->dentry = do_handle_to_connected_path(handle, path);
 	if (IS_ERR(path->dentry)) {
 		retval = PTR_ERR(path->dentry);
+		if (retval == -ESTALE && connectable) {
+			// Failed to get connected path - try disconnected path
+			connectable = false;
+			goto retry;
+		}
 		goto out_mnt;
 	}
 	return 0;
