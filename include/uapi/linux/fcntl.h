@@ -110,5 +110,6 @@
 #define AT_STATX_DONT_SYNC	0x4000	/* - Don't sync attributes with the server */
 
 #define AT_RECURSIVE		0x8000	/* Apply to the entire subtree */
+#define AT_CONNECTABLE		0x10000 /* Request a connectable file handle */
 
 #endif /* _UAPI_LINUX_FCNTL_H */

@@ -16,7 +16,8 @@
 
 static long do_sys_name_to_handle(struct path *path,
 				  struct file_handle __user *ufh,
-				  int __user *mnt_id)
+				  int __user *mnt_id,
+				  bool connectable)
 {
 	long retval;
 	struct file_handle f_handle;
@@ -48,7 +49,7 @@ static long do_sys_name_to_handle(struct path *path,
 	/* we ask for a non connected handle */
 	retval = exportfs_encode_fh(path->dentry,
 				    (struct fid *)handle->f_handle,
-				    &handle_dwords,  0);
+				    &handle_dwords, connectable);
 	handle->handle_type = retval;
 	/* convert handle size to bytes */
 	handle_bytes = handle_dwords * sizeof(u32);
@@ -98,7 +99,7 @@ SYSCALL_DEFINE5(name_to_handle_at, int, dfd, const char __user *, name,
 	int lookup_flags;
 	int err;
 
-	if ((flag & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH)) != 0)
+	if ((flag & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH | AT_CONNECTABLE)) != 0)
 		return -EINVAL;
 
 	lookup_flags = (flag & AT_SYMLINK_FOLLOW) ? LOOKUP_FOLLOW : 0;
@@ -106,7 +107,8 @@ SYSCALL_DEFINE5(name_to_handle_at, int, dfd, const char __user *, name,
 		lookup_flags |= LOOKUP_EMPTY;
 	err = user_path_at(dfd, name, lookup_flags, &path);
 	if (!err) {
-		err = do_sys_name_to_handle(&path, handle, mnt_id);
+		err = do_sys_name_to_handle(&path, handle, mnt_id,
+					    flag & AT_CONNECTABLE);
 		path_put(&path);
 	}
 	return err;
