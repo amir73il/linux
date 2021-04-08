@@ -161,12 +161,27 @@ struct dentry *vfs_acceptable_ancestor(struct path *path, struct dentry *dentry)
 }
 EXPORT_SYMBOL(vfs_acceptable_ancestor);
 
-static int vfs_dentry_acceptable(void *context, struct dentry *dentry)
+/*
+ * If @root dentry is NULL, accept anything.
+ * Otherwise, require that @dentry is connected to @root path and that user has
+ * x permissions in all ancestors.
+ */
+static int vfs_dentry_acceptable(void *root_path, struct dentry *dentry)
 {
-	return 1;
+	struct dentry *root = ((struct path *)root_path)->dentry;
+	struct dentry *d;
+
+	if (!root || root == dentry)
+		return 1;
+
+	d = vfs_acceptable_ancestor(root_path, dentry);
+	dput(d);
+
+	return d == root;
 }
 
-static int do_handle_to_path(struct file_handle *handle, struct path *path)
+static int do_handle_to_path(struct file_handle *handle, struct path *path,
+			     void *root_path)
 {
 	int handle_dwords;
 
@@ -175,7 +190,7 @@ static int do_handle_to_path(struct file_handle *handle, struct path *path)
 	path->dentry = exportfs_decode_fh(path->mnt,
 					  (struct fid *)handle->f_handle,
 					  handle_dwords, handle->handle_type,
-					  vfs_dentry_acceptable, NULL);
+					  vfs_dentry_acceptable, root_path);
 	if (IS_ERR(path->dentry))
 		return PTR_ERR(path->dentry);
 
@@ -188,20 +203,26 @@ static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
 	int retval = 0;
 	struct file_handle f_handle;
 	struct file_handle *handle = NULL;
+	struct path root_path = {};
 
 	path->mnt = get_vfsmount_from_fd(mountdirfd);
 	if (IS_ERR(path->mnt)) {
 		return PTR_ERR(path->mnt);
 	}
 	/*
-	 * With open by handle we don't look at the execute bit of the parents,
-	 * so we require that user has CAP_DAC_READ_SEARCH in the userns where
-	 * the filesystem was mounted.
+	 * With open by handle we look at the execute bit of the parents in case
+	 * the user has CAP_DAC_READ_SEARCH in userns of an idmapped mount and
+	 * not in the userns where the filesystem was mounted.
 	 * Ideally, we would like CAP_DAC_SEARCH but we don't have that.
 	 */
+	root_path.mnt = path->mnt;
 	if (!ns_capable(path->mnt->mnt_sb->s_user_ns, CAP_DAC_READ_SEARCH)) {
-		retval = -EPERM;
-		goto out_err;
+		if (!ns_capable(mnt_user_ns(path->mnt), CAP_DAC_READ_SEARCH)) {
+			retval = -EPERM;
+			goto out_err;
+		}
+		/* Verify accessibility from idmapped mount root */
+		root_path.dentry = path->mnt->mnt_root;
 	}
 	if (copy_from_user(&f_handle, ufh, sizeof(struct file_handle))) {
 		retval = -EFAULT;
@@ -227,7 +248,7 @@ static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
 		goto out_handle;
 	}
 
-	retval = do_handle_to_path(handle, path);
+	retval = do_handle_to_path(handle, path, &root_path);
 
 out_handle:
 	kfree(handle);
