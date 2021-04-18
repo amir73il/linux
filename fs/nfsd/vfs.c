@@ -740,7 +740,7 @@ __nfsd_open(struct svc_rqst *rqstp, struct svc_fh *fhp, umode_t type,
 	__be32		err;
 	int		host_err = 0;
 
-	path.mnt = fhp->fh_export->ex_path.mnt;
+	path.mnt = fh_mnt(fhp);
 	path.dentry = fhp->fh_dentry;
 	inode = d_inode(path.dentry);
 
@@ -1555,7 +1555,7 @@ nfsd_readlink(struct svc_rqst *rqstp, struct svc_fh *fhp, char *buf, int *lenp)
 	if (unlikely(err))
 		return err;
 
-	path.mnt = fhp->fh_export->ex_path.mnt;
+	path.mnt = fh_mnt(fhp);
 	path.dentry = fhp->fh_dentry;
 
 	if (unlikely(!d_is_symlink(path.dentry)))
@@ -1789,7 +1789,7 @@ retry:
 		goto out_dput_new;
 
 	host_err = -EXDEV;
-	if (ffhp->fh_export->ex_path.mnt != tfhp->fh_export->ex_path.mnt)
+	if (fh_mnt(ffhp) != fh_mnt(tfhp))
 		goto out_dput_new;
 	if (ffhp->fh_export->ex_path.dentry != tfhp->fh_export->ex_path.dentry)
 		goto out_dput_new;
@@ -2084,7 +2084,7 @@ nfsd_statfs(struct svc_rqst *rqstp, struct svc_fh *fhp, struct kstatfs *stat, in
 	err = fh_verify(rqstp, fhp, 0, NFSD_MAY_NOP | access);
 	if (!err) {
 		struct path path = {
-			.mnt	= fhp->fh_export->ex_path.mnt,
+			.mnt	= fh_mnt(fhp),
 			.dentry	= fhp->fh_dentry,
 		};
 		if (vfs_statfs(&path, stat))
