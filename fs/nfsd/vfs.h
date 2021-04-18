@@ -132,13 +132,28 @@ __be32		nfsd_statfs(struct svc_rqst *, struct svc_fh *,
 __be32		nfsd_permission(struct svc_rqst *, struct svc_export *,
 				struct dentry *, int);
 
+static inline struct vfsmount *fh_mnt(struct svc_fh *fh)
+{
+	return fh->fh_export->ex_path.mnt;
+}
+
+#define NFSDFH_PATH_INIT(path, fh)	\
+	(path).mnt = fh_mnt(fh);	\
+	(path).dentry = (fh)->fh_dentry
+
+#define NFSDFH_PATH(fh)			\
+	(&(struct path) {		\
+	 .mnt = fh_mnt(fh),		\
+	 .dentry = (fh)->fh_dentry,	\
+	 })
+
 static inline int fh_want_write(struct svc_fh *fh)
 {
 	int ret;
 
 	if (fh->fh_want_write)
 		return 0;
-	ret = mnt_want_write(fh->fh_export->ex_path.mnt);
+	ret = mnt_want_write(fh_mnt(fh));
 	if (!ret)
 		fh->fh_want_write = true;
 	return ret;
@@ -148,15 +163,13 @@ static inline void fh_drop_write(struct svc_fh *fh)
 {
 	if (fh->fh_want_write) {
 		fh->fh_want_write = false;
-		mnt_drop_write(fh->fh_export->ex_path.mnt);
+		mnt_drop_write(fh_mnt(fh));
 	}
 }
 
 static inline __be32 fh_getattr(struct svc_fh *fh, struct kstat *stat)
 {
-	struct path p = {.mnt = fh->fh_export->ex_path.mnt,
-			 .dentry = fh->fh_dentry};
-	return nfserrno(vfs_getattr(&p, stat, STATX_BASIC_STATS,
+	return nfserrno(vfs_getattr(NFSDFH_PATH(fh), stat, STATX_BASIC_STATS,
 				    AT_STATX_SYNC_AS_STAT));
 }
 

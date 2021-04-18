@@ -740,8 +740,7 @@ __nfsd_open(struct svc_rqst *rqstp, struct svc_fh *fhp, umode_t type,
 	__be32		err;
 	int		host_err = 0;
 
-	path.mnt = fhp->fh_export->ex_path.mnt;
-	path.dentry = fhp->fh_dentry;
+	NFSDFH_PATH_INIT(path, fhp);
 	inode = d_inode(path.dentry);
 
 	/* Disallow write access to files with the append-only bit set
@@ -1555,8 +1554,7 @@ nfsd_readlink(struct svc_rqst *rqstp, struct svc_fh *fhp, char *buf, int *lenp)
 	if (unlikely(err))
 		return err;
 
-	path.mnt = fhp->fh_export->ex_path.mnt;
-	path.dentry = fhp->fh_dentry;
+	NFSDFH_PATH_INIT(path, fhp);
 
 	if (unlikely(!d_is_symlink(path.dentry)))
 		return nfserr_inval;
@@ -1789,7 +1787,7 @@ retry:
 		goto out_dput_new;
 
 	host_err = -EXDEV;
-	if (ffhp->fh_export->ex_path.mnt != tfhp->fh_export->ex_path.mnt)
+	if (fh_mnt(ffhp) != fh_mnt(tfhp))
 		goto out_dput_new;
 	if (ffhp->fh_export->ex_path.dentry != tfhp->fh_export->ex_path.dentry)
 		goto out_dput_new;
@@ -2083,11 +2081,7 @@ nfsd_statfs(struct svc_rqst *rqstp, struct svc_fh *fhp, struct kstatfs *stat, in
 
 	err = fh_verify(rqstp, fhp, 0, NFSD_MAY_NOP | access);
 	if (!err) {
-		struct path path = {
-			.mnt	= fhp->fh_export->ex_path.mnt,
-			.dentry	= fhp->fh_dentry,
-		};
-		if (vfs_statfs(&path, stat))
+		if (vfs_statfs(NFSDFH_PATH(fhp), stat))
 			err = nfserr_io;
 	}
 	return err;
