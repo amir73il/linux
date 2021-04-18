@@ -204,6 +204,21 @@ static inline void fsnotify_link(struct inode *dir, struct inode *inode,
 }
 
 /*
+ * fsnotify_delete - 'name' was removed
+ *
+ * Caller must hold a reference on victim inode and make sure that
+ * dentry->d_name is stable.
+ */
+static inline void fsnotify_delete(struct inode *dir, struct dentry *dentry,
+				   struct inode *victim, bool isdir)
+{
+	WARN_ON_ONCE(atomic_read(&victim->i_count) < 1);
+
+	fsnotify_name(dir, FS_DELETE | (isdir ? FS_ISDIR : 0) , victim,
+		      &dentry->d_name, 0);
+}
+
+/*
  * fsnotify_unlink - 'name' was unlinked
  *
  * Caller must make sure that dentry->d_name is stable.
@@ -213,7 +228,7 @@ static inline void fsnotify_unlink(struct inode *dir, struct dentry *dentry)
 	/* Expected to be called before d_delete() */
 	WARN_ON_ONCE(d_is_negative(dentry));
 
-	fsnotify_dirent(dir, dentry, FS_DELETE);
+	fsnotify_delete(dir, dentry, d_inode(dentry), false);
 }
 
 /*
@@ -236,7 +251,7 @@ static inline void fsnotify_rmdir(struct inode *dir, struct dentry *dentry)
 	/* Expected to be called before d_delete() */
 	WARN_ON_ONCE(d_is_negative(dentry));
 
-	fsnotify_dirent(dir, dentry, FS_DELETE | FS_ISDIR);
+	fsnotify_delete(dir, dentry, d_inode(dentry), true);
 }
 
 /*
