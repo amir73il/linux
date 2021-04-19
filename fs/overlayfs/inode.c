@@ -371,11 +371,12 @@ int ovl_xattr_set(struct dentry *dentry, struct inode *inode, const char *name,
 
 	old_cred = ovl_override_creds(dentry->d_sb);
 	if (value)
-		err = vfs_setxattr(&init_user_ns, realdentry, name, value, size,
-				   flags);
+		err = vfs_setxattr_notify(NULL, &init_user_ns, realdentry, name,
+					  value, size, flags);
 	else {
 		WARN_ON(flags != XATTR_REPLACE);
-		err = vfs_removexattr(&init_user_ns, realdentry, name);
+		err = vfs_removexattr_notify(NULL, &init_user_ns, realdentry,
+					     name);
 	}
 	revert_creds(old_cred);
 

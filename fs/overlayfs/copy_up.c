@@ -115,7 +115,8 @@ retry:
 			goto retry;
 		}
 
-		error = vfs_setxattr(&init_user_ns, new, name, value, size, 0);
+		error = vfs_setxattr_notify(NULL, &init_user_ns, new, name,
+					    value, size, 0);
 		if (error) {
 			if (error != -EOPNOTSUPP || ovl_must_copy_xattr(name))
 				break;

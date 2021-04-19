@@ -447,7 +447,8 @@ static int ovl_set_upper_acl(struct dentry *upperdentry, const char *name,
 	if (err < 0)
 		goto out_free;
 
-	err = vfs_setxattr(&init_user_ns, upperdentry, name, buffer, size, XATTR_CREATE);
+	err = vfs_setxattr_notify(NULL, &init_user_ns, upperdentry, name,
+				  buffer, size, XATTR_CREATE);
 out_free:
 	kfree(buffer);
 	return err;
