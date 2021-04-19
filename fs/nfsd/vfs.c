@@ -1254,12 +1254,15 @@ nfsd_create_locked(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	host_err = 0;
 	switch (type) {
 	case S_IFREG:
-		host_err = vfs_create(&init_user_ns, dirp, dchild, iap->ia_mode, true);
+		host_err = vfs_create(&init_user_ns, dirp, dchild, iap->ia_mode,
+				      true);
 		if (!host_err)
 			nfsd_check_ignore_resizing(iap);
 		break;
 	case S_IFDIR:
 		host_err = vfs_mkdir(&init_user_ns, dirp, dchild, iap->ia_mode);
+		if (!host_err)
+			fsnotify_mkdir(fh_mnt(fhp), dirp, dchild);
 		if (!host_err && unlikely(d_unhashed(dchild))) {
 			struct dentry *d;
 			d = lookup_one_len(dchild->d_name.name,
@@ -1297,6 +1300,9 @@ nfsd_create_locked(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	}
 	if (host_err < 0)
 		goto out_nfserr;
+
+	if (type != S_IFDIR)
+		fsnotify_create(fh_mnt(fhp), dirp, dchild);
 
 	err = nfsd_create_setattr(rqstp, resfhp, iap);
 
@@ -1491,6 +1497,7 @@ do_nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 		fh_drop_write(fhp);
 		goto out_nfserr;
 	}
+	fsnotify_create(fh_mnt(fhp), dirp, dchild);
 	if (created)
 		*created = true;
 
@@ -1610,6 +1617,8 @@ nfsd_symlink(struct svc_rqst *rqstp, struct svc_fh *fhp,
 		goto out_nfserr;
 
 	host_err = vfs_symlink(&init_user_ns, d_inode(dentry), dnew, path);
+	if (!host_err)
+		fsnotify_create(fh_mnt(fhp), d_inode(dentry), dnew);
 	err = nfserrno(host_err);
 	if (!err)
 		err = nfserrno(commit_metadata(fhp));
@@ -1679,6 +1688,7 @@ nfsd_link(struct svc_rqst *rqstp, struct svc_fh *ffhp,
 		goto out_dput;
 	host_err = vfs_link(dold, &init_user_ns, dirp, dnew, NULL);
 	if (!host_err) {
+		fsnotify_link(fh_mnt(tfhp), d_inode(dold), dirp, dnew);
 		err = nfserrno(commit_metadata(ffhp));
 		if (!err)
 			err = nfserrno(commit_metadata(tfhp));
@@ -1856,7 +1866,7 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 				char *fname, int flen)
 {
 	struct dentry	*dentry, *rdentry;
-	struct inode	*dirp;
+	struct inode	*dirp, *rinode;
 	__be32		err;
 	int		host_err;
 
@@ -1886,8 +1896,10 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 		goto out_drop_write;
 	}
 
+	rinode = d_inode(rdentry);
+	ihold(rinode);
 	if (!type)
-		type = d_inode(rdentry)->i_mode & S_IFMT;
+		type = rinode->i_mode & S_IFMT;
 
 	if (type != S_IFDIR) {
 		if (rdentry->d_sb->s_export_op->flags & EXPORT_OP_CLOSE_BEFORE_UNLINK)
@@ -1897,8 +1909,12 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 		host_err = vfs_rmdir(&init_user_ns, dirp, rdentry);
 	}
 
-	if (!host_err)
+	if (!host_err) {
+		fsnotify_delete(fh_mnt(fhp), dirp, rdentry, rinode,
+				type == S_IFDIR);
 		host_err = commit_metadata(fhp);
+	}
+	iput(rinode);
 	dput(rdentry);
 
 out_drop_write:

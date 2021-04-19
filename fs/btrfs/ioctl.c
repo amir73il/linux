@@ -1008,7 +1008,7 @@ static noinline int btrfs_mksubvol(const struct path *parent,
 		error = create_subvol(dir, dentry, name, namelen, inherit);
 
 	if (!error)
-		fsnotify_mkdir(dir, dentry);
+		fsnotify_mkdir(NULL, dir, dentry);
 out_up_read:
 	up_read(&fs_info->subvol_sem);
 out_dput:
@@ -3116,7 +3116,7 @@ static noinline int btrfs_ioctl_snap_destroy(struct file *file,
 	err = btrfs_delete_subvolume(dir, dentry);
 	inode_unlock(inode);
 	if (!err) {
-		fsnotify_rmdir(dir, dentry);
+		fsnotify_rmdir(NULL, dir, dentry);
 		d_delete(dentry);
 	}
 

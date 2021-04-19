@@ -38,6 +38,7 @@
 #include <linux/namei.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
+#include <linux/fsnotify.h>
 #include <linux/module.h>
 #include <net/net_namespace.h>
 #include <linux/sunrpc/rpc_pipe_fs.h>
@@ -234,6 +235,8 @@ nfsd4_create_clid_dir(struct nfs4_client *clp)
 		 */
 		goto out_put;
 	status = vfs_mkdir(&init_user_ns, d_inode(dir), dentry, S_IRWXU);
+	if (!status)
+		fsnotify_mkdir(NULL, d_inode(dir), dentry);
 out_put:
 	dput(dentry);
 out_unlock:
@@ -443,10 +446,17 @@ purge_old(struct dentry *parent, struct dentry *child, struct nfsd_net *nn)
 	if (nfs4_has_reclaimed_state(name, nn))
 		goto out_free;
 
+	/* Keep dentry from becoming negative */
+	dget(child);
 	status = vfs_rmdir(&init_user_ns, d_inode(parent), child);
-	if (status)
+	dput(child);
+	if (!status) {
+		fsnotify_rmdir(NULL, d_inode(parent), child);
+	} else {
 		printk("failed to remove client recovery directory %pd\n",
-				child);
+		       child);
+	}
+
 out_free:
 	kfree(name.data);
 out:

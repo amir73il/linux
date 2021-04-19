@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/uuid.h>
 #include <linux/fs.h>
+#include <linux/fsnotify.h>
 #include "ovl_entry.h"
 
 #undef pr_fmt
@@ -131,6 +132,8 @@ static inline int ovl_do_rmdir(struct inode *dir, struct dentry *dentry)
 	dput(dentry);
 
 	pr_debug("rmdir(%pd2) = %i\n", dentry, err);
+	if (!err)
+		fsnotify_rmdir(NULL, dir, dentry);
 	return err;
 }
 
@@ -144,6 +147,8 @@ static inline int ovl_do_unlink(struct inode *dir, struct dentry *dentry)
 	dput(dentry);
 
 	pr_debug("unlink(%pd2) = %i\n", dentry, err);
+	if (!err)
+		fsnotify_unlink(NULL, dir, dentry);
 	return err;
 }
 
@@ -153,6 +158,8 @@ static inline int ovl_do_link(struct dentry *old_dentry, struct inode *dir,
 	int err = vfs_link(old_dentry, &init_user_ns, dir, new_dentry, NULL);
 
 	pr_debug("link(%pd2, %pd2) = %i\n", old_dentry, new_dentry, err);
+	if (!err)
+		fsnotify_link(NULL, d_inode(old_dentry), dir, new_dentry);
 	return err;
 }
 
@@ -162,6 +169,8 @@ static inline int ovl_do_create(struct inode *dir, struct dentry *dentry,
 	int err = vfs_create(&init_user_ns, dir, dentry, mode, true);
 
 	pr_debug("create(%pd2, 0%o) = %i\n", dentry, mode, err);
+	if (!err)
+		fsnotify_create(NULL, dir, dentry);
 	return err;
 }
 
@@ -169,7 +178,10 @@ static inline int ovl_do_mkdir(struct inode *dir, struct dentry *dentry,
 			       umode_t mode)
 {
 	int err = vfs_mkdir(&init_user_ns, dir, dentry, mode);
+
 	pr_debug("mkdir(%pd2, 0%o) = %i\n", dentry, mode, err);
+	if (!err)
+		fsnotify_mkdir(NULL, dir, dentry);
 	return err;
 }
 
@@ -179,6 +191,8 @@ static inline int ovl_do_mknod(struct inode *dir, struct dentry *dentry,
 	int err = vfs_mknod(&init_user_ns, dir, dentry, mode, dev);
 
 	pr_debug("mknod(%pd2, 0%o, 0%o) = %i\n", dentry, mode, dev, err);
+	if (!err)
+		fsnotify_create(NULL, dir, dentry);
 	return err;
 }
 
@@ -188,6 +202,8 @@ static inline int ovl_do_symlink(struct inode *dir, struct dentry *dentry,
 	int err = vfs_symlink(&init_user_ns, dir, dentry, oldname);
 
 	pr_debug("symlink(\"%s\", %pd2) = %i\n", oldname, dentry, err);
+	if (!err)
+		fsnotify_create(NULL, dir, dentry);
 	return err;
 }
 

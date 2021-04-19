@@ -569,7 +569,7 @@ lookup_again:
 			if (ret < 0)
 				goto create_error;
 			start = jiffies;
-			ret = vfs_mkdir(&init_user_ns, d_inode(dir), next, 0);
+			ret = vfs_mkdir_notify(&init_user_ns, &path, next, 0);
 			cachefiles_hist(cachefiles_mkdir_histogram, start);
 			if (!key)
 				trace_cachefiles_mkdir(object, next, ret);
@@ -800,7 +800,7 @@ retry:
 		ret = security_path_mkdir(&path, subdir, 0700);
 		if (ret < 0)
 			goto mkdir_error;
-		ret = vfs_mkdir(&init_user_ns, d_inode(dir), subdir, 0700);
+		ret = vfs_mkdir_notify(&init_user_ns, &path, subdir, 0700);
 		if (ret < 0)
 			goto mkdir_error;
 

@@ -1326,12 +1326,16 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 * Events with data type inode do not carry enough information to report
 	 * event->fd, so we do not allow setting a mask for inode events unless
 	 * group supports reporting fid.
-	 * inode events are not supported on a mount mark, because they do not
-	 * carry enough information (i.e. path) to be filtered by mount point.
 	 */
 	fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
-	if (mask & FANOTIFY_INODE_EVENTS &&
-	    (!fid_mode || mark_type == FAN_MARK_MOUNT))
+	if (mask & FANOTIFY_INODE_EVENTS && !fid_mode)
+		goto fput_and_out;
+
+	/*
+	 * Some events are not supported on a mount mark, because they never
+	 * carry the mount information.
+	 */
+	if (mark_type == FAN_MARK_MOUNT && (mask & FANOTIFY_NO_MNT_EVENTS))
 		goto fput_and_out;
 
 	if (flags & FAN_MARK_FLUSH) {

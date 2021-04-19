@@ -195,7 +195,7 @@ static int binderfs_binder_device_create(struct inode *ref_inode,
 
 	inode->i_private = device;
 	d_instantiate(dentry, inode);
-	fsnotify_create(root->d_inode, dentry);
+	fsnotify_create(NULL, root->d_inode, dentry);
 	inode_unlock(d_inode(root));
 
 	return 0;
@@ -541,7 +541,7 @@ struct dentry *binderfs_create_file(struct dentry *parent, const char *name,
 	new_inode->i_fop = fops;
 	new_inode->i_private = data;
 	d_instantiate(dentry, new_inode);
-	fsnotify_create(parent_inode, dentry);
+	fsnotify_create(NULL, parent_inode, dentry);
 
 out:
 	inode_unlock(parent_inode);
@@ -576,7 +576,7 @@ static struct dentry *binderfs_create_dir(struct dentry *parent,
 	set_nlink(new_inode, 2);
 	d_instantiate(dentry, new_inode);
 	inc_nlink(parent_inode);
-	fsnotify_mkdir(parent_inode, dentry);
+	fsnotify_mkdir(NULL, parent_inode, dentry);
 
 out:
 	inode_unlock(parent_inode);

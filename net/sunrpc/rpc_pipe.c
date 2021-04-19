@@ -520,7 +520,7 @@ static int __rpc_create(struct inode *dir, struct dentry *dentry,
 	err = __rpc_create_common(dir, dentry, S_IFREG | mode, i_fop, private);
 	if (err)
 		return err;
-	fsnotify_create(dir, dentry);
+	fsnotify_create(NULL, dir, dentry);
 	return 0;
 }
 
@@ -535,7 +535,7 @@ static int __rpc_mkdir(struct inode *dir, struct dentry *dentry,
 	if (err)
 		return err;
 	inc_nlink(dir);
-	fsnotify_mkdir(dir, dentry);
+	fsnotify_mkdir(NULL, dir, dentry);
 	return 0;
 }
 
@@ -590,7 +590,7 @@ static int __rpc_mkpipe_dentry(struct inode *dir, struct dentry *dentry,
 	rpci = RPC_I(d_inode(dentry));
 	rpci->private = private;
 	rpci->pipe = pipe;
-	fsnotify_create(dir, dentry);
+	fsnotify_create(NULL, dir, dentry);
 	return 0;
 }
 
@@ -601,7 +601,7 @@ static int __rpc_rmdir(struct inode *dir, struct dentry *dentry)
 	dget(dentry);
 	ret = simple_rmdir(dir, dentry);
 	if (!ret)
-		fsnotify_rmdir(dir, dentry);
+		fsnotify_rmdir(NULL, dir, dentry);
 	d_delete(dentry);
 	dput(dentry);
 	return ret;
@@ -614,7 +614,7 @@ static int __rpc_unlink(struct inode *dir, struct dentry *dentry)
 	dget(dentry);
 	ret = simple_unlink(dir, dentry);
 	if (!ret)
-		fsnotify_unlink(dir, dentry);
+		fsnotify_unlink(NULL, dir, dentry);
 	d_delete(dentry);
 	dput(dentry);
 	return ret;
