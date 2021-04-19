@@ -370,9 +370,10 @@ static inline void fsnotify_xattr(struct vfsmount *mnt, struct dentry *dentry)
 }
 
 /*
- * fsnotify_change - file was modified and/or metadata was changed
+ * fsnotify_setattr - file was modified and/or metadata was changed
  */
-static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
+static inline void fsnotify_setattr(struct vfsmount *mnt, struct dentry *dentry,
+				    unsigned int ia_valid)
 {
 	__u32 mask = 0;
 
@@ -395,7 +396,7 @@ static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
 		mask |= FS_ATTRIB;
 
 	if (mask)
-		fsnotify_dentry(NULL, dentry, mask);
+		fsnotify_dentry(mnt, dentry, mask);
 }
 
 #endif	/* _LINUX_FS_NOTIFY_H */

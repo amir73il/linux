@@ -1916,7 +1916,7 @@ static int __remove_privs(struct user_namespace *mnt_userns,
 	 * Note we call this on write, so vfs_setattr() will not
 	 * encounter any conflicting delegations:
 	 */
-	return vfs_setattr(mnt_userns, dentry, &newattrs, NULL);
+	return vfs_setattr_notify(NULL, mnt_userns, dentry, &newattrs, NULL);
 }
 
 /*

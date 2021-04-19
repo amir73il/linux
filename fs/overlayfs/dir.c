@@ -507,7 +507,8 @@ static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 			.ia_mode = cattr->mode,
 		};
 		inode_lock(newdentry->d_inode);
-		err = vfs_setattr(&init_user_ns, newdentry, &attr, NULL);
+		err = vfs_setattr_notify(NULL, &init_user_ns, newdentry, &attr,
+					 NULL);
 		inode_unlock(newdentry->d_inode);
 		if (err)
 			goto out_cleanup;

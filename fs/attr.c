@@ -400,7 +400,6 @@ int vfs_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 		error = simple_setattr(mnt_userns, dentry, attr);
 
 	if (!error) {
-		fsnotify_change(dentry, ia_valid);
 		ima_inode_post_setattr(mnt_userns, dentry);
 		evm_inode_post_setattr(dentry, ia_valid);
 	}
@@ -408,3 +407,16 @@ int vfs_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 	return error;
 }
 EXPORT_SYMBOL(vfs_setattr);
+
+int vfs_setattr_notify(struct vfsmount *mnt, struct user_namespace *mnt_userns,
+		       struct dentry *dentry, struct iattr *attr,
+		       struct inode **delegated_inode)
+{
+	int error = vfs_setattr(mnt_userns, dentry, attr, delegated_inode);
+
+	if (!error)
+		fsnotify_setattr(mnt, dentry, attr->ia_valid);
+
+	return error;
+}
+EXPORT_SYMBOL(vfs_setattr_notify);

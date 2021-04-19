@@ -879,7 +879,8 @@ int ecryptfs_truncate(struct dentry *dentry, loff_t new_length)
 		struct dentry *lower_dentry = ecryptfs_dentry_to_lower(dentry);
 
 		inode_lock(d_inode(lower_dentry));
-		rc = vfs_setattr(&init_user_ns, lower_dentry, &lower_ia, NULL);
+		rc = vfs_setattr_notify(NULL, &init_user_ns, lower_dentry,
+					&lower_ia, NULL);
 		inode_unlock(d_inode(lower_dentry));
 	}
 	return rc;
@@ -986,7 +987,8 @@ static int ecryptfs_setattr(struct user_namespace *mnt_userns,
 		lower_ia.ia_valid &= ~ATTR_MODE;
 
 	inode_lock(d_inode(lower_dentry));
-	rc = vfs_setattr(&init_user_ns, lower_dentry, &lower_ia, NULL);
+	rc = vfs_setattr_notify(NULL, &init_user_ns, lower_dentry, &lower_ia,
+				NULL);
 	inode_unlock(d_inode(lower_dentry));
 out:
 	fsstack_copy_attr_all(inode, lower_inode);
