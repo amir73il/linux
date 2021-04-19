@@ -75,12 +75,11 @@ extern struct ctl_table fanotify_table[]; /* for sysctl */
  * FSNOTIFY_EVENT_INODE in cases where the path information is not available.
  */
 #define FANOTIFY_PATH_EVENTS	(FAN_ACCESS | FAN_MODIFY | \
-				 FAN_CREATE | FAN_DELETE | \
+				 FANOTIFY_DIRENT_EVENTS | FAN_MOVE_SELF | \
 				 FAN_CLOSE | FAN_OPEN | FAN_OPEN_EXEC)
 
 /* Events that can only be reported with data type FSNOTIFY_EVENT_INODE */
-#define FANOTIFY_INODE_EVENTS	(FAN_MOVE | FAN_MOVE_SELF | \
-				 FAN_ATTRIB | FAN_DELETE_SELF)
+#define FANOTIFY_INODE_EVENTS	(FAN_ATTRIB | FAN_DELETE_SELF)
 
 /* Events that user can request to be notified on */
 #define FANOTIFY_EVENTS		(FANOTIFY_PATH_EVENTS | \

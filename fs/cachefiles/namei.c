@@ -422,7 +422,7 @@ try_again:
 			.new_dentry	= grave,
 		};
 		trace_cachefiles_rename(object, rep, grave, why);
-		ret = vfs_rename(&rd);
+		ret = vfs_rename_notify(cache->mnt, &rd);
 		if (ret != 0 && ret != -ENOMEM)
 			cachefiles_io_error(cache,
 					    "Rename failed with error %d", ret);

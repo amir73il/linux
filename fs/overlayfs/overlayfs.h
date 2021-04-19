@@ -251,7 +251,7 @@ static inline int ovl_do_rename(struct inode *olddir, struct dentry *olddentry,
 	};
 
 	pr_debug("rename(%pd2, %pd2, 0x%x)\n", olddentry, newdentry, flags);
-	err = vfs_rename(&rd);
+	err = vfs_rename_notify(NULL, &rd);
 	if (err) {
 		pr_debug("...rename(%pd2, %pd2, ...) = %i\n",
 			 olddentry, newdentry, err);
