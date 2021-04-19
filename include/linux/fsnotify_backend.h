@@ -128,6 +128,7 @@ struct mem_cgroup;
 struct fsnotify_event_info {
 	const void *data;
 	int data_type;
+	struct vfsmount *mnt;
 	struct inode *dir;
 	const struct qstr *name;
 	struct inode *inode;
@@ -149,6 +150,7 @@ struct fsnotify_event_info {
  * @mark:	mark to notify
  * @mask:	event type and flags
  * @inode:	inode that event happened on
+ * @mnt:	optional mount where event happened
  * @dir:	optional directory associated with event -
  *		if @file_name is not NULL, this is the directory that
  *		@file_name is relative to.
@@ -438,7 +440,7 @@ struct fsnotify_mark {
 /* main fsnotify call to send events */
 extern int __fsnotify(__u32 mask,
 		      const struct fsnotify_event_info *event_info);
-extern int __fsnotify_parent(struct dentry *dentry, __u32 mask,
+extern int __fsnotify_parent(const struct path *path, __u32 mask,
 			     const void *data, int data_type);
 
 static inline int fsnotify(__u32 mask, const void *data, int data_type,
@@ -632,7 +634,7 @@ static inline int fsnotify(__u32 mask,
 	return 0;
 }
 
-static inline int __fsnotify_parent(struct dentry *dentry, __u32 mask,
+static inline int __fsnotify_parent(const struct path *path, __u32 mask,
 				    const void *data, int data_type)
 {
 	return 0;

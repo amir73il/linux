@@ -4311,7 +4311,7 @@ int vfs_link(struct dentry *old_dentry, struct user_namespace *mnt_userns,
 	}
 	inode_unlock(inode);
 	if (!error)
-		fsnotify_link(dir, inode, new_dentry);
+		fsnotify_link(inode, dir, new_dentry);
 	return error;
 }
 EXPORT_SYMBOL(vfs_link);

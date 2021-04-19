@@ -177,11 +177,11 @@ static bool fsnotify_event_needs_parent(struct inode *inode, struct mount *mnt,
  * Notify only the child without name info if parent is not watching and
  * inode/sb/mount are not interested in events with parent and name info.
  */
-int __fsnotify_parent(struct dentry *dentry, __u32 mask,
+int __fsnotify_parent(const struct path *path, __u32 mask,
 		      const void *data, int data_type)
 {
-	const struct path *path = fsnotify_data_path(data, data_type);
-	struct mount *mnt = path ? real_mount(path->mnt) : NULL;
+	struct mount *mnt = path->mnt ? real_mount(path->mnt) : NULL;
+	struct dentry *dentry = path->dentry;
 	struct inode *inode = d_inode(dentry);
 	struct dentry *parent;
 	bool parent_watched = dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED;
@@ -232,7 +232,7 @@ notify:
 	ret = __fsnotify(mask, &(struct fsnotify_event_info) {
 				.data = data, .data_type = data_type,
 				.dir = p_inode, .name = file_name,
-				.inode = inode,
+				.inode = inode, .mnt = path->mnt,
 				});
 
 	if (file_name)
@@ -458,6 +458,7 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
  * Input args in struct fsnotify_event_info:
  * @data:	object that event happened on
  * @data_type:	type of object for fanotify_data_XXX() accessors
+ * @mnt:	optional mount where event happened
  * @dir:	optional directory associated with event -
  *		if @name is not NULL, this is the directory that
  *		@name is relative to
@@ -469,7 +470,6 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
  */
 int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 {
-	const struct path *path = fsnotify_event_info_path(event_info);
 	struct inode *inode = event_info->inode;
 	struct fsnotify_iter_info iter_info = {};
 	struct super_block *sb;
@@ -478,8 +478,8 @@ int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 	int ret = 0;
 	__u32 test_mask, marks_mask;
 
-	if (path)
-		mnt = real_mount(path->mnt);
+	if (event_info->mnt)
+		mnt = real_mount(event_info->mnt);
 
 	if (!inode) {
 		/* Dirent event - report on TYPE_INODE to dir */
