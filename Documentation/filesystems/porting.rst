@@ -149,7 +149,7 @@ went in - and hadn't been documented ;-/).  Just remove it from fs_flags
 
 ->setattr() is called without BKL now.  Caller _always_ holds ->i_mutex, so
 watch for ->i_mutex-grabbing code that might be used by your ->setattr().
-Callers of notify_change() need ->i_mutex now.
+Callers of vfs_setattr() need ->i_mutex now.
 
 ---
 

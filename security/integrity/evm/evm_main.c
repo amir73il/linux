@@ -508,7 +508,7 @@ int evm_inode_setattr(struct dentry *dentry, struct iattr *attr)
  * For now, update the HMAC stored in 'security.evm' to reflect UID/GID
  * changes.
  *
- * This function is called from notify_change(), which expects the caller
+ * This function is called from vfs_setattr(), which expects the caller
  * to lock the inode's i_mutex.
  */
 void evm_inode_post_setattr(struct dentry *dentry, int ia_valid)

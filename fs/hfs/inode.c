@@ -586,11 +586,11 @@ static int hfs_file_release(struct inode *inode, struct file *file)
 }
 
 /*
- * hfs_notify_change()
+ * hfs_inode_setattr()
  *
  * Based very closely on fs/msdos/inode.c by Werner Almesberger
  *
- * This is the notify_change() field in the super_operations structure
+ * This is the ->setattr() field in the super_operations structure
  * for HFS file systems.  The purpose is to take that changes made to
  * an inode and apply then in a filesystem-dependent manner.  In this
  * case the process has a few of tasks to do:

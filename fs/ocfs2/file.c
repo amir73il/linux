@@ -1180,7 +1180,7 @@ int ocfs2_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 		 *
 		 * For instance:
 		 * chmod_common()
-		 *  notify_change()
+		 *  vfs_setattr()
 		 *   ocfs2_setattr()
 		 *    posix_acl_chmod()
 		 *     ocfs2_iop_get_acl()

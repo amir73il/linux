@@ -2853,7 +2853,7 @@ void ntfs_truncate_vfs(struct inode *vi) {
 #endif
 
 /**
- * ntfs_setattr - called from notify_change() when an attribute is being changed
+ * ntfs_setattr - called from vfs_setattr() when an attribute is being changed
  * @mnt_userns:	user namespace of the mount the inode was found from
  * @dentry:	dentry whose attributes to change
  * @attr:	structure describing the attributes and the changes

@@ -741,7 +741,7 @@ upper_size_to_lower_size(struct ecryptfs_crypt_stat *crypt_stat,
  * writing strings of 0's out. When truncating, we truncate the upper
  * inode and update the lower_ia according to the page index
  * interpolations. If ATTR_SIZE is set in lower_ia->ia_valid upon return,
- * the caller must use lower_ia in a call to notify_change() to perform
+ * the caller must use lower_ia in a call to vfs_setattr() to perform
  * the truncation of the lower inode.
  *
  * Returns zero on success; non-zero otherwise
@@ -879,8 +879,7 @@ int ecryptfs_truncate(struct dentry *dentry, loff_t new_length)
 		struct dentry *lower_dentry = ecryptfs_dentry_to_lower(dentry);
 
 		inode_lock(d_inode(lower_dentry));
-		rc = notify_change(&init_user_ns, lower_dentry,
-				   &lower_ia, NULL);
+		rc = vfs_setattr(&init_user_ns, lower_dentry, &lower_ia, NULL);
 		inode_unlock(d_inode(lower_dentry));
 	}
 	return rc;
@@ -987,7 +986,7 @@ static int ecryptfs_setattr(struct user_namespace *mnt_userns,
 		lower_ia.ia_valid &= ~ATTR_MODE;
 
 	inode_lock(d_inode(lower_dentry));
-	rc = notify_change(&init_user_ns, lower_dentry, &lower_ia, NULL);
+	rc = vfs_setattr(&init_user_ns, lower_dentry, &lower_ia, NULL);
 	inode_unlock(d_inode(lower_dentry));
 out:
 	fsstack_copy_attr_all(inode, lower_inode);

@@ -31,9 +31,9 @@
  *
  * and this is because they were added in 2.5 development.
  * Actually, they are not needed by most ->setattr() methods - they are set by
- * callers of notify_change() to notify that the setuid/setgid bits must be
+ * callers of vfs_setattr() to notify that the setuid/setgid bits must be
  * dropped.
- * notify_change() will delete those flags, make sure attr->ia_valid & ATTR_MODE
+ * vfs_setattr() will delete those flags, make sure attr->ia_valid & ATTR_MODE
  * is on, and remove the appropriate bits from attr->ia_mode (attr is a
  * "struct iattr *"). -BlaisorBlade
  */

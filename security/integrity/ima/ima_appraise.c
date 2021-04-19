@@ -507,7 +507,7 @@ void ima_update_xattr(struct integrity_iint_cache *iint, struct file *file)
  *
  * Changes to a dentry's metadata might result in needing to appraise.
  *
- * This function is called from notify_change(), which expects the caller
+ * This function is called from vfs_setattr(), which expects the caller
  * to lock the inode's i_mutex.
  */
 void ima_inode_post_setattr(struct user_namespace *mnt_userns,

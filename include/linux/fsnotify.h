@@ -370,8 +370,7 @@ static inline void fsnotify_xattr(struct vfsmount *mnt, struct dentry *dentry)
 }
 
 /*
- * fsnotify_change - notify_change event.  file was modified and/or metadata
- * was changed.
+ * fsnotify_change - file was modified and/or metadata was changed
  */
 static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
 {

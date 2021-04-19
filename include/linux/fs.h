@@ -210,7 +210,7 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 #define WHITEOUT_DEV 0
 
 /*
- * This is the Inode Attributes structure, used for notify_change().  It
+ * This is the Inode Attributes structure, used for vfs_setattr().  It
  * uses the above definitions as flags, to know which values have changed.
  * Also, in this manner, a Filesystem can look at only the values it cares
  * about.  Basically, these are the attributes that the VFS layer can
@@ -2862,8 +2862,8 @@ static inline int bmap(struct inode *inode,  sector_t *block)
 }
 #endif
 
-int notify_change(struct user_namespace *, struct dentry *,
-		  struct iattr *, struct inode **);
+int vfs_setattr(struct user_namespace *, struct dentry *,
+		struct iattr *, struct inode **);
 int inode_permission(struct user_namespace *, struct inode *, int);
 int generic_permission(struct user_namespace *, struct inode *, int);
 static inline int file_permission(struct file *file, int mask)

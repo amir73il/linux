@@ -1884,7 +1884,7 @@ int should_remove_suid(struct dentry *dentry)
 EXPORT_SYMBOL(should_remove_suid);
 
 /*
- * Return mask of changes for notify_change() that need to be done as a
+ * Return mask of changes for vfs_setattr() that need to be done as a
  * response to write or truncate. Return 0 if nothing has to be changed.
  * Negative value on error (change should be denied).
  */
@@ -1913,10 +1913,10 @@ static int __remove_privs(struct user_namespace *mnt_userns,
 
 	newattrs.ia_valid = ATTR_FORCE | kill;
 	/*
-	 * Note we call this on write, so notify_change will not
+	 * Note we call this on write, so vfs_setattr() will not
 	 * encounter any conflicting delegations:
 	 */
-	return notify_change(mnt_userns, dentry, &newattrs, NULL);
+	return vfs_setattr(mnt_userns, dentry, &newattrs, NULL);
 }
 
 /*
