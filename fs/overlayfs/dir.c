@@ -27,12 +27,10 @@ int ovl_cleanup(struct inode *wdir, struct dentry *wdentry)
 {
 	int err;
 
-	dget(wdentry);
 	if (d_is_dir(wdentry))
 		err = ovl_do_rmdir(wdir, wdentry);
 	else
 		err = ovl_do_unlink(wdir, wdentry);
-	dput(wdentry);
 
 	if (err) {
 		pr_err("cleanup of '%pd2' failed (%i)\n",
@@ -822,9 +820,9 @@ static int ovl_remove_upper(struct dentry *dentry, bool is_dir,
 		goto out_dput_upper;
 
 	if (is_dir)
-		err = vfs_rmdir(&init_user_ns, dir, upper);
+		err = ovl_do_rmdir(dir, upper);
 	else
-		err = vfs_unlink(&init_user_ns, dir, upper, NULL);
+		err = ovl_do_unlink(dir, upper);
 	ovl_dir_modified(dentry->d_parent, ovl_type_origin(dentry));
 
 	/*
