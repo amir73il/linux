@@ -123,7 +123,12 @@ static inline const char *ovl_xattr(struct ovl_fs *ofs, enum ovl_xattr ox)
 
 static inline int ovl_do_rmdir(struct inode *dir, struct dentry *dentry)
 {
-	int err = vfs_rmdir(&init_user_ns, dir, dentry);
+	int err;
+
+	/* Keep dentry from becoming negative */
+	dget(dentry);
+	err = vfs_rmdir(&init_user_ns, dir, dentry);
+	dput(dentry);
 
 	pr_debug("rmdir(%pd2) = %i\n", dentry, err);
 	return err;
@@ -131,7 +136,12 @@ static inline int ovl_do_rmdir(struct inode *dir, struct dentry *dentry)
 
 static inline int ovl_do_unlink(struct inode *dir, struct dentry *dentry)
 {
-	int err = vfs_unlink(&init_user_ns, dir, dentry, NULL);
+	int err;
+
+	/* Keep dentry from becoming negative */
+	dget(dentry);
+	err = vfs_unlink(&init_user_ns, dir, dentry, NULL);
+	dput(dentry);
 
 	pr_debug("unlink(%pd2) = %i\n", dentry, err);
 	return err;
