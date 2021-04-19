@@ -568,7 +568,7 @@ long spufs_create(struct path *path, struct dentry *dentry,
 		ret = spufs_create_context(dir, dentry, path->mnt, flags, mode,
 					    filp);
 	if (ret >= 0)
-		fsnotify_mkdir(dir, dentry);
+		fsnotify_mkdir(NULL, dir, dentry);
 
 	return ret;
 }

@@ -587,7 +587,7 @@ struct dentry *devpts_pty_new(struct pts_fs_info *fsi, int index, void *priv)
 	if (dentry) {
 		dentry->d_fsdata = priv;
 		d_add(dentry, inode);
-		fsnotify_create(d_inode(root), dentry);
+		fsnotify_create(NULL, d_inode(root), dentry);
 	} else {
 		iput(inode);
 		dentry = ERR_PTR(-ENOMEM);
@@ -621,7 +621,7 @@ void devpts_pty_kill(struct dentry *dentry)
 
 	dentry->d_fsdata = NULL;
 	drop_nlink(dentry->d_inode);
-	fsnotify_unlink(d_inode(dentry->d_parent), dentry);
+	fsnotify_unlink(NULL, d_inode(dentry->d_parent), dentry);
 	d_drop(dentry);
 	dput(dentry);	/* d_alloc_name() in devpts_pty_new() */
 }

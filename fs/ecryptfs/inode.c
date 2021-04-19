@@ -16,6 +16,7 @@
 #include <linux/namei.h>
 #include <linux/mount.h>
 #include <linux/fs_stack.h>
+#include <linux/fsnotify.h>
 #include <linux/slab.h>
 #include <linux/xattr.h>
 #include <asm/unaligned.h>
@@ -147,6 +148,7 @@ static int ecryptfs_do_unlink(struct inode *dir, struct dentry *dentry,
 		printk(KERN_ERR "Error in vfs_unlink; rc = [%d]\n", rc);
 		goto out_unlock;
 	}
+	fsnotify_unlink(NULL, lower_dir_inode, lower_dentry);
 	fsstack_copy_attr_times(dir, lower_dir_inode);
 	set_nlink(inode, ecryptfs_inode_to_lower(inode)->i_nlink);
 	inode->i_ctime = dir->i_ctime;
@@ -189,6 +191,7 @@ ecryptfs_do_create(struct inode *directory_inode,
 		inode = ERR_PTR(rc);
 		goto out_lock;
 	}
+	fsnotify_create(NULL, d_inode(lower_dir_dentry), lower_dentry);
 	inode = __ecryptfs_get_inode(d_inode(lower_dentry),
 				     directory_inode->i_sb);
 	if (IS_ERR(inode)) {
@@ -444,6 +447,8 @@ static int ecryptfs_link(struct dentry *old_dentry, struct inode *dir,
 		      d_inode(lower_dir_dentry), lower_new_dentry, NULL);
 	if (rc || d_really_is_negative(lower_new_dentry))
 		goto out_lock;
+	fsnotify_link(NULL, d_inode(lower_old_dentry),
+		      d_inode(lower_dir_dentry), lower_new_dentry);
 	rc = ecryptfs_interpose(lower_new_dentry, new_dentry, dir->i_sb);
 	if (rc)
 		goto out_lock;
@@ -491,6 +496,7 @@ static int ecryptfs_symlink(struct user_namespace *mnt_userns,
 	kfree(encoded_symname);
 	if (rc || d_really_is_negative(lower_dentry))
 		goto out_lock;
+	fsnotify_create(NULL, d_inode(lower_dir_dentry), lower_dentry);
 	rc = ecryptfs_interpose(lower_dentry, dentry, dir->i_sb);
 	if (rc)
 		goto out_lock;
@@ -517,6 +523,7 @@ static int ecryptfs_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
 		       mode);
 	if (rc || d_really_is_negative(lower_dentry))
 		goto out;
+	fsnotify_mkdir(NULL, d_inode(lower_dir_dentry), lower_dentry);
 	rc = ecryptfs_interpose(lower_dentry, dentry, dir->i_sb);
 	if (rc)
 		goto out;
@@ -550,6 +557,7 @@ static int ecryptfs_rmdir(struct inode *dir, struct dentry *dentry)
 	else
 		rc = vfs_rmdir(&init_user_ns, lower_dir_inode, lower_dentry);
 	if (!rc) {
+		fsnotify_rmdir(NULL, lower_dir_inode, lower_dentry);
 		clear_nlink(d_inode(dentry));
 		fsstack_copy_attr_times(dir, lower_dir_inode);
 		set_nlink(dir, lower_dir_inode->i_nlink);
@@ -575,6 +583,7 @@ ecryptfs_mknod(struct user_namespace *mnt_userns, struct inode *dir,
 		       mode, dev);
 	if (rc || d_really_is_negative(lower_dentry))
 		goto out;
+	fsnotify_create(NULL, d_inode(lower_dir_dentry), lower_dentry);
 	rc = ecryptfs_interpose(lower_dentry, dentry, dir->i_sb);
 	if (rc)
 		goto out;

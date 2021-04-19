@@ -1185,7 +1185,7 @@ static int __nfsd_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode, 
 	}
 	d_add(dentry, inode);
 	inc_nlink(dir);
-	fsnotify_mkdir(dir, dentry);
+	fsnotify_mkdir(NULL, dir, dentry);
 	return 0;
 }
 
@@ -1289,7 +1289,7 @@ static  int nfsdfs_create_files(struct dentry *root,
 		inode->i_fop = files->ops;
 		inode->i_private = __get_nfsdfs_client(dir);
 		d_add(dentry, inode);
-		fsnotify_create(dir, dentry);
+		fsnotify_create(NULL, dir, dentry);
 	}
 	inode_unlock(dir);
 	return 0;
@@ -1334,7 +1334,7 @@ void nfsd_client_rmdir(struct dentry *dentry)
 	dget(dentry);
 	ret = simple_rmdir(dir, dentry);
 	WARN_ON_ONCE(ret);
-	fsnotify_rmdir(dir, dentry);
+	fsnotify_rmdir(NULL, dir, dentry);
 	d_delete(dentry);
 	dput(dentry);
 	inode_unlock(dir);

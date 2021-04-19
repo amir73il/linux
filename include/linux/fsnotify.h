@@ -18,6 +18,28 @@
 #include <linux/bug.h>
 
 /*
+ * vfs_xxx() wrappers that also generate fsnotify events.
+ *
+ * These helpers are called when the mount context is available, so that the
+ * fsnotify event can be reported to mount marks.
+ */
+int vfs_create_notify(struct user_namespace *mnt_userns, struct path *path,
+		      struct dentry *dentry, umode_t mode, bool want_excl);
+int vfs_mknod_notify(struct user_namespace *mnt_userns, struct path *path,
+		     struct dentry *dentry, umode_t mode, dev_t dev);
+int vfs_symlink_notify(struct user_namespace *mnt_userns, struct path *path,
+		       struct dentry *dentry, const char *oldname);
+int vfs_mkdir_notify(struct user_namespace *mnt_userns, struct path *path,
+		     struct dentry *dentry, umode_t mode);
+int vfs_link_notify(struct dentry *old_dentry,
+		    struct user_namespace *mnt_userns, struct path *path,
+		    struct dentry *new_dentry, struct inode **delegated_inode);
+int vfs_rmdir_notify(struct user_namespace *mnt_userns, struct path *path,
+		     struct dentry *dentry);
+int vfs_unlink_notify(struct user_namespace *mnt_userns, struct path *path,
+		      struct dentry *dentry, struct inode **delegated_inode);
+
+/*
  * Notify this @dir inode about a change in a child directory entry.
  * The directory entry may have turned positive or negative or its inode may
  * have changed (i.e. renamed over).
@@ -210,43 +232,46 @@ static inline void fsnotify_inoderemove(struct inode *inode)
 /*
  * fsnotify_mkobj - 'name' was created
  */
-static inline void fsnotify_mkobj(struct inode *dir,
+static inline void fsnotify_mkobj(struct vfsmount *mnt, struct inode *dir,
 				  struct dentry *child, bool isdir)
 {
 	audit_inode_child(dir, child, AUDIT_TYPE_CHILD_CREATE);
 
-	fsnotify_name(NULL, dir, FS_CREATE | (isdir ? FS_ISDIR : 0),
+	fsnotify_name(mnt, dir, FS_CREATE | (isdir ? FS_ISDIR : 0),
 		      d_inode(child), &child->d_name, 0);
 }
 
 /*
  * fsnotify_create - 'name' was linked in
  */
-static inline void fsnotify_create(struct inode *dir, struct dentry *dentry)
+static inline void fsnotify_create(struct vfsmount *mnt, struct inode *dir,
+				   struct dentry *dentry)
 {
-	fsnotify_mkobj(dir, dentry, false);
+	fsnotify_mkobj(mnt, dir, dentry, false);
 }
 
 /*
  * fsnotify_mkdir - directory 'name' was created
  */
-static inline void fsnotify_mkdir(struct inode *dir, struct dentry *dentry)
+static inline void fsnotify_mkdir(struct vfsmount *mnt, struct inode *dir,
+				  struct dentry *dentry)
 {
-	fsnotify_mkobj(dir, dentry, true);
+	fsnotify_mkobj(mnt, dir, dentry, true);
 }
 
 /*
  * fsnotify_link - new hardlink of 'inode'
+ *
  * Note: We have to pass also the linked inode ptr as some filesystems leave
  *   new_dentry->d_inode NULL and instantiate inode pointer later
  */
-static inline void fsnotify_link(struct inode *inode, struct inode *dir,
-				 struct dentry *new_dentry)
+static inline void fsnotify_link(struct vfsmount *mnt, struct inode *inode,
+				 struct inode *dir, struct dentry *new_dentry)
 {
 	fsnotify_link_count(inode);
 	audit_inode_child(dir, new_dentry, AUDIT_TYPE_CHILD_CREATE);
 
-	fsnotify_name(NULL, dir, FS_CREATE, inode, &new_dentry->d_name, 0);
+	fsnotify_name(mnt, dir, FS_CREATE, inode, &new_dentry->d_name, 0);
 }
 
 /*
@@ -255,12 +280,13 @@ static inline void fsnotify_link(struct inode *inode, struct inode *dir,
  * Caller must hold a reference on victim inode and make sure that
  * dentry->d_name is stable.
  */
-static inline void fsnotify_delete(struct inode *dir, struct dentry *dentry,
-				   struct inode *victim, bool isdir)
+static inline void fsnotify_delete(struct vfsmount *mnt, struct inode *dir,
+				   struct dentry *dentry, struct inode *victim,
+				   bool isdir)
 {
 	WARN_ON_ONCE(atomic_read(&victim->i_count) < 1);
 
-	fsnotify_name(NULL, dir, FS_DELETE | (isdir ? FS_ISDIR : 0), victim,
+	fsnotify_name(mnt, dir, FS_DELETE | (isdir ? FS_ISDIR : 0), victim,
 		      &dentry->d_name, 0);
 }
 
@@ -269,12 +295,13 @@ static inline void fsnotify_delete(struct inode *dir, struct dentry *dentry,
  *
  * Caller must make sure that dentry->d_name is stable.
  */
-static inline void fsnotify_unlink(struct inode *dir, struct dentry *dentry)
+static inline void fsnotify_unlink(struct vfsmount *mnt, struct inode *dir,
+				   struct dentry *dentry)
 {
 	/* Expected to be called before d_delete() */
 	WARN_ON_ONCE(d_is_negative(dentry));
 
-	fsnotify_delete(dir, dentry, d_inode(dentry), false);
+	fsnotify_delete(mnt, dir, dentry, d_inode(dentry), false);
 }
 
 /*
@@ -282,12 +309,13 @@ static inline void fsnotify_unlink(struct inode *dir, struct dentry *dentry)
  *
  * Caller must make sure that dentry->d_name is stable.
  */
-static inline void fsnotify_rmdir(struct inode *dir, struct dentry *dentry)
+static inline void fsnotify_rmdir(struct vfsmount *mnt, struct inode *dir,
+				  struct dentry *dentry)
 {
 	/* Expected to be called before d_delete() */
 	WARN_ON_ONCE(d_is_negative(dentry));
 
-	fsnotify_delete(dir, dentry, d_inode(dentry), true);
+	fsnotify_delete(mnt, dir, dentry, d_inode(dentry), true);
 }
 
 /*

@@ -2910,12 +2910,22 @@ int vfs_create(struct user_namespace *mnt_userns, struct inode *dir,
 	error = security_inode_create(dir, dentry, mode);
 	if (error)
 		return error;
-	error = dir->i_op->create(mnt_userns, dir, dentry, mode, want_excl);
-	if (!error)
-		fsnotify_create(dir, dentry);
-	return error;
+
+	return dir->i_op->create(mnt_userns, dir, dentry, mode, want_excl);
 }
 EXPORT_SYMBOL(vfs_create);
+
+int vfs_create_notify(struct user_namespace *mnt_userns, struct path *path,
+		      struct dentry *dentry, umode_t mode, bool want_excl)
+{
+	int error = vfs_create(mnt_userns, d_inode(path->dentry), dentry, mode,
+			       want_excl);
+
+	if (!error)
+		fsnotify_create(path->mnt, d_inode(path->dentry), dentry);
+	return error;
+}
+EXPORT_SYMBOL(vfs_create_notify);
 
 int vfs_mkobj(struct dentry *dentry, umode_t mode,
 		int (*f)(struct dentry *, umode_t, void *),
@@ -2933,7 +2943,7 @@ int vfs_mkobj(struct dentry *dentry, umode_t mode,
 		return error;
 	error = f(dentry, mode, arg);
 	if (!error)
-		fsnotify_create(dir, dentry);
+		fsnotify_create(NULL, dir, dentry);
 	return error;
 }
 EXPORT_SYMBOL(vfs_mkobj);
@@ -3288,7 +3298,7 @@ static const char *open_last_lookups(struct nameidata *nd,
 		inode_lock_shared(dir->d_inode);
 	dentry = lookup_open(nd, file, op, got_write);
 	if (!IS_ERR(dentry) && (file->f_mode & FMODE_CREATED))
-		fsnotify_create(dir->d_inode, dentry);
+		fsnotify_create(nd->path.mnt, dir->d_inode, dentry);
 	if (open_flag & O_CREAT)
 		inode_unlock(dir->d_inode);
 	else
@@ -3695,12 +3705,21 @@ int vfs_mknod(struct user_namespace *mnt_userns, struct inode *dir,
 	if (error)
 		return error;
 
-	error = dir->i_op->mknod(mnt_userns, dir, dentry, mode, dev);
-	if (!error)
-		fsnotify_create(dir, dentry);
-	return error;
+	return dir->i_op->mknod(mnt_userns, dir, dentry, mode, dev);
 }
 EXPORT_SYMBOL(vfs_mknod);
+
+int vfs_mknod_notify(struct user_namespace *mnt_userns, struct path *path,
+		     struct dentry *dentry, umode_t mode, dev_t dev)
+{
+	int error = vfs_mknod(mnt_userns, d_inode(path->dentry), dentry, mode,
+			      dev);
+
+	if (!error)
+		fsnotify_create(path->mnt, d_inode(path->dentry), dentry);
+	return error;
+}
+EXPORT_SYMBOL(vfs_mknod_notify);
 
 static int may_mknod(umode_t mode)
 {
@@ -3745,18 +3764,18 @@ retry:
 	mnt_userns = mnt_user_ns(path.mnt);
 	switch (mode & S_IFMT) {
 		case 0: case S_IFREG:
-			error = vfs_create(mnt_userns, path.dentry->d_inode,
-					   dentry, mode, true);
+			error = vfs_create_notify(mnt_userns, &path, dentry,
+						  mode, true);
 			if (!error)
 				ima_post_path_mknod(mnt_userns, dentry);
 			break;
 		case S_IFCHR: case S_IFBLK:
-			error = vfs_mknod(mnt_userns, path.dentry->d_inode,
-					  dentry, mode, new_decode_dev(dev));
+			error = vfs_mknod_notify(mnt_userns, &path, dentry,
+						 mode, new_decode_dev(dev));
 			break;
 		case S_IFIFO: case S_IFSOCK:
-			error = vfs_mknod(mnt_userns, path.dentry->d_inode,
-					  dentry, mode, 0);
+			error = vfs_mknod_notify(mnt_userns, &path, dentry,
+						 mode, 0);
 			break;
 	}
 out:
@@ -3814,12 +3833,20 @@ int vfs_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
 	if (max_links && dir->i_nlink >= max_links)
 		return -EMLINK;
 
-	error = dir->i_op->mkdir(mnt_userns, dir, dentry, mode);
-	if (!error)
-		fsnotify_mkdir(dir, dentry);
-	return error;
+	return dir->i_op->mkdir(mnt_userns, dir, dentry, mode);
 }
 EXPORT_SYMBOL(vfs_mkdir);
+
+int vfs_mkdir_notify(struct user_namespace *mnt_userns, struct path *path,
+		     struct dentry *dentry, umode_t mode)
+{
+	int error = vfs_mkdir(mnt_userns, d_inode(path->dentry), dentry, mode);
+
+	if (!error)
+		fsnotify_mkdir(path->mnt, d_inode(path->dentry), dentry);
+	return error;
+}
+EXPORT_SYMBOL(vfs_mkdir_notify);
 
 static long do_mkdirat(int dfd, const char __user *pathname, umode_t mode)
 {
@@ -3839,8 +3866,7 @@ retry:
 	if (!error) {
 		struct user_namespace *mnt_userns;
 		mnt_userns = mnt_user_ns(path.mnt);
-		error = vfs_mkdir(mnt_userns, path.dentry->d_inode, dentry,
-				  mode);
+		error = vfs_mkdir_notify(mnt_userns, &path, dentry, mode);
 	}
 	done_path_create(&path, dentry);
 	if (retry_estale(error, lookup_flags)) {
@@ -3875,7 +3901,7 @@ SYSCALL_DEFINE2(mkdir, const char __user *, pathname, umode_t, mode)
  * raw inode simply passs init_user_ns.
  */
 int vfs_rmdir(struct user_namespace *mnt_userns, struct inode *dir,
-		     struct dentry *dentry)
+	      struct dentry *dentry)
 {
 	int error = may_delete(mnt_userns, dir, dentry, 1);
 
@@ -3904,7 +3930,6 @@ int vfs_rmdir(struct user_namespace *mnt_userns, struct inode *dir,
 	dentry->d_inode->i_flags |= S_DEAD;
 	dont_mount(dentry);
 	detach_mounts(dentry);
-	fsnotify_rmdir(dir, dentry);
 
 out:
 	inode_unlock(dentry->d_inode);
@@ -3914,6 +3939,24 @@ out:
 	return error;
 }
 EXPORT_SYMBOL(vfs_rmdir);
+
+int vfs_rmdir_notify(struct user_namespace *mnt_userns, struct path *path,
+		     struct dentry *dentry)
+{
+	struct inode *inode = d_inode(dentry);
+	int error;
+
+	ihold(inode);
+	error = vfs_rmdir(mnt_userns, d_inode(path->dentry), dentry);
+	if (!error) {
+		fsnotify_delete(path->mnt, d_inode(path->dentry), dentry,
+				inode, true);
+	}
+	iput(inode);
+
+	return error;
+}
+EXPORT_SYMBOL(vfs_rmdir_notify);
 
 long do_rmdir(int dfd, struct filename *name)
 {
@@ -3959,7 +4002,7 @@ retry:
 	if (error)
 		goto exit3;
 	mnt_userns = mnt_user_ns(path.mnt);
-	error = vfs_rmdir(mnt_userns, path.dentry->d_inode, dentry);
+	error = vfs_rmdir_notify(mnt_userns, &path, dentry);
 exit3:
 	dput(dentry);
 exit2:
@@ -4030,7 +4073,6 @@ int vfs_unlink(struct user_namespace *mnt_userns, struct inode *dir,
 			if (!error) {
 				dont_mount(dentry);
 				detach_mounts(dentry);
-				fsnotify_unlink(dir, dentry);
 			}
 		}
 	}
@@ -4046,6 +4088,25 @@ out:
 	return error;
 }
 EXPORT_SYMBOL(vfs_unlink);
+
+int vfs_unlink_notify(struct user_namespace *mnt_userns, struct path *path,
+		      struct dentry *dentry, struct inode **delegated_inode)
+{
+	struct inode *inode = d_inode(dentry);
+	int error;
+
+	ihold(inode);
+	error = vfs_unlink(mnt_userns, d_inode(path->dentry), dentry,
+			   delegated_inode);
+	if (!error) {
+		fsnotify_delete(path->mnt, d_inode(path->dentry), dentry,
+				inode, false);
+	}
+	iput(inode);
+
+	return error;
+}
+EXPORT_SYMBOL(vfs_unlink_notify);
 
 /*
  * Make sure that the actual truncation of the file will occur outside its
@@ -4093,8 +4154,8 @@ retry_deleg:
 		if (error)
 			goto exit2;
 		mnt_userns = mnt_user_ns(path.mnt);
-		error = vfs_unlink(mnt_userns, path.dentry->d_inode, dentry,
-				   &delegated_inode);
+		error = vfs_unlink_notify(mnt_userns, &path, dentry,
+					  &delegated_inode);
 exit2:
 		dput(dentry);
 	}
@@ -4173,12 +4234,21 @@ int vfs_symlink(struct user_namespace *mnt_userns, struct inode *dir,
 	if (error)
 		return error;
 
-	error = dir->i_op->symlink(mnt_userns, dir, dentry, oldname);
-	if (!error)
-		fsnotify_create(dir, dentry);
-	return error;
+	return dir->i_op->symlink(mnt_userns, dir, dentry, oldname);
 }
 EXPORT_SYMBOL(vfs_symlink);
+
+int vfs_symlink_notify(struct user_namespace *mnt_userns, struct path *path,
+		       struct dentry *dentry, const char *oldname)
+{
+	int error = vfs_symlink(mnt_userns, d_inode(path->dentry), dentry,
+				oldname);
+
+	if (!error)
+		fsnotify_create(path->mnt, d_inode(path->dentry), dentry);
+	return error;
+}
+EXPORT_SYMBOL(vfs_symlink_notify);
 
 static long do_symlinkat(const char __user *oldname, int newdfd,
 		  const char __user *newname)
@@ -4203,8 +4273,8 @@ retry:
 		struct user_namespace *mnt_userns;
 
 		mnt_userns = mnt_user_ns(path.mnt);
-		error = vfs_symlink(mnt_userns, path.dentry->d_inode, dentry,
-				    from->name);
+		error = vfs_symlink_notify(mnt_userns, &path, dentry,
+					   from->name);
 	}
 	done_path_create(&path, dentry);
 	if (retry_estale(error, lookup_flags)) {
@@ -4310,11 +4380,25 @@ int vfs_link(struct dentry *old_dentry, struct user_namespace *mnt_userns,
 		spin_unlock(&inode->i_lock);
 	}
 	inode_unlock(inode);
-	if (!error)
-		fsnotify_link(inode, dir, new_dentry);
+
 	return error;
 }
 EXPORT_SYMBOL(vfs_link);
+
+int vfs_link_notify(struct dentry *old_dentry,
+		    struct user_namespace *mnt_userns, struct path *path,
+		    struct dentry *new_dentry, struct inode **delegated_inode)
+{
+	int error = vfs_link(old_dentry, mnt_userns, d_inode(path->dentry),
+			     new_dentry, delegated_inode);
+
+	if (!error) {
+		fsnotify_link(path->mnt, old_dentry->d_inode,
+			      d_inode(path->dentry), new_dentry);
+	}
+	return error;
+}
+EXPORT_SYMBOL(vfs_link_notify);
 
 /*
  * Hardlinks are often used in delicate situations.  We avoid
@@ -4371,8 +4455,8 @@ retry:
 	error = security_path_link(old_path.dentry, &new_path, new_dentry);
 	if (error)
 		goto out_dput;
-	error = vfs_link(old_path.dentry, mnt_userns, new_path.dentry->d_inode,
-			 new_dentry, &delegated_inode);
+	error = vfs_link_notify(old_path.dentry, mnt_userns, &new_path,
+				new_dentry, &delegated_inode);
 out_dput:
 	done_path_create(&new_path, new_dentry);
 	if (delegated_inode) {

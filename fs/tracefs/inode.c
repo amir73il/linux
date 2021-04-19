@@ -415,7 +415,7 @@ struct dentry *tracefs_create_file(const char *name, umode_t mode,
 	inode->i_fop = fops ? fops : &tracefs_file_operations;
 	inode->i_private = data;
 	d_instantiate(dentry, inode);
-	fsnotify_create(dentry->d_parent->d_inode, dentry);
+	fsnotify_create(NULL, dentry->d_parent->d_inode, dentry);
 	return end_creating(dentry);
 }
 
@@ -440,7 +440,7 @@ static struct dentry *__create_dir(const char *name, struct dentry *parent,
 	inc_nlink(inode);
 	d_instantiate(dentry, inode);
 	inc_nlink(dentry->d_parent->d_inode);
-	fsnotify_mkdir(dentry->d_parent->d_inode, dentry);
+	fsnotify_mkdir(NULL, dentry->d_parent->d_inode, dentry);
 	return end_creating(dentry);
 }
 
