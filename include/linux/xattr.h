@@ -62,10 +62,13 @@ int __vfs_setxattr_locked(struct user_namespace *, struct dentry *,
 			  struct inode **);
 int vfs_setxattr(struct user_namespace *, struct dentry *, const char *,
 		 const void *, size_t, int);
+int vfs_setxattr_notify(const struct path *, const char *, const void *,
+			size_t, int);
 int __vfs_removexattr(struct user_namespace *, struct dentry *, const char *);
 int __vfs_removexattr_locked(struct user_namespace *, struct dentry *,
 			     const char *, struct inode **);
 int vfs_removexattr(struct user_namespace *, struct dentry *, const char *);
+int vfs_removexattr_notify(const struct path *, const char *);
 
 ssize_t generic_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size);
 ssize_t vfs_getxattr_alloc(struct user_namespace *mnt_userns,

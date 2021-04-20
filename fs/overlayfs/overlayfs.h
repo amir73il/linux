@@ -221,8 +221,14 @@ static inline int ovl_do_setxattr(struct ovl_fs *ofs, struct dentry *dentry,
 {
 	const char *name = ovl_xattr(ofs, ox);
 	int err = vfs_setxattr(&init_user_ns, dentry, name, value, size, 0);
+
 	pr_debug("setxattr(%pd2, \"%s\", \"%*pE\", %zu, 0) = %i\n",
 		 dentry, name, min((int)size, 48), value, size, err);
+	if (!err) {
+		fsnotify_xattr(&(struct path){
+			       .mnt = ovl_upper_mnt(ofs),
+			       .dentry = dentry});
+	}
 	return err;
 }
 
@@ -231,7 +237,13 @@ static inline int ovl_do_removexattr(struct ovl_fs *ofs, struct dentry *dentry,
 {
 	const char *name = ovl_xattr(ofs, ox);
 	int err = vfs_removexattr(&init_user_ns, dentry, name);
+
 	pr_debug("removexattr(%pd2, \"%s\") = %i\n", dentry, name, err);
+	if (!err) {
+		fsnotify_xattr(&(struct path){
+			       .mnt = ovl_upper_mnt(ofs),
+			       .dentry = dentry});
+	}
 	return err;
 }
 

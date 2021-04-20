@@ -345,6 +345,7 @@ int ovl_xattr_set(struct dentry *dentry, struct inode *inode, const char *name,
 		  const void *value, size_t size, int flags)
 {
 	int err;
+	struct path upperpath;
 	struct dentry *upperdentry = ovl_i_dentry_upper(inode);
 	struct dentry *realdentry = upperdentry ?: ovl_dentry_lower(dentry);
 	const struct cred *old_cred;
@@ -365,17 +366,15 @@ int ovl_xattr_set(struct dentry *dentry, struct inode *inode, const char *name,
 		err = ovl_copy_up(dentry);
 		if (err)
 			goto out_drop_write;
-
-		realdentry = ovl_dentry_upper(dentry);
 	}
 
+	ovl_path_upper(dentry, &upperpath);
 	old_cred = ovl_override_creds(dentry->d_sb);
 	if (value)
-		err = vfs_setxattr(&init_user_ns, realdentry, name, value, size,
-				   flags);
+		err = vfs_setxattr_notify(&upperpath, name, value, size, flags);
 	else {
 		WARN_ON(flags != XATTR_REPLACE);
-		err = vfs_removexattr(&init_user_ns, realdentry, name);
+		err = vfs_removexattr_notify(&upperpath, name);
 	}
 	revert_creds(old_cred);
 

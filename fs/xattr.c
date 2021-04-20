@@ -295,8 +295,6 @@ retry_deleg:
 	inode_lock(inode);
 	error = __vfs_setxattr_locked(mnt_userns, dentry, name, value, size,
 				      flags, &delegated_inode);
-	if (!error)
-		fsnotify_xattr(dentry);
 	inode_unlock(inode);
 
 	if (delegated_inode) {
@@ -310,6 +308,20 @@ retry_deleg:
 	return error;
 }
 EXPORT_SYMBOL_GPL(vfs_setxattr);
+
+int
+vfs_setxattr_notify(const struct path *path, const char *name,
+		    const void *value, size_t size, int flags)
+{
+	int error = vfs_setxattr(mnt_user_ns(path->mnt), path->dentry, name,
+				 value, size, flags);
+
+	if (!error)
+		fsnotify_xattr(path);
+
+	return error;
+}
+EXPORT_SYMBOL_GPL(vfs_setxattr_notify);
 
 static ssize_t
 xattr_getsecurity(struct user_namespace *mnt_userns, struct inode *inode,
@@ -518,8 +530,6 @@ retry_deleg:
 	inode_lock(inode);
 	error = __vfs_removexattr_locked(mnt_userns, dentry,
 					 name, &delegated_inode);
-	if (!error)
-		fsnotify_xattr(dentry);
 	inode_unlock(inode);
 
 	if (delegated_inode) {
@@ -532,14 +542,26 @@ retry_deleg:
 }
 EXPORT_SYMBOL_GPL(vfs_removexattr);
 
+int
+vfs_removexattr_notify(const struct path *path, const char *name)
+{
+	int error = vfs_removexattr(mnt_user_ns(path->mnt), path->dentry, name);
+
+	if (!error)
+		fsnotify_xattr(path);
+
+	return error;
+}
+EXPORT_SYMBOL_GPL(vfs_removexattr_notify);
+
 /*
  * Extended attribute SET operations
  */
 static long
-setxattr(struct user_namespace *mnt_userns, struct dentry *d,
-	 const char __user *name, const void __user *value, size_t size,
-	 int flags)
+setxattr(struct path *path, const char __user *name, const void __user *value,
+	 size_t size, int flags)
 {
+	struct user_namespace *mnt_userns = mnt_user_ns(path->mnt);
 	int error;
 	void *kvalue = NULL;
 	char kname[XATTR_NAME_MAX + 1];
@@ -568,7 +590,7 @@ setxattr(struct user_namespace *mnt_userns, struct dentry *d,
 			posix_acl_fix_xattr_from_user(mnt_userns, kvalue, size);
 	}
 
-	error = vfs_setxattr(mnt_userns, d, kname, kvalue, size, flags);
+	error = vfs_setxattr_notify(path, kname, kvalue, size, flags);
 out:
 	kvfree(kvalue);
 
@@ -588,8 +610,7 @@ retry:
 		return error;
 	error = mnt_want_write(path.mnt);
 	if (!error) {
-		error = setxattr(mnt_user_ns(path.mnt), path.dentry, name,
-				 value, size, flags);
+		error = setxattr(&path, name, value, size, flags);
 		mnt_drop_write(path.mnt);
 	}
 	path_put(&path);
@@ -625,9 +646,7 @@ SYSCALL_DEFINE5(fsetxattr, int, fd, const char __user *, name,
 	audit_file(f.file);
 	error = mnt_want_write_file(f.file);
 	if (!error) {
-		error = setxattr(file_mnt_user_ns(f.file),
-				 f.file->f_path.dentry, name,
-				 value, size, flags);
+		error = setxattr(&f.file->f_path, name, value, size, flags);
 		mnt_drop_write_file(f.file);
 	}
 	fdput(f);
@@ -802,8 +821,7 @@ SYSCALL_DEFINE3(flistxattr, int, fd, char __user *, list, size_t, size)
  * Extended attribute REMOVE operations
  */
 static long
-removexattr(struct user_namespace *mnt_userns, struct dentry *d,
-	    const char __user *name)
+removexattr(struct path *path, const char __user *name)
 {
 	int error;
 	char kname[XATTR_NAME_MAX + 1];
@@ -814,7 +832,7 @@ removexattr(struct user_namespace *mnt_userns, struct dentry *d,
 	if (error < 0)
 		return error;
 
-	return vfs_removexattr(mnt_userns, d, kname);
+	return vfs_removexattr_notify(path, kname);
 }
 
 static int path_removexattr(const char __user *pathname,
@@ -828,7 +846,7 @@ retry:
 		return error;
 	error = mnt_want_write(path.mnt);
 	if (!error) {
-		error = removexattr(mnt_user_ns(path.mnt), path.dentry, name);
+		error = removexattr(&path, name);
 		mnt_drop_write(path.mnt);
 	}
 	path_put(&path);
@@ -861,8 +879,7 @@ SYSCALL_DEFINE2(fremovexattr, int, fd, const char __user *, name)
 	audit_file(f.file);
 	error = mnt_want_write_file(f.file);
 	if (!error) {
-		error = removexattr(file_mnt_user_ns(f.file),
-				    f.file->f_path.dentry, name);
+		error = removexattr(&f.file->f_path, name);
 		mnt_drop_write_file(f.file);
 	}
 	fdput(f);

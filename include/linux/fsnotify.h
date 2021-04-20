@@ -108,10 +108,10 @@ notify_child:
  * Simple wrappers to consolidate calls to fsnotify_parent() when an event
  * is on a file/dentry.
  */
-static inline void fsnotify_dentry(struct dentry *dentry, __u32 mask)
+static inline void fsnotify_dentry(const struct path *path, __u32 mask)
 {
-	fsnotify_parent(&(struct path){ .dentry = dentry }, mask,
-			d_inode(dentry), FSNOTIFY_EVENT_INODE);
+	fsnotify_parent(path, mask, d_inode(path->dentry),
+			FSNOTIFY_EVENT_INODE);
 }
 
 static inline int fsnotify_file(struct file *file, __u32 mask)
@@ -363,9 +363,9 @@ static inline void fsnotify_close(struct file *file)
 /*
  * fsnotify_xattr - extended attributes were changed
  */
-static inline void fsnotify_xattr(struct dentry *dentry)
+static inline void fsnotify_xattr(const struct path *path)
 {
-	fsnotify_dentry(dentry, FS_ATTRIB);
+	fsnotify_dentry(path, FS_ATTRIB);
 }
 
 /*
@@ -395,7 +395,7 @@ static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
 		mask |= FS_ATTRIB;
 
 	if (mask)
-		fsnotify_dentry(dentry, mask);
+		fsnotify_dentry(&(struct path){.dentry = dentry}, mask);
 }
 
 #endif	/* _LINUX_FS_NOTIFY_H */

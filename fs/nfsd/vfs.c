@@ -49,6 +49,7 @@
 
 #define NFSDDBG_FACILITY		NFSDDBG_FILEOP
 
+
 /* 
  * Called from nfsd_lookup and encode_dirent. Check if we have crossed 
  * a mount point.
@@ -521,7 +522,7 @@ __be32 nfsd4_set_nfs4_label(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	inode_lock(d_inode(dentry));
 	host_error = security_inode_setsecctx(dentry, label->data, label->len);
 	if (!host_error)
-		fsnotify_xattr(dentry);
+		fsnotify_xattr(NFSDFH_PATH(fhp));
 	inode_unlock(d_inode(dentry));
 	return nfserrno(host_error);
 }
@@ -2308,7 +2309,7 @@ nfsd_removexattr(struct svc_rqst *rqstp, struct svc_fh *fhp, char *name)
 	ret = __vfs_removexattr_locked(&init_user_ns, fhp->fh_dentry,
 				       name, NULL);
 	if (!ret)
-		fsnotify_xattr(fhp->fh_dentry);
+		fsnotify_xattr(NFSDFH_PATH(fhp));
 
 	fh_unlock(fhp);
 	fh_drop_write(fhp);
@@ -2335,7 +2336,7 @@ nfsd_setxattr(struct svc_rqst *rqstp, struct svc_fh *fhp, char *name,
 	ret = __vfs_setxattr_locked(&init_user_ns, fhp->fh_dentry, name, buf,
 				    len, flags, NULL);
 	if (!ret)
-		fsnotify_xattr(fhp->fh_dentry);
+		fsnotify_xattr(NFSDFH_PATH(fhp));
 
 	fh_unlock(fhp);
 	fh_drop_write(fhp);
