@@ -2624,8 +2624,8 @@ static inline struct user_namespace *file_mnt_user_ns(struct file *file)
 	return mnt_user_ns(file->f_path.mnt);
 }
 extern long vfs_truncate(const struct path *, loff_t);
-int do_truncate(struct user_namespace *, struct dentry *, loff_t start,
-		unsigned int time_attrs, struct file *filp);
+int do_truncate(const struct path *, loff_t start, unsigned int time_attrs,
+		struct file *filp);
 extern int vfs_fallocate(struct file *file, int mode, loff_t offset,
 			loff_t len);
 extern long do_sys_open(int dfd, const char __user *filename, int flags,
@@ -2862,8 +2862,9 @@ static inline int bmap(struct inode *inode,  sector_t *block)
 }
 #endif
 
-int notify_change(struct user_namespace *, struct dentry *,
-		  struct iattr *, struct inode **);
+int vfs_setattr(struct user_namespace *, struct dentry *, struct iattr *,
+		struct inode **);
+int notify_change(const struct path *, struct iattr *, struct inode **);
 int inode_permission(struct user_namespace *, struct inode *, int);
 int generic_permission(struct user_namespace *, struct inode *, int);
 static inline int file_permission(struct file *file, int mask)

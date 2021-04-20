@@ -433,6 +433,7 @@ static int cachefiles_attr_changed(struct fscache_object *_object)
 	struct cachefiles_cache *cache;
 	const struct cred *saved_cred;
 	struct iattr newattrs;
+	struct path path;
 	uint64_t ni_size;
 	loff_t oi_size;
 	int ret;
@@ -463,6 +464,9 @@ static int cachefiles_attr_changed(struct fscache_object *_object)
 	cachefiles_begin_secure(cache, &saved_cred);
 	inode_lock(d_inode(object->backer));
 
+	path.dentry = object->backer;
+	path.mnt = cache->mnt;
+
 	/* if there's an extension to a partial page at the end of the backing
 	 * file, we need to discard the partial page so that we pick up new
 	 * data after it */
@@ -470,14 +474,14 @@ static int cachefiles_attr_changed(struct fscache_object *_object)
 		_debug("discard tail %llx", oi_size);
 		newattrs.ia_valid = ATTR_SIZE;
 		newattrs.ia_size = oi_size & PAGE_MASK;
-		ret = notify_change(&init_user_ns, object->backer, &newattrs, NULL);
+		ret = notify_change(&path, &newattrs, NULL);
 		if (ret < 0)
 			goto truncate_failed;
 	}
 
 	newattrs.ia_valid = ATTR_SIZE;
 	newattrs.ia_size = ni_size;
-	ret = notify_change(&init_user_ns, object->backer, &newattrs, NULL);
+	ret = notify_change(&path, &newattrs, NULL);
 
 truncate_failed:
 	inode_unlock(d_inode(object->backer));

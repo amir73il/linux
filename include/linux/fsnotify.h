@@ -372,7 +372,8 @@ static inline void fsnotify_xattr(const struct path *path)
  * fsnotify_change - notify_change event.  file was modified and/or metadata
  * was changed.
  */
-static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
+static inline void fsnotify_change(const struct path *path,
+				   unsigned int ia_valid)
 {
 	__u32 mask = 0;
 
@@ -395,7 +396,7 @@ static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
 		mask |= FS_ATTRIB;
 
 	if (mask)
-		fsnotify_dentry(&(struct path){.dentry = dentry}, mask);
+		fsnotify_dentry(path, mask);
 }
 
 #endif	/* _LINUX_FS_NOTIFY_H */

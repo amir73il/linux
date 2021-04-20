@@ -47,8 +47,10 @@ int ovl_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 		err = ovl_copy_up_with_data(dentry);
 	if (!err) {
 		struct inode *winode = NULL;
+		struct path upperpath;
 
-		upperdentry = ovl_dentry_upper(dentry);
+		ovl_path_upper(dentry, &upperpath);
+		upperdentry = upperpath.dentry;
 
 		if (attr->ia_valid & ATTR_SIZE) {
 			winode = d_inode(upperdentry);
@@ -80,7 +82,7 @@ int ovl_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 
 		inode_lock(upperdentry->d_inode);
 		old_cred = ovl_override_creds(dentry->d_sb);
-		err = notify_change(&init_user_ns, upperdentry, attr, NULL);
+		err = notify_change(&upperpath, attr, NULL);
 		revert_creds(old_cred);
 		if (!err)
 			ovl_copyattr(upperdentry->d_inode, dentry->d_inode);

@@ -3011,7 +3011,7 @@ static int may_open(struct user_namespace *mnt_userns, const struct path *path,
 	return 0;
 }
 
-static int handle_truncate(struct user_namespace *mnt_userns, struct file *filp)
+static int handle_truncate(struct file *filp)
 {
 	const struct path *path = &filp->f_path;
 	struct inode *inode = path->dentry->d_inode;
@@ -3025,8 +3025,7 @@ static int handle_truncate(struct user_namespace *mnt_userns, struct file *filp)
 	if (!error)
 		error = security_path_truncate(path);
 	if (!error) {
-		error = do_truncate(mnt_userns, path->dentry, 0,
-				    ATTR_MTIME|ATTR_CTIME|ATTR_OPEN,
+		error = do_truncate(path, 0, ATTR_MTIME|ATTR_CTIME|ATTR_OPEN,
 				    filp);
 	}
 	put_write_access(inode);
@@ -3376,7 +3375,7 @@ static int do_open(struct nameidata *nd,
 	if (!error)
 		error = ima_file_check(file, op->acc_mode);
 	if (!error && do_truncate)
-		error = handle_truncate(mnt_userns, file);
+		error = handle_truncate(file);
 	if (unlikely(error > 0)) {
 		WARN_ON(1);
 		error = -EINVAL;

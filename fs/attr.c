@@ -250,7 +250,7 @@ void setattr_copy(struct user_namespace *mnt_userns, struct inode *inode,
 EXPORT_SYMBOL(setattr_copy);
 
 /**
- * notify_change - modify attributes of a filesytem object
+ * vfs_setattr - modify attributes of a filesytem object
  * @mnt_userns:	user namespace of the mount the inode was found from
  * @dentry:	object affected
  * @attr:	new attributes
@@ -258,13 +258,13 @@ EXPORT_SYMBOL(setattr_copy);
  *
  * The caller must hold the i_mutex on the affected object.
  *
- * If notify_change discovers a delegation in need of breaking,
+ * If vfs_setattr() discovers a delegation in need of breaking,
  * it will return -EWOULDBLOCK and return a reference to the inode in
  * delegated_inode.  The caller should then break the delegation and
  * retry.  Because breaking a delegation may take a long time, the
  * caller should drop the i_mutex before doing so.
  *
- * If file ownership is changed notify_change() doesn't map ia_uid and
+ * If file ownership is changed vfs_setattr() doesn't map ia_uid and
  * ia_gid. It will asssume the caller has already provided the intended values.
  *
  * Alternatively, a caller may pass NULL for delegated_inode.  This may
@@ -279,8 +279,8 @@ EXPORT_SYMBOL(setattr_copy);
  * permissions. On non-idmapped mounts or if permission checking is to be
  * performed on the raw inode simply passs init_user_ns.
  */
-int notify_change(struct user_namespace *mnt_userns, struct dentry *dentry,
-		  struct iattr *attr, struct inode **delegated_inode)
+int vfs_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+		    struct iattr *attr, struct inode **delegated_inode)
 {
 	struct inode *inode = dentry->d_inode;
 	umode_t mode = inode->i_mode;
@@ -341,7 +341,7 @@ int notify_change(struct user_namespace *mnt_userns, struct dentry *dentry,
 	 * We now pass ATTR_KILL_S*ID to the lower level setattr function so
 	 * that the function has the ability to reinterpret a mode change
 	 * that's due to these bits. This adds an implicit restriction that
-	 * no function will ever call notify_change with both ATTR_MODE and
+	 * no function will ever call vfs_setattr() with both ATTR_MODE and
 	 * ATTR_KILL_S*ID set.
 	 */
 	if ((ia_valid & (ATTR_KILL_SUID|ATTR_KILL_SGID)) &&
@@ -400,10 +400,22 @@ int notify_change(struct user_namespace *mnt_userns, struct dentry *dentry,
 		error = simple_setattr(mnt_userns, dentry, attr);
 
 	if (!error) {
-		fsnotify_change(dentry, ia_valid);
 		ima_inode_post_setattr(mnt_userns, dentry);
 		evm_inode_post_setattr(dentry, ia_valid);
 	}
+
+	return error;
+}
+EXPORT_SYMBOL(vfs_setattr);
+
+int notify_change(const struct path *path, struct iattr *attr,
+		  struct inode **delegated_inode)
+{
+	int error = vfs_setattr(mnt_user_ns(path->mnt), path->dentry, attr,
+				delegated_inode);
+
+	if (!error)
+		fsnotify_change(path, attr->ia_valid);
 
 	return error;
 }

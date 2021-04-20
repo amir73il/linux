@@ -367,7 +367,7 @@ __be32
 nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp, struct iattr *iap,
 	     int check_guard, time64_t guardtime)
 {
-	struct dentry	*dentry;
+	struct path	path;
 	struct inode	*inode;
 	int		accmode = NFSD_MAY_SATTR;
 	umode_t		ftype = 0;
@@ -407,8 +407,8 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp, struct iattr *iap,
 			goto out;
 	}
 
-	dentry = fhp->fh_dentry;
-	inode = d_inode(dentry);
+	NFSDFH_PATH_INIT(path, fhp);
+	inode = d_inode(path.dentry);
 
 	/* Ignore any mode updates on symlinks */
 	if (S_ISLNK(inode->i_mode))
@@ -449,7 +449,7 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp, struct iattr *iap,
 			.ia_size	= iap->ia_size,
 		};
 
-		host_err = notify_change(&init_user_ns, dentry, &size_attr, NULL);
+		host_err = notify_change(&path, &size_attr, NULL);
 		if (host_err)
 			goto out_unlock;
 		iap->ia_valid &= ~ATTR_SIZE;
@@ -464,7 +464,7 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp, struct iattr *iap,
 	}
 
 	iap->ia_valid |= ATTR_CTIME;
-	host_err = notify_change(&init_user_ns, dentry, iap, NULL);
+	host_err = notify_change(&path, iap, NULL);
 
 out_unlock:
 	fh_unlock(fhp);

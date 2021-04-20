@@ -35,11 +35,12 @@
 
 #include "internal.h"
 
-int do_truncate(struct user_namespace *mnt_userns, struct dentry *dentry,
-		loff_t length, unsigned int time_attrs, struct file *filp)
+int do_truncate(const struct path *path, loff_t length, unsigned int time_attrs,
+		struct file *filp)
 {
 	int ret;
 	struct iattr newattrs;
+	struct dentry *dentry = path->dentry;
 
 	/* Not pretty: "inode->i_size" shouldn't really be signed. But it is. */
 	if (length < 0)
@@ -61,7 +62,7 @@ int do_truncate(struct user_namespace *mnt_userns, struct dentry *dentry,
 
 	inode_lock(dentry->d_inode);
 	/* Note any delegations or leases have already been broken: */
-	ret = notify_change(mnt_userns, dentry, &newattrs, NULL);
+	ret = notify_change(path, &newattrs, NULL);
 	inode_unlock(dentry->d_inode);
 	return ret;
 }
@@ -109,7 +110,7 @@ long vfs_truncate(const struct path *path, loff_t length)
 	if (!error)
 		error = security_path_truncate(path);
 	if (!error)
-		error = do_truncate(mnt_userns, path->dentry, length, 0, NULL);
+		error = do_truncate(path, length, 0, NULL);
 
 put_write_and_out:
 	put_write_access(inode);
@@ -193,7 +194,7 @@ long do_sys_ftruncate(unsigned int fd, loff_t length, int small)
 	if (!error)
 		error = security_path_truncate(&f.file->f_path);
 	if (!error)
-		error = do_truncate(file_mnt_user_ns(f.file), dentry, length,
+		error = do_truncate(&f.file->f_path, length,
 				    ATTR_MTIME | ATTR_CTIME, f.file);
 	sb_end_write(inode->i_sb);
 out_putf:
@@ -582,8 +583,7 @@ retry_deleg:
 		goto out_unlock;
 	newattrs.ia_mode = (mode & S_IALLUGO) | (inode->i_mode & ~S_IALLUGO);
 	newattrs.ia_valid = ATTR_MODE | ATTR_CTIME;
-	error = notify_change(mnt_user_ns(path->mnt), path->dentry,
-			      &newattrs, &delegated_inode);
+	error = notify_change(path, &newattrs, &delegated_inode);
 out_unlock:
 	inode_unlock(inode);
 	if (delegated_inode) {
@@ -679,8 +679,7 @@ retry_deleg:
 	inode_lock(inode);
 	error = security_path_chown(path, uid, gid);
 	if (!error)
-		error = notify_change(mnt_userns, path->dentry, &newattrs,
-				      &delegated_inode);
+		error = notify_change(path, &newattrs, &delegated_inode);
 	inode_unlock(inode);
 	if (delegated_inode) {
 		error = break_deleg_wait(&delegated_inode);

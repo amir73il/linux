@@ -1913,10 +1913,10 @@ static int __remove_privs(struct user_namespace *mnt_userns,
 
 	newattrs.ia_valid = ATTR_FORCE | kill;
 	/*
-	 * Note we call this on write, so notify_change will not
+	 * Note we call this on write, so vfs_setattr() will not
 	 * encounter any conflicting delegations:
 	 */
-	return notify_change(mnt_userns, dentry, &newattrs, NULL);
+	return vfs_setattr(mnt_userns, dentry, &newattrs, NULL);
 }
 
 /*

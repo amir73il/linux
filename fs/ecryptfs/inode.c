@@ -876,11 +876,11 @@ int ecryptfs_truncate(struct dentry *dentry, loff_t new_length)
 
 	rc = truncate_upper(dentry, &ia, &lower_ia);
 	if (!rc && lower_ia.ia_valid & ATTR_SIZE) {
-		struct dentry *lower_dentry = ecryptfs_dentry_to_lower(dentry);
+		struct path *lower_path = ecryptfs_dentry_to_lower_path(dentry);
+		struct dentry *lower_dentry = lower_path->dentry;
 
 		inode_lock(d_inode(lower_dentry));
-		rc = notify_change(&init_user_ns, lower_dentry,
-				   &lower_ia, NULL);
+		rc = notify_change(lower_path, &lower_ia, NULL);
 		inode_unlock(d_inode(lower_dentry));
 	}
 	return rc;
@@ -910,6 +910,7 @@ static int ecryptfs_setattr(struct user_namespace *mnt_userns,
 			    struct dentry *dentry, struct iattr *ia)
 {
 	int rc = 0;
+	struct path *lower_path;
 	struct dentry *lower_dentry;
 	struct iattr lower_ia;
 	struct inode *inode;
@@ -924,7 +925,8 @@ static int ecryptfs_setattr(struct user_namespace *mnt_userns,
 	}
 	inode = d_inode(dentry);
 	lower_inode = ecryptfs_inode_to_lower(inode);
-	lower_dentry = ecryptfs_dentry_to_lower(dentry);
+	lower_path = ecryptfs_dentry_to_lower_path(dentry);
+	lower_dentry = lower_path->dentry;
 	mutex_lock(&crypt_stat->cs_mutex);
 	if (d_is_dir(dentry))
 		crypt_stat->flags &= ~(ECRYPTFS_ENCRYPTED);
@@ -987,7 +989,7 @@ static int ecryptfs_setattr(struct user_namespace *mnt_userns,
 		lower_ia.ia_valid &= ~ATTR_MODE;
 
 	inode_lock(d_inode(lower_dentry));
-	rc = notify_change(&init_user_ns, lower_dentry, &lower_ia, NULL);
+	rc = notify_change(lower_path, &lower_ia, NULL);
 	inode_unlock(d_inode(lower_dentry));
 out:
 	fsstack_copy_attr_all(inode, lower_inode);
