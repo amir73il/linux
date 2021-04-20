@@ -645,7 +645,7 @@ ecryptfs_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
 	rd.new_mnt_userns	= &init_user_ns;
 	rd.new_dir		= d_inode(lower_new_dir_dentry);
 	rd.new_dentry		= lower_new_dentry;
-	rc = vfs_rename(&rd);
+	rc = vfs_rename_notify(NULL, &rd);
 	if (rc)
 		goto out_lock;
 	if (target_inode)

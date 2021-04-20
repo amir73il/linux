@@ -38,6 +38,7 @@ int vfs_rmdir_notify(struct user_namespace *mnt_userns, struct path *path,
 		     struct dentry *dentry);
 int vfs_unlink_notify(struct user_namespace *mnt_userns, struct path *path,
 		      struct dentry *dentry, struct inode **delegated_inode);
+int vfs_rename_notify(struct vfsmount *mnt, struct renamedata *rd);
 
 /*
  * Notify this @dir inode about a change in a child directory entry.
@@ -159,7 +160,8 @@ static inline void fsnotify_link_count(struct inode *inode)
 /*
  * fsnotify_move - file old_name at old_dir was moved to new_name at new_dir
  */
-static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
+static inline void fsnotify_move(struct vfsmount *mnt,
+				 struct inode *old_dir, struct inode *new_dir,
 				 const struct qstr *old_name,
 				 struct inode *target, struct dentry *moved)
 {
@@ -176,31 +178,31 @@ static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
 		new_mask |= FS_ISDIR;
 	}
 
-	fsnotify_name(NULL, old_dir, old_mask, source, old_name, cookie);
-	fsnotify_name(NULL, new_dir, new_mask, source, &moved->d_name, cookie);
+	fsnotify_name(mnt, old_dir, old_mask, source, old_name, cookie);
+	fsnotify_name(mnt, new_dir, new_mask, source, &moved->d_name, cookie);
 
 	if (target)
 		fsnotify_link_count(target);
 
 	audit_inode_child(new_dir, moved, AUDIT_TYPE_CHILD_CREATE);
 
-	__fsnotify_inode(NULL, source, FS_MOVE_SELF);
+	__fsnotify_inode(mnt, source, FS_MOVE_SELF);
 }
 
 /*
  * fsnotify_rename - old_name was moved to or exchanged with new_name
  */
-static inline void fsnotify_rename(struct renamedata *rd,
+static inline void fsnotify_rename(struct vfsmount *mnt, struct renamedata *rd,
 				   const struct qstr *old_name)
 {
 	bool exchange = rd->flags & RENAME_EXCHANGE;
 	struct inode *target = !exchange ? rd->new_dentry->d_inode : NULL;
 
-	fsnotify_move(rd->old_dir, rd->new_dir, old_name, target,
+	fsnotify_move(mnt, rd->old_dir, rd->new_dir, old_name, target,
 		      rd->old_dentry);
 	if (exchange) {
-		fsnotify_move(rd->new_dir, rd->old_dir, &rd->old_dentry->d_name,
-			      NULL, rd->new_dentry);
+		fsnotify_move(mnt, rd->new_dir, rd->old_dir,
+			      &rd->old_dentry->d_name, NULL, rd->new_dentry);
 	}
 }
 

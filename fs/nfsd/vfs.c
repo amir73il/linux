@@ -1815,7 +1815,7 @@ retry:
 			.new_dir	= tdir,
 			.new_dentry	= ndentry,
 		};
-		host_err = vfs_rename(&rd);
+		host_err = vfs_rename_notify(fh_mnt(ffhp), &rd);
 		if (!host_err) {
 			host_err = commit_metadata(tfhp);
 			if (!host_err)

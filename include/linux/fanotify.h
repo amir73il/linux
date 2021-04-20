@@ -82,8 +82,7 @@ extern struct ctl_table fanotify_table[]; /* for sysctl */
 				 FAN_ATTRIB | FAN_MOVE_SELF | FAN_DELETE_SELF)
 
 /* Events that cannot be reported to a mount mark */
-#define FANOTIFY_NO_MNT_EVENTS	(FAN_MOVE | FAN_MOVE_SELF | \
-				 FAN_ATTRIB | FAN_DELETE_SELF)
+#define FANOTIFY_NO_MNT_EVENTS	(FAN_ATTRIB | FAN_DELETE_SELF)
 
 /* Events that user can request to be notified on */
 #define FANOTIFY_EVENTS		(FANOTIFY_PATH_EVENTS | \

@@ -4553,7 +4553,6 @@ int vfs_rename(struct renamedata *rd)
 	struct inode *target = new_dentry->d_inode;
 	bool new_is_dir = false;
 	unsigned max_links = new_dir->i_sb->s_max_links;
-	struct name_snapshot old_name;
 
 	if (source == target)
 		return 0;
@@ -4604,7 +4603,6 @@ int vfs_rename(struct renamedata *rd)
 	if (error)
 		return error;
 
-	take_dentry_name_snapshot(&old_name, old_dentry);
 	dget(new_dentry);
 	if (!is_dir || (flags & RENAME_EXCHANGE))
 		lock_two_nondirectories(source, target);
@@ -4658,13 +4656,25 @@ out:
 	else if (target)
 		inode_unlock(target);
 	dput(new_dentry);
-	if (!error)
-		fsnotify_rename(rd, &old_name.name);
-	release_dentry_name_snapshot(&old_name);
 
 	return error;
 }
 EXPORT_SYMBOL(vfs_rename);
+
+int vfs_rename_notify(struct vfsmount *mnt, struct renamedata *rd)
+{
+	struct name_snapshot old_name;
+	int error;
+
+	take_dentry_name_snapshot(&old_name, rd->old_dentry);
+	error = vfs_rename(rd);
+	if (!error)
+		fsnotify_rename(mnt, rd, &old_name.name);
+	release_dentry_name_snapshot(&old_name);
+
+	return error;
+}
+EXPORT_SYMBOL(vfs_rename_notify);
 
 int do_renameat2(int olddfd, struct filename *from, int newdfd,
 		 struct filename *to, unsigned int flags)
@@ -4782,7 +4792,7 @@ retry_deleg:
 	rd.new_mnt_userns  = mnt_user_ns(new_path.mnt);
 	rd.delegated_inode = &delegated_inode;
 	rd.flags	   = flags;
-	error = vfs_rename(&rd);
+	error = vfs_rename_notify(new_path.mnt, &rd);
 exit5:
 	dput(new_dentry);
 exit4:
