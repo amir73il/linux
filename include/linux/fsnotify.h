@@ -45,16 +45,22 @@ static inline void fsnotify_dirent(struct user_namespace *userns,
 	fsnotify_name(userns, dir, mask, d_inode(dentry), &dentry->d_name, 0);
 }
 
-static inline void fsnotify_inode(struct inode *inode, __u32 mask)
+static inline void fsnotify_ns_inode(struct user_namespace *userns,
+				     struct inode *inode, __u32 mask)
 {
 	if (S_ISDIR(inode->i_mode))
 		mask |= FS_ISDIR;
 
 	__fsnotify(mask, &(struct fsnotify_event_info) {
 			.data = inode, .data_type = FSNOTIFY_EVENT_INODE,
-			.fs_userns = inode->i_sb->s_user_ns,
+			.fs_userns = userns,
 			.inode = inode,
 			});
+}
+
+static inline void fsnotify_inode(struct inode *inode, __u32 mask)
+{
+	fsnotify_ns_inode(inode->i_sb->s_user_ns, inode, mask);
 }
 
 /* Notify this dentry's parent about a child's events. */
@@ -171,7 +177,7 @@ static inline void fsnotify_ns_move(struct renamedata *rd,
 
 	if (overwrite)
 		fsnotify_link_count(target);
-	fsnotify_inode(source, FS_MOVE_SELF);
+	fsnotify_ns_inode(rd->new_mnt_userns, source, FS_MOVE_SELF);
 	audit_inode_child(rd->new_dir, moved, AUDIT_TYPE_CHILD_CREATE);
 }
 
