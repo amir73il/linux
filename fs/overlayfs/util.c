@@ -10,6 +10,7 @@
 #include <linux/cred.h>
 #include <linux/xattr.h>
 #include <linux/exportfs.h>
+#include <linux/fileattr.h>
 #include <linux/uuid.h>
 #include <linux/namei.h>
 #include <linux/ratelimit.h>
@@ -585,6 +586,7 @@ bool ovl_check_dir_xattr(struct super_block *sb, struct dentry *dentry,
 #define OVL_XATTR_NLINK_POSTFIX		"nlink"
 #define OVL_XATTR_UPPER_POSTFIX		"upper"
 #define OVL_XATTR_METACOPY_POSTFIX	"metacopy"
+#define OVL_XATTR_XFLAGS_POSTFIX	"xflags"
 
 #define OVL_XATTR_TAB_ENTRY(x) \
 	[x] = { [false] = OVL_XATTR_TRUSTED_PREFIX x ## _POSTFIX, \
@@ -598,6 +600,7 @@ const char *const ovl_xattr_table[][2] = {
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_NLINK),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_UPPER),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_METACOPY),
+	OVL_XATTR_TAB_ENTRY(OVL_XATTR_XFLAGS),
 };
 
 int ovl_check_setxattr(struct ovl_fs *ofs, struct dentry *upperdentry,
@@ -637,6 +640,174 @@ int ovl_set_impure(struct dentry *dentry, struct dentry *upperdentry)
 		ovl_set_flag(OVL_IMPURE, d_inode(dentry));
 
 	return err;
+}
+
+
+/*
+ * Overlayfs stores immutable/append-only attributes in overlay.xflags xattr.
+ * If upper inode does have those fileattr flags set (i.e. from old kernel),
+ * overlayfs does not clear them on fileattr_get(), but it will clear them on
+ * fileattr_set().
+ */
+#define OVL_XFLAG(c, x) \
+	{ c, S_ ## x, FS_ ## x ## _FL, FS_XFLAG_ ## x, STATX_ATTR_ ## x }
+
+struct ovl_xflag {
+	char code;
+	u32 i_flag;
+	u32 fs_flag;
+	u32 fsx_flag;
+	u64 statx_attr;
+} const ovl_xflags[] = {
+	OVL_XFLAG('a', APPEND),
+	OVL_XFLAG('i', IMMUTABLE),
+};
+
+#define OVL_XFLAGS_NUM ARRAY_SIZE(ovl_xflags)
+#define OVL_XFLAGS_MAX 32 /* Reserved for future xflags */
+
+static const struct ovl_xflag *ovl_xflag(char code)
+{
+	const struct ovl_xflag *xflag = ovl_xflags;
+	int i;
+
+	for (i = 0; i < OVL_XFLAGS_NUM; i++, xflag++) {
+		if (xflag->code == code)
+			return xflag;
+	}
+
+	return NULL;
+}
+
+static int ovl_xflags_to_buf(struct inode *inode, char *buf, int len,
+			     const struct fileattr *fa)
+{
+	const struct ovl_xflag *xflag = ovl_xflags;
+	u32 iflags = 0;
+	int i, n = 0;
+
+	for (i = 0; i < OVL_XFLAGS_NUM; i++, xflag++) {
+		if (fa->flags & xflag->fs_flag) {
+			buf[n++] = xflag->code;
+			iflags |= xflag->i_flag;
+		}
+	}
+
+	inode_set_flags(inode, iflags, OVL_XFLAGS_I_FLAGS_MASK);
+
+	return n;
+}
+
+static bool ovl_xflags_from_buf(struct inode *inode, const char *buf, int len)
+{
+	const struct ovl_xflag *xflag = ovl_xflags;
+	u32 iflags = inode->i_flags & OVL_XFLAGS_I_FLAGS_MASK;
+	int n;
+
+	/*
+	 * We cannot clear flags that are set on real inode.
+	 * We can only set flags that are not set in inode.
+	 */
+	for (n = 0; n < len && buf[n]; n++) {
+		xflag = ovl_xflag(buf[n]);
+		if (!xflag)
+			break;
+
+		iflags |= xflag->i_flag;
+	}
+
+	inode_set_flags(inode, iflags, OVL_XFLAGS_I_FLAGS_MASK);
+
+	return buf[n] == 0;
+}
+
+/* Initialize inode flags from xflags xattr and upper inode flags */
+bool ovl_check_xflags(struct inode *inode, struct dentry *upper)
+{
+	struct ovl_fs *ofs = OVL_FS(inode->i_sb);
+	char buf[OVL_XFLAGS_MAX+1];
+	int res;
+
+	res = ovl_do_getxattr(ofs, upper, OVL_XATTR_XFLAGS, buf,
+			      OVL_XFLAGS_MAX);
+	if (res < 0)
+		return false;
+
+	buf[res] = 0;
+	if (res == 0 || !ovl_xflags_from_buf(inode, buf, res)) {
+		pr_warn_ratelimited("incompatible overlay.xflags format (%pd2, len=%d)\n",
+				    upper, res);
+	}
+
+	ovl_set_flag(OVL_XFLAGS, inode);
+	ovl_merge_xflags(d_inode(upper), inode);
+
+	return true;
+}
+
+/* Set inode flags and xflags xattr from fileattr */
+int ovl_set_xflags(struct inode *inode, struct dentry *upper,
+		   struct fileattr *fa)
+{
+	struct ovl_fs *ofs = OVL_FS(inode->i_sb);
+	char buf[OVL_XFLAGS_NUM];
+	int len, err = 0;
+
+	BUILD_BUG_ON(OVL_XFLAGS_NUM >= OVL_XFLAGS_MAX);
+	len = ovl_xflags_to_buf(inode, buf, OVL_XFLAGS_NUM, fa);
+
+	/*
+	 * Do not fail when upper doesn't support xattrs, but also do not
+	 * mask out the xattr xflags from real fileattr to continue
+	 * supporting fileattr_set() on fs without xattr support.
+	 * Remove xattr if it exist and all flags are cleared.
+	 */
+	if (len) {
+		err = ovl_check_setxattr(ofs, upper, OVL_XATTR_XFLAGS,
+					 buf, len, 0);
+	} else if (ovl_test_flag(OVL_XFLAGS, inode)) {
+		err = ovl_do_removexattr(ofs, upper, OVL_XATTR_XFLAGS);
+	}
+	if (err || ofs->noxattr)
+		return err;
+
+	/* Mask out the fileattr flags that should not be set in upper inode */
+	fa->flags &= ~OVL_XFLAGS_FS_FLAGS_MASK;
+	fa->fsx_xflags &= ~OVL_XFLAGS_FSX_FLAGS_MASK;
+
+	if (len)
+		ovl_set_flag(OVL_XFLAGS, inode);
+	else
+		ovl_clear_flag(OVL_XFLAGS, inode);
+
+	return 0;
+}
+
+/* Convert inode flags to visible fileattr/statx flags */
+void ovl_fill_xflags(struct inode *inode, struct kstat *stat,
+		     struct fileattr *fa)
+{
+	const struct ovl_xflag *xflag = ovl_xflags;
+	int i;
+
+	BUILD_BUG_ON(OVL_XFLAGS_FS_FLAGS_MASK & ~FS_COMMON_FL);
+	BUILD_BUG_ON(OVL_XFLAGS_FSX_FLAGS_MASK & ~FS_XFLAG_COMMON);
+
+	for (i = 0; i < OVL_XFLAGS_NUM; i++, xflag++) {
+		if (stat)
+			stat->attributes_mask |= xflag->statx_attr;
+
+		if (!(inode->i_flags & xflag->i_flag))
+			continue;
+
+		if (stat)
+			stat->attributes |= xflag->statx_attr;
+
+		if (fa) {
+			fa->flags |= xflag->fs_flag;
+			fa->fsx_xflags |= xflag->fsx_flag;
+		}
+	}
 }
 
 /**
