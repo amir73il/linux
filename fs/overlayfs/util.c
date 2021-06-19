@@ -10,6 +10,7 @@
 #include <linux/cred.h>
 #include <linux/xattr.h>
 #include <linux/exportfs.h>
+#include <linux/fileattr.h>
 #include <linux/uuid.h>
 #include <linux/namei.h>
 #include <linux/ratelimit.h>
@@ -585,6 +586,7 @@ bool ovl_check_dir_xattr(struct super_block *sb, struct dentry *dentry,
 #define OVL_XATTR_NLINK_POSTFIX		"nlink"
 #define OVL_XATTR_UPPER_POSTFIX		"upper"
 #define OVL_XATTR_METACOPY_POSTFIX	"metacopy"
+#define OVL_XATTR_PROTECTED_POSTFIX	"protected"
 
 #define OVL_XATTR_TAB_ENTRY(x) \
 	[x] = { [false] = OVL_XATTR_TRUSTED_PREFIX x ## _POSTFIX, \
@@ -598,6 +600,7 @@ const char *const ovl_xattr_table[][2] = {
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_NLINK),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_UPPER),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_METACOPY),
+	OVL_XATTR_TAB_ENTRY(OVL_XATTR_PROTECTED),
 };
 
 int ovl_check_setxattr(struct ovl_fs *ofs, struct dentry *upperdentry,
@@ -637,6 +640,118 @@ int ovl_set_impure(struct dentry *dentry, struct dentry *upperdentry)
 		ovl_set_flag(OVL_IMPURE, d_inode(dentry));
 
 	return err;
+}
+
+
+/*
+ * Initialize inode flags from overlay.protected xattr and upper inode flags.
+ * If upper inode has those fileattr flags set (i.e. from old kernel), we do not
+ * clear them on ovl_get_inode(), but we will clear them on next fileattr_set().
+ */
+static bool ovl_prot_flags_from_buf(struct inode *inode, const char *buf,
+				    int len)
+{
+	u32 iflags = inode->i_flags & OVL_PROT_I_FLAGS_MASK;
+	int n;
+
+	/*
+	 * We cannot clear flags that are set on real inode.
+	 * We can only set flags that are not set in inode.
+	 */
+	for (n = 0; n < len && buf[n]; n++) {
+		if (buf[n] == 'a')
+			iflags |= S_APPEND;
+		else if (buf[n] == 'i')
+			iflags |= S_IMMUTABLE;
+		else
+			break;
+	}
+
+	inode_set_flags(inode, iflags, OVL_PROT_I_FLAGS_MASK);
+
+	return buf[n] == 0;
+}
+
+#define OVL_PROTECTED_MAX 32 /* Reserved for future flags */
+
+bool ovl_check_protected(struct inode *inode, struct dentry *upper)
+{
+	struct ovl_fs *ofs = OVL_FS(inode->i_sb);
+	char buf[OVL_PROTECTED_MAX+1];
+	int res;
+
+	res = ovl_do_getxattr(ofs, upper, OVL_XATTR_PROTECTED, buf,
+			      OVL_PROTECTED_MAX);
+	if (res < 0)
+		return false;
+
+	buf[res] = 0;
+	if (res == 0 || !ovl_prot_flags_from_buf(inode, buf, res)) {
+		pr_warn_ratelimited("incompatible overlay.protected format (%pd2, len=%d)\n",
+				    upper, res);
+	}
+
+	ovl_set_flag(OVL_PROTECTED, inode);
+	ovl_merge_prot_flags(d_inode(upper), inode);
+
+	return true;
+}
+
+/* Set inode flags and overlay.protected xattr from fileattr */
+static int ovl_prot_flags_to_buf(struct inode *inode, char *buf,
+				 const struct fileattr *fa)
+{
+	u32 iflags = 0;
+	int n = 0;
+
+	if (fa->flags & FS_APPEND_FL) {
+		buf[n++] = 'a';
+		iflags |= S_APPEND;
+	}
+	if (fa->flags & FS_IMMUTABLE_FL) {
+		buf[n++] = 'i';
+		iflags |= S_IMMUTABLE;
+	}
+
+	inode_set_flags(inode, iflags, OVL_PROT_I_FLAGS_MASK);
+
+	return n;
+}
+
+int ovl_set_protected(struct inode *inode, struct dentry *upper,
+		      struct fileattr *fa)
+{
+	struct ovl_fs *ofs = OVL_FS(inode->i_sb);
+	char buf[OVL_PROTECTED_MAX];
+	int len, err = 0;
+
+	BUILD_BUG_ON(HWEIGHT32(OVL_PROT_FS_FLAGS_MASK) > OVL_PROTECTED_MAX);
+	len = ovl_prot_flags_to_buf(inode, buf, fa);
+
+	/*
+	 * Do not allow to set protection flags when upper doesn't support
+	 * xattrs, because we do not set those fileattr flags on upper inode.
+	 * Remove xattr if it exist and all protection flags are cleared.
+	 */
+	if (len) {
+		err = ovl_check_setxattr(ofs, upper, OVL_XATTR_PROTECTED,
+					 buf, len, -EPERM);
+	} else if (ovl_test_flag(OVL_PROTECTED, inode)) {
+		err = ovl_do_removexattr(ofs, upper, OVL_XATTR_PROTECTED);
+	}
+	if (err)
+		return err;
+
+	/* Mask out the fileattr flags that should not be set in upper inode */
+	fa->flags &= ~OVL_PROT_FS_FLAGS_MASK;
+	fa->fsx_xflags &= ~OVL_PROT_FSX_FLAGS_MASK;
+
+	if (len)
+		ovl_set_flag(OVL_PROTECTED, inode);
+	else
+		ovl_clear_flag(OVL_PROTECTED, inode);
+
+	return 0;
 }
 
 /**

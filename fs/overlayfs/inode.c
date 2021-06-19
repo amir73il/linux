@@ -162,7 +162,8 @@ int ovl_getattr(struct user_namespace *mnt_userns, const struct path *path,
 	enum ovl_path_type type;
 	struct path realpath;
 	const struct cred *old_cred;
-	bool is_dir = S_ISDIR(dentry->d_inode->i_mode);
+	struct inode *inode = d_inode(dentry);
+	bool is_dir = S_ISDIR(inode->i_mode);
 	int fsid = 0;
 	int err;
 	bool metacopy_blocks = false;
@@ -174,6 +175,10 @@ int ovl_getattr(struct user_namespace *mnt_userns, const struct path *path,
 	err = vfs_getattr(&realpath, stat, request_mask, flags);
 	if (err)
 		goto out;
+
+	/* Report the effective immutable/append-only STATX flags */
+	if (ovl_test_flag(OVL_PROTECTED, inode))
+		generic_fill_statx_attr(inode, stat);
 
 	/*
 	 * For non-dir or same fs, we use st_ino of the copy up origin.
@@ -556,13 +561,38 @@ int ovl_fileattr_set(struct user_namespace *mnt_userns,
 		ovl_path_real(dentry, &upperpath);
 
 		old_cred = ovl_override_creds(inode->i_sb);
-		err = ovl_real_fileattr(&upperpath, fa, true);
+		/*
+		 * Store immutable/append-only flags in xattr and clear them
+		 * in upper fileattr (in case they were set by older kernel)
+		 * so children of "ovl-immutable" directories lower aliases of
+		 * "ovl-immutable" hardlinks could be copied up.
+		 * Clear xattr when flags are cleared.
+		 */
+		err = ovl_set_protected(inode, upperpath.dentry, fa);
+		if (!err)
+			err = ovl_real_fileattr(&upperpath, fa, true);
 		revert_creds(old_cred);
-		ovl_copyflags(ovl_inode_real(inode), inode);
+		ovl_merge_prot_flags(ovl_inode_real(inode), inode);
 	}
 	ovl_drop_write(dentry);
 out:
 	return err;
+}
+
+/* Convert inode protection flags to fileattr flags */
+static void ovl_fileattr_prot_flags(struct inode *inode, struct fileattr *fa)
+{
+	BUILD_BUG_ON(OVL_PROT_FS_FLAGS_MASK & ~FS_COMMON_FL);
+	BUILD_BUG_ON(OVL_PROT_FSX_FLAGS_MASK & ~FS_XFLAG_COMMON);
+
+	if (inode->i_flags & S_APPEND) {
+		fa->flags |= FS_APPEND_FL;
+		fa->fsx_xflags |= FS_XFLAG_APPEND;
+	}
+	if (inode->i_flags & S_IMMUTABLE) {
+		fa->flags |= FS_IMMUTABLE_FL;
+		fa->fsx_xflags |= FS_XFLAG_IMMUTABLE;
+	}
 }
 
 int ovl_fileattr_get(struct dentry *dentry, struct fileattr *fa)
@@ -576,6 +606,8 @@ int ovl_fileattr_get(struct dentry *dentry, struct fileattr *fa)
 
 	old_cred = ovl_override_creds(inode->i_sb);
 	err = ovl_real_fileattr(&realpath, fa, false);
+	if (!err && ovl_test_flag(OVL_PROTECTED, inode))
+		ovl_fileattr_prot_flags(inode, fa);
 	revert_creds(old_cred);
 
 	return err;
@@ -1127,6 +1159,10 @@ struct inode *ovl_get_inode(struct super_block *sb,
 			ovl_set_flag(OVL_WHITEOUTS, inode);
 		}
 	}
+
+	/* Check for immutable/append-only inode flags in xattr */
+	if (upperdentry)
+		ovl_check_protected(inode, upperdentry);
 
 	if (inode->i_state & I_NEW)
 		unlock_new_inode(inode);

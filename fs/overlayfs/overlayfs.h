@@ -34,6 +34,7 @@ enum ovl_xattr {
 	OVL_XATTR_NLINK,
 	OVL_XATTR_UPPER,
 	OVL_XATTR_METACOPY,
+	OVL_XATTR_PROTECTED,
 };
 
 enum ovl_inode_flag {
@@ -45,6 +46,8 @@ enum ovl_inode_flag {
 	OVL_UPPERDATA,
 	/* Inode number will remain constant over copy up. */
 	OVL_CONST_INO,
+	/* Has overlay.protected xattr */
+	OVL_PROTECTED,
 };
 
 enum ovl_entry_flag {
@@ -532,20 +535,41 @@ static inline void ovl_copyattr(struct inode *from, struct inode *to)
 
 /* vfs inode flags copied from real to ovl inode */
 #define OVL_COPY_I_FLAGS_MASK	(S_SYNC | S_NOATIME | S_APPEND | S_IMMUTABLE)
+/* vfs inode flags read from overlay.protected xattr to ovl inode */
+#define OVL_PROT_I_FLAGS_MASK	(S_APPEND | S_IMMUTABLE)
 
 /*
  * fileattr flags copied from lower to upper inode on copy up.
- * We cannot copy immutable/append-only flags, because that would prevevnt
- * linking temp inode to upper dir.
+ * We cannot copy up immutable/append-only flags, because that would prevevnt
+ * linking temp inode to upper dir, so we store them in xattr instead.
  */
 #define OVL_COPY_FS_FLAGS_MASK	(FS_SYNC_FL | FS_NOATIME_FL)
 #define OVL_COPY_FSX_FLAGS_MASK	(FS_XFLAG_SYNC | FS_XFLAG_NOATIME)
+#define OVL_PROT_FS_FLAGS_MASK  (FS_APPEND_FL | FS_IMMUTABLE_FL)
+#define OVL_PROT_FSX_FLAGS_MASK (FS_XFLAG_APPEND | FS_XFLAG_IMMUTABLE)
+
+bool ovl_check_protected(struct inode *inode, struct dentry *upper);
+int ovl_set_protected(struct inode *inode, struct dentry *upper,
+		      struct fileattr *fa);
 
 static inline void ovl_copyflags(struct inode *from, struct inode *to)
 {
 	unsigned int mask = OVL_COPY_I_FLAGS_MASK;
 
 	inode_set_flags(to, from->i_flags & mask, mask);
+}
+
+/* Merge real inode flags with inode flags read from overlay.protected xattr */
+static inline void ovl_merge_prot_flags(struct inode *real, struct inode *inode)
+{
+	unsigned int flags = real->i_flags & OVL_COPY_I_FLAGS_MASK;
+
+	BUILD_BUG_ON(OVL_PROT_I_FLAGS_MASK & ~OVL_COPY_I_FLAGS_MASK);
+
+	if (ovl_test_flag(OVL_PROTECTED, inode))
+		flags |= inode->i_flags & OVL_PROT_I_FLAGS_MASK;
+
+	inode_set_flags(inode, flags, OVL_COPY_I_FLAGS_MASK);
 }
 
 /* dir.c */
