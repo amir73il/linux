@@ -253,21 +253,22 @@ out:
  * been included within the event mask, but have not been explicitly
  * requested by the user, will not be present in the returned mask.
  */
-static u32 fanotify_group_event_mask(struct fsnotify_group *group,
-				     struct fsnotify_iter_info *iter_info,
-				     u32 event_mask, const void *data,
-				     int data_type, struct inode *dir)
+static u32 fanotify_group_event_mask(
+				struct fsnotify_group *group, u32 event_mask,
+				const struct fsnotify_event_info *event_info,
+				struct fsnotify_iter_info *iter_info)
 {
 	__u32 marks_mask = 0, marks_ignored_mask = 0;
 	__u32 test_mask, user_mask = FANOTIFY_OUTGOING_EVENTS |
 				     FANOTIFY_EVENT_FLAGS;
-	const struct path *path = fsnotify_data_path(data, data_type);
+	const struct path *path = fsnotify_event_info_path(event_info);
 	unsigned int fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	struct fsnotify_mark *mark;
 	int type;
 
 	pr_debug("%s: report_mask=%x mask=%x data=%p data_type=%d\n",
-		 __func__, iter_info->report_mask, event_mask, data, data_type);
+		 __func__, iter_info->report_mask, event_mask,
+		 event_info->data, event_info->data_type);
 
 	if (!fid_mode) {
 		/* Do we have path to open a file descriptor? */
@@ -278,7 +279,7 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 			return 0;
 	} else if (!(fid_mode & FAN_REPORT_FID)) {
 		/* Do we have a directory inode to report? */
-		if (!dir && !(event_mask & FS_ISDIR))
+		if (!event_info->dir && !(event_mask & FS_ISDIR))
 			return 0;
 	}
 
@@ -427,13 +428,13 @@ out_err:
  * FS_ATTRIB reports the child inode even if reported on a watched parent.
  * FS_CREATE reports the modified dir inode and not the created inode.
  */
-static struct inode *fanotify_fid_inode(u32 event_mask, const void *data,
-					int data_type, struct inode *dir)
+static struct inode *fanotify_fid_inode(u32 event_mask,
+				const struct fsnotify_event_info *event_info)
 {
 	if (event_mask & ALL_FSNOTIFY_DIRENT_EVENTS)
-		return dir;
+		return event_info->dir;
 
-	return fsnotify_data_inode(data, data_type);
+	return fsnotify_event_info_inode(event_info);
 }
 
 /*
@@ -444,18 +445,18 @@ static struct inode *fanotify_fid_inode(u32 event_mask, const void *data,
  * reported to parent.
  * Otherwise, do not report dir fid.
  */
-static struct inode *fanotify_dfid_inode(u32 event_mask, const void *data,
-					 int data_type, struct inode *dir)
+static struct inode *fanotify_dfid_inode(u32 event_mask,
+				const struct fsnotify_event_info *event_info)
 {
-	struct inode *inode = fsnotify_data_inode(data, data_type);
+	struct inode *inode = fsnotify_event_info_inode(event_info);
 
 	if (event_mask & ALL_FSNOTIFY_DIRENT_EVENTS)
-		return dir;
+		return event_info->dir;
 
 	if (S_ISDIR(inode->i_mode))
 		return inode;
 
-	return dir;
+	return event_info->dir;
 }
 
 static struct fanotify_event *fanotify_alloc_path_event(const struct path *path,
@@ -563,17 +564,17 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *id,
 	return &fne->fae;
 }
 
-static struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
-						   u32 mask, const void *data,
-						   int data_type, struct inode *dir,
-						   const struct qstr *file_name,
-						   __kernel_fsid_t *fsid)
+static struct fanotify_event *fanotify_alloc_event(
+				struct fsnotify_group *group, u32 mask,
+				const struct fsnotify_event_info *event_info,
+				__kernel_fsid_t *fsid)
 {
 	struct fanotify_event *event = NULL;
 	gfp_t gfp = GFP_KERNEL_ACCOUNT;
-	struct inode *id = fanotify_fid_inode(mask, data, data_type, dir);
-	struct inode *dirid = fanotify_dfid_inode(mask, data, data_type, dir);
-	const struct path *path = fsnotify_data_path(data, data_type);
+	struct inode *id = fanotify_fid_inode(mask, event_info);
+	struct inode *dirid = fanotify_dfid_inode(mask, event_info);
+	const struct path *path = fsnotify_event_info_path(event_info);
+	const struct qstr *file_name = event_info->name;
 	unsigned int fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	struct mem_cgroup *old_memcg;
 	struct inode *child = NULL;
@@ -709,9 +710,7 @@ static void fanotify_insert_event(struct fsnotify_group *group,
 }
 
 static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
-				 const void *data, int data_type,
-				 struct inode *dir,
-				 const struct qstr *file_name, u32 cookie,
+				 const struct fsnotify_event_info *event_info,
 				 struct fsnotify_iter_info *iter_info)
 {
 	int ret = 0;
@@ -741,8 +740,7 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 
 	BUILD_BUG_ON(HWEIGHT32(ALL_FANOTIFY_EVENT_BITS) != 19);
 
-	mask = fanotify_group_event_mask(group, iter_info, mask, data,
-					 data_type, dir);
+	mask = fanotify_group_event_mask(group, mask, event_info, iter_info);
 	if (!mask)
 		return 0;
 
@@ -764,8 +762,7 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 			return 0;
 	}
 
-	event = fanotify_alloc_event(group, mask, data, data_type, dir,
-				     file_name, &fsid);
+	event = fanotify_alloc_event(group, mask, event_info, &fsid);
 	ret = -ENOMEM;
 	if (unlikely(!event)) {
 		/*
