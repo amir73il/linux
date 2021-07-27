@@ -55,9 +55,19 @@
 #define FAN_REPORT_FID		0x00000200	/* Report unique file id */
 #define FAN_REPORT_DIR_FID	0x00000400	/* Report unique directory id */
 #define FAN_REPORT_NAME		0x00000800	/* Report events with name */
+#define FAN_REPORT_FID_OF	0x00001000	/* May report multi fids */
 
 /* Convenience macro - FAN_REPORT_NAME requires FAN_REPORT_DIR_FID */
 #define FAN_REPORT_DFID_NAME	(FAN_REPORT_DIR_FID | FAN_REPORT_NAME)
+/*
+ * FAN_REPORT_FID_OF is about reporting multi fids in an unambigious manner.
+ * It is not very usefull with only FAN_REPORT_DIR_FID or FAN_REPORT_FID,
+ * so we only allow it with both flags set and we use it as an indication
+ * to report both dir and child fids on dirent events, where previously,
+ * only dir fid was reported.
+ */
+#define FAN_REPORT_ALL_FIDS	(FAN_REPORT_DIR_FID | FAN_REPORT_FID | \
+				 FAN_REPORT_FID_OF)
 
 /* Deprecated - do not use this in programs and do not add new flags here! */
 #define FAN_ALL_INIT_FLAGS	(FAN_CLOEXEC | FAN_NONBLOCK | \
@@ -120,14 +130,18 @@ struct fanotify_event_metadata {
 	__s32 pid;
 };
 
+/* Classes of info records */
 #define FAN_EVENT_INFO_TYPE_FID		1
 #define FAN_EVENT_INFO_TYPE_DFID_NAME	2
 #define FAN_EVENT_INFO_TYPE_DFID	3
 
-/* Variable length info record following event metadata */
+/* Sub-classes common to all three fid info types */
+#define FAN_EVENT_INFO_FID_OF_SELF	1
+#define FAN_EVENT_INFO_FID_OF_PARENT	2
+
 struct fanotify_event_info_header {
 	__u8 info_type;
-	__u8 pad;
+	__u8 sub_type;
 	__u16 len;
 };
 

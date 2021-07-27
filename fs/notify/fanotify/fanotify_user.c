@@ -306,8 +306,8 @@ static int process_access_response(struct fsnotify_group *group,
 }
 
 static int copy_fid_info_to_user(__kernel_fsid_t *fsid, struct fanotify_fh *fh,
-				 int info_type, const char *name,
-				 size_t name_len,
+				 int fid_mode, int info_type, int info_of,
+				 const char *name, size_t name_len,
 				 char __user *buf, size_t count)
 {
 	struct fanotify_event_info_fid info = { };
@@ -345,6 +345,8 @@ static int copy_fid_info_to_user(__kernel_fsid_t *fsid, struct fanotify_fh *fh,
 	}
 
 	info.hdr.info_type = info_type;
+	if (fid_mode & FAN_REPORT_FID_OF)
+		info.hdr.sub_type = info_of;
 	info.hdr.len = len;
 	info.fsid = *fsid;
 	if (copy_to_user(buf, &info, sizeof(info)))
@@ -417,7 +419,8 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 					     FAN_EVENT_INFO_TYPE_DFID;
 		ret = copy_fid_info_to_user(fanotify_event_fsid(event),
 					    fanotify_info_dir_fh(info),
-					    info_type,
+					    fid_mode, info_type,
+					    FAN_EVENT_INFO_FID_OF_PARENT,
 					    fanotify_info_name(info),
 					    info->name_len, buf, count);
 		if (ret < 0)
@@ -436,6 +439,8 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 			/*
 			 * With only group flag FAN_REPORT_FID only type FID is
 			 * reported. Second info record type is always FID.
+			 * XXX: consider reporting DFID type for second record
+			 * on subdir with FAN_REPORT_FID_OF.
 			 */
 			info_type = FAN_EVENT_INFO_TYPE_FID;
 		} else if ((fid_mode & FAN_REPORT_NAME) &&
@@ -468,8 +473,9 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 
 		ret = copy_fid_info_to_user(fanotify_event_fsid(event),
 					    fanotify_event_object_fh(event),
-					    info_type, dot, dot_len,
-					    buf, count);
+					    fid_mode, info_type,
+					    FAN_EVENT_INFO_FID_OF_SELF,
+					    dot, dot_len, buf, count);
 		if (ret < 0)
 			return ret;
 
@@ -1125,6 +1131,15 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if ((fid_mode & FAN_REPORT_NAME) && !(fid_mode & FAN_REPORT_DIR_FID))
 		return -EINVAL;
 
+	/*
+	 * FAN_REPORT_FID_OF requires FAN_REPORT_DIR_FID and FAN_REPORT_FID
+	 * and is use as an indication to report both dir and child fid on
+	 * dirent events.
+	 */
+	if ((fid_mode & FAN_REPORT_FID_OF) &&
+	    (fid_mode & FAN_REPORT_ALL_FIDS) != FAN_REPORT_ALL_FIDS)
+		return -EINVAL;
+
 	f_flags = O_RDWR | FMODE_NONOTIFY;
 	if (flags & FAN_CLOEXEC)
 		f_flags |= O_CLOEXEC;
@@ -1504,7 +1519,7 @@ static int __init fanotify_user_setup(void)
 				     FANOTIFY_DEFAULT_MAX_USER_MARKS);
 
 	BUILD_BUG_ON(FANOTIFY_INIT_FLAGS & FANOTIFY_INTERNAL_GROUP_FLAGS);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 10);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 11);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 9);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
