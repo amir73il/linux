@@ -47,27 +47,33 @@ struct fanotify_fh {
 #define FANOTIFY_FH_DWORDS_BITS	(ilog2(FANOTIFY_MAX_FH_DWORDS) + 1)
 #define FANOTIFY_NAME_LEN_BITS	(ilog2(NAME_MAX) + 1)
 #define FANOTIFY_INFO_PAD_BITS \
-	(32 - 2*FANOTIFY_FH_DWORDS_BITS - FANOTIFY_NAME_LEN_BITS)
+	(32 - 3*FANOTIFY_FH_DWORDS_BITS - 2*FANOTIFY_NAME_LEN_BITS)
 
 /* Variable size struct for dir file handle + child file handle + name */
 struct fanotify_info {
 	/* size of dir_fh/file_fh in dwords including fanotify_fh hdr size */
 	unsigned int dir_fh_dwords : FANOTIFY_FH_DWORDS_BITS;
+	unsigned int dir2_fh_dwords : FANOTIFY_FH_DWORDS_BITS;
 	unsigned int file_fh_dwords : FANOTIFY_FH_DWORDS_BITS;
 	unsigned int name_len : FANOTIFY_NAME_LEN_BITS;
+	unsigned int name2_len : FANOTIFY_NAME_LEN_BITS;
 	unsigned int pad : FANOTIFY_INFO_PAD_BITS;
 	unsigned char buf[];
 	/*
 	 * (struct fanotify_fh) dir_fh starts at buf[0]
-	 * (optional) file_fh starts at buf[dir_fh_dwords<<2]
-	 * name starts at buf[dir_fh_dwords<<2 + file_fh_dwords<<2]
+	 * (optional) dir2_fh starts at buf[dir_fh_dwords<<2]
+	 * (optional) file_fh starts at buf[dir_fh_dwords<<2+dir2_fh_dwords<<2]
+	 * ...
 	 */
 #define FANOTIFY_DIR_FH_SIZE(info)	((info)->dir_fh_dwords << 2)
+#define FANOTIFY_DIR2_FH_SIZE(info)	((info)->dir2_fh_dwords << 2)
 #define FANOTIFY_FILE_FH_SIZE(info)	((info)->file_fh_dwords << 2)
 
 #define FANOTIFY_DIR_FH_OFFSET(info)	0
-#define FANOTIFY_FILE_FH_OFFSET(info) \
+#define FANOTIFY_DIR2_FH_OFFSET(info) \
 	(FANOTIFY_DIR_FH_OFFSET(info) + FANOTIFY_DIR_FH_SIZE(info))
+#define FANOTIFY_FILE_FH_OFFSET(info) \
+	(FANOTIFY_DIR2_FH_OFFSET(info) + FANOTIFY_DIR2_FH_SIZE(info))
 #define FANOTIFY_NAME_OFFSET(info) \
 	(FANOTIFY_FILE_FH_OFFSET(info) + FANOTIFY_FILE_FH_SIZE(info))
 } __aligned(4);
@@ -111,6 +117,20 @@ static inline struct fanotify_fh *fanotify_info_dir_fh(struct fanotify_info *inf
 	return (struct fanotify_fh *)info->buf;
 }
 
+static inline int fanotify_info_dir2_fh_len(struct fanotify_info *info)
+{
+	if (!info->dir2_fh_dwords ||
+	    WARN_ON_ONCE(info->dir2_fh_dwords < FANOTIFY_FH_HDR_DWORDS))
+		return 0;
+
+	return (info->dir2_fh_dwords - FANOTIFY_FH_HDR_DWORDS) << 2;
+}
+
+static inline struct fanotify_fh *fanotify_info_dir2_fh(struct fanotify_info *info)
+{
+	return (struct fanotify_fh *)(info->buf + FANOTIFY_DIR2_FH_OFFSET(info));
+}
+
 static inline int fanotify_info_file_fh_len(struct fanotify_info *info)
 {
 	if (!info->file_fh_dwords ||
@@ -134,6 +154,14 @@ static inline char *fanotify_info_name(struct fanotify_info *info)
 	return info->buf + FANOTIFY_NAME_OFFSET(info);
 }
 
+static inline char *fanotify_info_name2(struct fanotify_info *info)
+{
+	if (!info->name_len || !info->name2_len)
+		return NULL;
+
+	return info->buf + FANOTIFY_NAME_OFFSET(info) + info->name_len + 1;
+}
+
 static inline void fanotify_info_init(struct fanotify_info *info)
 {
 	info->dir_fh_dwords = 0;
@@ -149,6 +177,17 @@ static inline void fanotify_info_copy_name(struct fanotify_info *info,
 
 	info->name_len = name->len;
 	strcpy(fanotify_info_name(info), name->name);
+}
+
+static inline void fanotify_info_copy_name2(struct fanotify_info *info,
+					    const struct qstr *name)
+{
+	if (WARN_ON_ONCE(name->len > NAME_MAX) ||
+	    WARN_ON_ONCE(!info->name_len))
+		return;
+
+	info->name2_len = name->len;
+	strcpy(fanotify_info_name2(info), name->name);
 }
 
 /*
