@@ -36,19 +36,40 @@ struct fanotify_fh {
 	unsigned char buf[];
 } __aligned(4);
 
+/*
+ * Large fh len are rare - reduce the max allowed fs handle size by 2 dwords,
+ * so we can fit the fh hdr we still encode total dwords using 5 bits.
+ */
+#define FANOTIFY_FH_HDR_DWORDS	(FANOTIFY_FH_HDR_LEN >> 2)
+#define FANOTIFY_MAX_FH_DWORDS	((MAX_HANDLE_SZ >> 2) - \
+				 FANOTIFY_FH_HDR_DWORDS - 1)
+#define FANOTIFY_MAX_FH_LEN	(FANOTIFY_MAX_FH_DWORDS << 2)
+#define FANOTIFY_FH_DWORDS_BITS	(ilog2(FANOTIFY_MAX_FH_DWORDS) + 1)
+#define FANOTIFY_NAME_LEN_BITS	(ilog2(NAME_MAX) + 1)
+#define FANOTIFY_INFO_PAD_BITS \
+	(32 - 2*FANOTIFY_FH_DWORDS_BITS - FANOTIFY_NAME_LEN_BITS)
+
 /* Variable size struct for dir file handle + child file handle + name */
 struct fanotify_info {
-	/* size of dir_fh/file_fh including fanotify_fh hdr size */
-	u8 dir_fh_totlen;
-	u8 file_fh_totlen;
-	u8 name_len;
-	u8 pad;
+	/* size of dir_fh/file_fh in dwords including fanotify_fh hdr size */
+	unsigned int dir_fh_dwords : FANOTIFY_FH_DWORDS_BITS;
+	unsigned int file_fh_dwords : FANOTIFY_FH_DWORDS_BITS;
+	unsigned int name_len : FANOTIFY_NAME_LEN_BITS;
+	unsigned int pad : FANOTIFY_INFO_PAD_BITS;
 	unsigned char buf[];
 	/*
 	 * (struct fanotify_fh) dir_fh starts at buf[0]
-	 * (optional) file_fh starts at buf[dir_fh_totlen]
-	 * name starts at buf[dir_fh_totlen + file_fh_totlen]
+	 * (optional) file_fh starts at buf[dir_fh_dwords<<2]
+	 * name starts at buf[dir_fh_dwords<<2 + file_fh_dwords<<2]
 	 */
+#define FANOTIFY_DIR_FH_SIZE(info)	((info)->dir_fh_dwords << 2)
+#define FANOTIFY_FILE_FH_SIZE(info)	((info)->file_fh_dwords << 2)
+
+#define FANOTIFY_DIR_FH_OFFSET(info)	0
+#define FANOTIFY_FILE_FH_OFFSET(info) \
+	(FANOTIFY_DIR_FH_OFFSET(info) + FANOTIFY_DIR_FH_SIZE(info))
+#define FANOTIFY_NAME_OFFSET(info) \
+	(FANOTIFY_FILE_FH_OFFSET(info) + FANOTIFY_FILE_FH_SIZE(info))
 } __aligned(4);
 
 static inline bool fanotify_fh_has_ext_buf(struct fanotify_fh *fh)
@@ -76,11 +97,11 @@ static inline void *fanotify_fh_buf(struct fanotify_fh *fh)
 
 static inline int fanotify_info_dir_fh_len(struct fanotify_info *info)
 {
-	if (!info->dir_fh_totlen ||
-	    WARN_ON_ONCE(info->dir_fh_totlen < FANOTIFY_FH_HDR_LEN))
+	if (!info->dir_fh_dwords ||
+	    WARN_ON_ONCE(info->dir_fh_dwords < FANOTIFY_FH_HDR_DWORDS))
 		return 0;
 
-	return info->dir_fh_totlen - FANOTIFY_FH_HDR_LEN;
+	return (info->dir_fh_dwords - FANOTIFY_FH_HDR_DWORDS) << 2;
 }
 
 static inline struct fanotify_fh *fanotify_info_dir_fh(struct fanotify_info *info)
@@ -92,41 +113,42 @@ static inline struct fanotify_fh *fanotify_info_dir_fh(struct fanotify_info *inf
 
 static inline int fanotify_info_file_fh_len(struct fanotify_info *info)
 {
-	if (!info->file_fh_totlen ||
-	    WARN_ON_ONCE(info->file_fh_totlen < FANOTIFY_FH_HDR_LEN))
+	if (!info->file_fh_dwords ||
+	    WARN_ON_ONCE(info->file_fh_dwords < FANOTIFY_FH_HDR_DWORDS))
 		return 0;
 
-	return info->file_fh_totlen - FANOTIFY_FH_HDR_LEN;
+	return (info->file_fh_dwords - FANOTIFY_FH_HDR_DWORDS) << 2;
 }
 
 static inline struct fanotify_fh *fanotify_info_file_fh(struct fanotify_info *info)
 {
-	return (struct fanotify_fh *)(info->buf + info->dir_fh_totlen);
+	return (struct fanotify_fh *)(info->buf +
+				      FANOTIFY_FILE_FH_OFFSET(info));
 }
 
-static inline const char *fanotify_info_name(struct fanotify_info *info)
+static inline char *fanotify_info_name(struct fanotify_info *info)
 {
-	return info->buf + info->dir_fh_totlen + info->file_fh_totlen;
+	if (!info->name_len)
+		return NULL;
+
+	return info->buf + FANOTIFY_NAME_OFFSET(info);
 }
 
 static inline void fanotify_info_init(struct fanotify_info *info)
 {
-	info->dir_fh_totlen = 0;
-	info->file_fh_totlen = 0;
+	info->dir_fh_dwords = 0;
+	info->file_fh_dwords = 0;
 	info->name_len = 0;
-}
-
-static inline unsigned int fanotify_info_len(struct fanotify_info *info)
-{
-	return info->dir_fh_totlen + info->file_fh_totlen + info->name_len;
 }
 
 static inline void fanotify_info_copy_name(struct fanotify_info *info,
 					   const struct qstr *name)
 {
+	if (WARN_ON_ONCE(name->len > NAME_MAX))
+		return;
+
 	info->name_len = name->len;
-	strcpy(info->buf + info->dir_fh_totlen + info->file_fh_totlen,
-	       name->name);
+	strcpy(fanotify_info_name(info), name->name);
 }
 
 /*
@@ -232,7 +254,7 @@ static inline int fanotify_event_object_fh_len(struct fanotify_event *event)
 	struct fanotify_fh *fh = fanotify_event_object_fh(event);
 
 	if (info)
-		return info->file_fh_totlen ? fh->len : 0;
+		return info->file_fh_dwords ? fh->len : 0;
 	else
 		return fh ? fh->len : 0;
 }

@@ -75,17 +75,17 @@ static bool fanotify_fid_event_equal(struct fanotify_fid_event *ffe1,
 static bool fanotify_info_equal(struct fanotify_info *info1,
 				struct fanotify_info *info2)
 {
-	if (info1->dir_fh_totlen != info2->dir_fh_totlen ||
-	    info1->file_fh_totlen != info2->file_fh_totlen ||
+	if (info1->dir_fh_dwords != info2->dir_fh_dwords ||
+	    info1->file_fh_dwords != info2->file_fh_dwords ||
 	    info1->name_len != info2->name_len)
 		return false;
 
-	if (info1->dir_fh_totlen &&
+	if (info1->dir_fh_dwords &&
 	    !fanotify_fh_equal(fanotify_info_dir_fh(info1),
 			       fanotify_info_dir_fh(info2)))
 		return false;
 
-	if (info1->file_fh_totlen &&
+	if (info1->file_fh_dwords &&
 	    !fanotify_fh_equal(fanotify_info_file_fh(info1),
 			       fanotify_info_file_fh(info2)))
 		return false;
@@ -102,7 +102,7 @@ static bool fanotify_name_event_equal(struct fanotify_name_event *fne1,
 	struct fanotify_info *info2 = &fne2->info;
 
 	/* Do not merge name events without dir fh */
-	if (!info1->dir_fh_totlen)
+	if (!info1->dir_fh_dwords)
 		return false;
 
 	if (!fanotify_fsid_equal(&fne1->fsid, &fne2->fsid))
@@ -355,7 +355,7 @@ static int fanotify_encode_fh_len(struct inode *inode)
 /*
  * Encode fanotify_fh.
  *
- * Return total size of encoded fh including fanotify_fh header.
+ * Return size of encoded fh in dwords including the fanotify_fh header.
  * Return 0 on failure to encode.
  */
 static int fanotify_encode_fh(struct fanotify_fh *fh, struct inode *inode,
@@ -378,7 +378,8 @@ static int fanotify_encode_fh(struct fanotify_fh *fh, struct inode *inode,
 	 * be zero in that case if encoding fh len failed.
 	 */
 	err = -ENOENT;
-	if (fh_len < 4 || WARN_ON_ONCE(fh_len % 4))
+	if (fh_len < 4 || WARN_ON_ONCE(fh_len % 4) ||
+	    fh_len > FANOTIFY_MAX_FH_LEN)
 		goto out_err;
 
 	/* No external buffer in a variable size allocated fh */
@@ -406,7 +407,7 @@ static int fanotify_encode_fh(struct fanotify_fh *fh, struct inode *inode,
 	/* Mix fh into event merge key */
 	*hash ^= fanotify_hash_fh(fh);
 
-	return FANOTIFY_FH_HDR_LEN + fh_len;
+	return FANOTIFY_FH_HDR_DWORDS + dwords;
 
 out_err:
 	pr_warn_ratelimited("fanotify: failed to encode fid (type=%d, len=%d, err=%i)\n",
@@ -571,11 +572,11 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *id,
 	info = &fne->info;
 	fanotify_info_init(info);
 	dfh = fanotify_info_dir_fh(info);
-	info->dir_fh_totlen = fanotify_encode_fh(dfh, id, dir_fh_len, hash, 0);
+	info->dir_fh_dwords = fanotify_encode_fh(dfh, id, dir_fh_len, hash, 0);
 	if (child_fh_len) {
 		ffh = fanotify_info_file_fh(info);
-		info->file_fh_totlen = fanotify_encode_fh(ffh, child,
-							child_fh_len, hash, 0);
+		info->file_fh_dwords = fanotify_encode_fh(ffh, child,
+							 child_fh_len, hash, 0);
 	}
 	if (name) {
 		long salt = name->len;
