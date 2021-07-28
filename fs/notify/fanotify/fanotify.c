@@ -592,21 +592,30 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *id,
 							__kernel_fsid_t *fsid,
 							const struct qstr *name,
 							struct inode *child,
+							struct dentry *moved,
 							unsigned int *hash,
 							gfp_t gfp)
 {
 	struct fanotify_name_event *fne;
 	struct fanotify_info *info;
 	struct fanotify_fh *dfh, *ffh;
+	struct inode *dir2 = moved ? d_inode(moved->d_parent) : NULL;
+	const struct qstr *name2 = moved ? &moved->d_name : NULL;
 	unsigned int dir_fh_len = fanotify_encode_fh_len(id);
+	unsigned int dir2_fh_len = fanotify_encode_fh_len(dir2);
 	unsigned int child_fh_len = fanotify_encode_fh_len(child);
 	unsigned int size;
 
 	size = sizeof(*fne) + FANOTIFY_FH_HDR_LEN + dir_fh_len;
+	if (dir2_fh_len)
+		size += FANOTIFY_FH_HDR_LEN + dir2_fh_len;
 	if (child_fh_len)
 		size += FANOTIFY_FH_HDR_LEN + child_fh_len;
-	if (name)
+	if (name) {
 		size += name->len + 1;
+		if (name2)
+			size += name2->len + 1;
+	}
 	fne = kmalloc(size, gfp);
 	if (!fne)
 		return NULL;
@@ -618,6 +627,11 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *id,
 	fanotify_info_init(info);
 	dfh = fanotify_info_dir_fh(info);
 	info->dir_fh_totlen = fanotify_encode_fh(dfh, id, dir_fh_len, hash, 0);
+	if (dir2_fh_len) {
+		dfh = fanotify_info_dir2_fh(info);
+		info->dir2_fh_totlen = fanotify_encode_fh(dfh, dir2,
+							  dir2_fh_len, hash, 0);
+	}
 	if (child_fh_len) {
 		ffh = fanotify_info_file_fh(info);
 		info->file_fh_totlen = fanotify_encode_fh(ffh, child,
@@ -628,11 +642,25 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *id,
 
 		fanotify_info_copy_name(info, name);
 		*hash ^= full_name_hash((void *)salt, name->name, name->len);
+
+		/* name2 can only be stored after valid name1 */
+		if (name2) {
+			salt = name2->len;
+			fanotify_info_copy_name2(info, name2);
+			*hash ^= full_name_hash((void *)salt, name2->name,
+						name2->len);
+		}
 	}
 
 	pr_debug("%s: ino=%lu size=%u dir_fh_len=%u child_fh_len=%u name_len=%u name='%.*s'\n",
 		 __func__, id->i_ino, size, dir_fh_len, child_fh_len,
 		 info->name_len, info->name_len, fanotify_info_name(info));
+
+	if (dir2_fh_len) {
+		pr_debug("%s: dir2_fh_len=%u name2_len=%u name2='%.*s'\n",
+			 __func__, dir2_fh_len, info->name2_len,
+			 info->name2_len, fanotify_info_name2(info));
+	}
 
 	return &fne->fae;
 }
@@ -689,6 +717,7 @@ static struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 	struct inode *dirid = fanotify_dfid_inode(mask, data, data_type, dir);
 	const struct path *path = fsnotify_data_path(data, data_type);
 	struct mem_cgroup *old_memcg;
+	struct dentry *moved = NULL;
 	struct inode *child = NULL;
 	bool name_event = false;
 	unsigned int hash = 0;
@@ -699,9 +728,14 @@ static struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 		/*
 		 * For certain events and group flags, report the child fid
 		 * in addition to reporting the parent fid and maybe child name.
+		 * In the special case of MOVED_FROM event, if we are reporting
+		 * the child fid we are also reporting the new parent and name.
 		 */
-		if (fanotify_report_child_fid(fid_mode, mask) && id != dirid)
+		if (fanotify_report_child_fid(fid_mode, mask) && id != dirid) {
 			child = id;
+			if (mask & FAN_MOVED_FROM)
+				moved = fsnotify_data_dentry(data, data_type);
+		}
 
 		id = dirid;
 
@@ -747,7 +781,7 @@ static struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 						   data_type, &hash);
 	} else if (name_event && (file_name || child)) {
 		event = fanotify_alloc_name_event(id, fsid, file_name, child,
-						  &hash, gfp);
+						  moved, &hash, gfp);
 	} else if (fid_mode) {
 		event = fanotify_alloc_fid_event(id, fsid, &hash, gfp);
 	} else {
