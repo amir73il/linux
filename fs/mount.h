@@ -81,6 +81,7 @@ struct mount {
 
 #define MNT_NS_INTERNAL ERR_PTR(-EINVAL) /* distinct from any mnt_namespace */
 
+#define MNT_HAVE_REAL_MOUNT /* code can call real_mount() */
 static inline struct mount *real_mount(struct vfsmount *mnt)
 {
 	return container_of(mnt, struct mount, mnt);

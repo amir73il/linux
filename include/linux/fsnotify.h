@@ -16,6 +16,7 @@
 #include <linux/audit.h>
 #include <linux/slab.h>
 #include <linux/bug.h>
+#include <linux/mount.h>
 
 /*
  * Notify this @dir inode about a change in a child directory entry.
@@ -48,8 +49,8 @@ static inline void fsnotify_inode(struct inode *inode, __u32 mask)
 }
 
 /* Notify this dentry's parent about a child's events. */
-static inline int fsnotify_parent(struct dentry *dentry, __u32 mask,
-				  const void *data, int data_type)
+static inline int fsnotify_parent(struct dentry *dentry, struct mount *mnt,
+				  __u32 mask, const void *data, int data_type)
 {
 	struct inode *inode = d_inode(dentry);
 
@@ -65,10 +66,21 @@ static inline int fsnotify_parent(struct dentry *dentry, __u32 mask,
 	if (IS_ROOT(dentry))
 		goto notify_child;
 
-	return __fsnotify_parent(dentry, mask, data, data_type);
+	return __fsnotify_parent(dentry, mnt, mask, data, data_type);
 
 notify_child:
-	return fsnotify(mask, data, data_type, NULL, NULL, inode, 0);
+	/*
+	 * Optimize out the function call for the case of disconnected inode
+	 * (e.g. pipe) with no watches.
+	 */
+	if (!inode->i_fsnotify_marks &&
+#ifdef MNT_HAVE_REAL_MOUNT
+	    (!mnt || !mnt->mnt_fsnotify_marks) &&
+#endif
+	    !inode->i_sb->s_fsnotify_marks)
+		return 0;
+
+	return fsnotify_child(mask, data, data_type, NULL, NULL, inode, mnt);
 }
 
 /*
@@ -77,9 +89,11 @@ notify_child:
  */
 static inline void fsnotify_dentry(struct dentry *dentry, __u32 mask)
 {
-	fsnotify_parent(dentry, mask, d_inode(dentry), FSNOTIFY_EVENT_INODE);
+	fsnotify_parent(dentry, NULL, mask, d_inode(dentry),
+			FSNOTIFY_EVENT_INODE);
 }
 
+#ifdef MNT_HAVE_REAL_MOUNT
 static inline int fsnotify_file(struct file *file, __u32 mask)
 {
 	const struct path *path = &file->f_path;
@@ -87,7 +101,8 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 	if (file->f_mode & FMODE_NONOTIFY)
 		return 0;
 
-	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
+	return fsnotify_parent(path->dentry, real_mount(path->mnt), mask, path,
+			       FSNOTIFY_EVENT_PATH);
 }
 
 /* Simple call site for access decisions */
@@ -114,6 +129,7 @@ static inline int fsnotify_perm(struct file *file, int mask)
 
 	return fsnotify_file(file, fsnotify_mask);
 }
+#endif
 
 /*
  * fsnotify_link_count - inode's link count changed

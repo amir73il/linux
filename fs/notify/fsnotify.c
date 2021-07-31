@@ -177,11 +177,9 @@ static bool fsnotify_event_needs_parent(struct inode *inode, struct mount *mnt,
  * Notify only the child without name info if parent is not watching and
  * inode/sb/mount are not interested in events with parent and name info.
  */
-int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
-		      int data_type)
+int __fsnotify_parent(struct dentry *dentry, struct mount *mnt, __u32 mask,
+		      const void *data, int data_type)
 {
-	const struct path *path = fsnotify_data_path(data, data_type);
-	struct mount *mnt = path ? real_mount(path->mnt) : NULL;
 	struct inode *inode = d_inode(dentry);
 	struct dentry *parent;
 	bool parent_watched = dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED;
@@ -229,7 +227,8 @@ int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 	}
 
 notify:
-	ret = fsnotify(mask, data, data_type, p_inode, file_name, inode, 0);
+	ret = fsnotify_child(mask, data, data_type, p_inode, file_name, inode,
+			     mnt);
 
 	if (file_name)
 		release_dentry_name_snapshot(&name);
@@ -461,11 +460,11 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
  * @inode:	optional inode associated with event -
  *		either @dir or @inode must be non-NULL.
  *		if both are non-NULL event may be reported to both.
- * @cookie:	inotify rename cookie
+ * @mnt:	optional mount associated with event
+ * @cookie:	optional inotify rename cookie
  */
 int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 {
-	const struct path *path = fsnotify_event_info_path(event_info);
 	struct inode *inode = event_info->inode;
 	struct fsnotify_iter_info iter_info = {};
 	struct super_block *sb;
@@ -473,9 +472,6 @@ int __fsnotify(__u32 mask, const struct fsnotify_event_info *event_info)
 	struct inode *parent = NULL;
 	int ret = 0;
 	__u32 test_mask, marks_mask;
-
-	if (path)
-		mnt = real_mount(path->mnt);
 
 	if (!inode) {
 		/* Dirent event - report on TYPE_INODE to dir */
