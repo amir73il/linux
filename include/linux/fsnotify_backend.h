@@ -636,6 +636,7 @@ extern int fsnotify_get_conn_fsid(const struct fsnotify_mark_connector *conn,
 
 /* attach the mark to the object */
 #define FSNOTIFY_ADD_MARK_ALLOW_DUPS	0x1
+#define FSNOTIFY_ADD_MARK_UPDATE_MASKS	0x2
 
 extern int fsnotify_add_mark(struct fsnotify_mark *mark,
 			     fsnotify_connp_t *connp, unsigned int obj_type,
