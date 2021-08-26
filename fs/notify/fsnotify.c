@@ -463,8 +463,8 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	     const struct qstr *file_name, struct inode *inode, u32 cookie)
 {
 	const struct path *path = fsnotify_data_path(data, data_type);
+	struct super_block *sb = fsnotify_data_sb(data, data_type);
 	struct fsnotify_iter_info iter_info = {};
-	struct super_block *sb;
 	struct mount *mnt = NULL;
 	struct inode *parent = NULL;
 	int ret = 0;
@@ -483,7 +483,6 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		 */
 		parent = dir;
 	}
-	sb = inode->i_sb;
 
 	/*
 	 * Optimization: srcu_read_lock() has a memory barrier which can
