@@ -9,6 +9,7 @@
 
 #include <linux/fs.h>
 #include <linux/fsnotify.h>
+#include "../mount.h"
 #include "overlayfs.h"
 
 #define OVL_FSNOTIFY_MASK (FS_MODIFY_INTENT | FS_NAME_INTENT | FS_MOVE_INTENT)
@@ -26,16 +27,84 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 			    struct fsnotify_iter_info *iter_info)
 {
 	struct super_block *sb = group->private;
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct dentry *dentry = fsnotify_data_dentry(data, data_type);
+	struct dentry *lowerdir = NULL;
+	int ret = 0;
 
 	if (WARN_ON_ONCE(!(mask & OVL_FSNOTIFY_MASK)))
 		return 0;
+
+	if (WARN_ON_ONCE(!dentry))
+		return 0;
+
+	pr_debug("%s: %pd2 mask=%x\n", __func__, dentry, mask);
 
 	/* Don't handle events before overlay mount is done */
 	if (!(sb->s_flags & SB_BORN))
 		return 0;
 	smp_rmb();
 
-	return 0;
+	lowerdir = d_is_dir(dentry) ? dget(dentry) : dget_parent(dentry);
+	/* Not interested in events from non-dir with no parent */
+	if (unlikely(!d_is_dir(lowerdir)))
+		goto out;
+
+	/* Modifications on disconnected dir is unexpected */
+	if (WARN_ON_ONCE(lowerdir->d_flags & DCACHE_DISCONNECTED)) {
+		ret = -EIO;
+		goto out;
+	}
+
+	/* Not interested in events on objects outside lower rootdir */
+	if (!is_subdir(lowerdir, ofs->layers[1].mnt->mnt_root)) {
+		goto out;
+	}
+
+	/* Deny all modification to lower when indexing is disabled */
+	if (!ovl_indexdir(sb)) {
+		ret = -EROFS;
+		goto out;
+	}
+
+out:
+	dput(lowerdir);
+
+	return ret < 0 ? -EPERM : 0;
+}
+
+static int ovl_add_sb_mark(struct fsnotify_group *group,
+			   struct vfsmount *lowermnt, bool watch_mnt)
+{
+	struct ovl_mark *ovm;
+	u32 mask = OVL_FSNOTIFY_MASK;
+	fsnotify_connp_t *connp;
+	int type, err;
+
+	/* TODO: relax for watch_mnt and idmapped mount */
+	if (!ns_capable(lowermnt->mnt_sb->s_user_ns, CAP_SYS_ADMIN))
+		return -EPERM;
+
+	ovm = kmem_cache_alloc(ovl_mark_cachep, GFP_KERNEL);
+	if (!ovm)
+		return -ENOMEM;
+
+	fsnotify_init_mark(&ovm->fsn_mark, group);
+	ovm->fsn_mark.mask = mask;
+	if (watch_mnt) {
+		connp = &real_mount(lowermnt)->mnt_fsnotify_marks;
+		type = FSNOTIFY_OBJ_TYPE_VFSMOUNT;
+	} else {
+		connp = &lowermnt->mnt_sb->s_fsnotify_marks;
+		type = FSNOTIFY_OBJ_TYPE_SB;
+	}
+	err = fsnotify_add_mark(&ovm->fsn_mark, connp, type, 0, NULL);
+	fsnotify_put_mark(&ovm->fsn_mark);
+
+	pr_debug("%s: %pd2 group=%p mark=%p type=%d mask=%x\n", __func__,
+		 lowermnt->mnt_root, group, ovm, type, mask);
+
+	return err;
 }
 
 static void ovl_free_mark(struct fsnotify_mark *mark)
@@ -52,9 +121,20 @@ static const struct fsnotify_ops ovl_fsnotify_ops = {
 	.free_mark = ovl_free_mark,
 };
 
-int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs)
+int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs, struct path *lowerpath)
 {
 	struct fsnotify_group *group;
+	int err;
+
+	if (ofs->numlayer > 2) {
+		pr_err("option \"watch\" is not supported with multi lower layers.\n");
+		return -EINVAL;
+	}
+
+	if (ofs->numfs > 1 && ofs->config.watch == OVL_WATCH_SB) {
+		pr_warn("option \"watch\" requires lowerdir and upperdir on the same fs; Try \"watch=mnt\".\n");
+		return -EINVAL;
+	}
 
 	group = fsnotify_alloc_group(&ovl_fsnotify_ops);
 	if (IS_ERR(group)) {
@@ -65,7 +145,13 @@ int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs)
 	ofs->watch = group;
 	group->private = sb;
 
-	return 0;
+	/* Create a mark on lower sb/mnt */
+	err = ovl_add_sb_mark(group, lowerpath->mnt,
+			      ofs->config.watch == OVL_WATCH_MNT);
+	if (err)
+		pr_err("failed to add fsnotify sb mark (err=%i)\n", err);
+
+	return err;
 }
 
 void ovl_free_watch(struct ovl_fs *ofs)

@@ -457,8 +457,10 @@ static int ovl_create_index(struct dentry *dentry, struct dentry *origin,
 		return -EIO;
 
 	/* Directory not expected to be indexed before copy up */
-	if (WARN_ON(ovl_test_flag(OVL_INDEX, d_inode(dentry))))
+	if (ovl_test_flag(OVL_INDEX, d_inode(dentry))) {
+		WARN_ON_ONCE(!ofs->config.watch);
 		return -EIO;
+	}
 
 	err = ovl_get_index_name(ofs, origin, &name);
 	if (err)

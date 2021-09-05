@@ -498,6 +498,17 @@ match the origin file handle that was stored at copy_up time.  If a
 found lower directory does not match the stored origin, that directory
 will not be merged with the upper directory.
 
+Changes to the underlying filesystems while part of a mounted overlay can be
+better controlled with the "watch" mount option.  When providing the mount
+option "watch" along with inode index feature, the resulting overlay acts as
+a "persistent change tracking snapshot" of a single lower tree.
+
+Any attempt to change the lower tree while overlay filesystems is mounted, will
+create index entries for all the lower object's ancestry in the index directory
+before the change.  The "trusted.overlay.upper" extended attribute on a
+directory index entry is an indication of a directory copy up.
+If this attribute is missing, the directory index entry is an indication of a
+lower object modification under that lower directory tree.
 
 
 NFS export

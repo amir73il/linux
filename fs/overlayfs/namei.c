@@ -571,12 +571,16 @@ int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index)
 		err = PTR_ERR(upper);
 		/*
 		 * Directory index entries with no 'upper' xattr need to be
-		 * removed. When dir index entry has a stale 'upper' xattr,
+		 * removed.  With watched lowerdir, directry index entries
+		 * with no 'upper' are change records, so do not remove them.
+		 * When dir index entry has a stale 'upper' xattr,
 		 * we assume that upper dir was removed and we treat the dir
 		 * index as orphan entry that needs to be whited out.
 		 */
 		if (err == -ESTALE)
 			goto orphan;
+		else if (!err && ofs->config.watch)
+			goto out;
 		else if (!err)
 			err = -ESTALE;
 		goto fail;
@@ -1049,7 +1053,8 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 
 	if (origin && ovl_indexdir(dentry->d_sb) &&
 	    (!d.is_dir || ovl_index_all(ofs))) {
-		index = ovl_lookup_index(ofs, upperdentry, origin, true);
+		index = ovl_lookup_index(ofs, upperdentry, origin,
+					 !ofs->config.watch);
 		if (IS_ERR(index)) {
 			err = PTR_ERR(index);
 			index = NULL;
@@ -1070,7 +1075,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 
 	if (upperdentry)
 		ovl_dentry_set_upper_alias(dentry);
-	else if (index) {
+	else if (index && !d.is_dir) {
 		upperdentry = dget(index);
 		upperredirect = ovl_get_redirect_xattr(ofs, upperdentry, 0);
 		if (IS_ERR(upperredirect)) {
