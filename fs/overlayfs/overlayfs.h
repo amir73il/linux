@@ -291,7 +291,7 @@ int ovl_can_decode_fh(struct super_block *sb);
 struct ovl_entry *ovl_alloc_entry(unsigned int numlower);
 bool ovl_dentry_remote(struct dentry *dentry);
 void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
-			     unsigned int mask);
+			     struct dentry *index, unsigned int mask);
 bool ovl_dentry_weird(struct dentry *dentry);
 enum ovl_path_type ovl_path_type(struct dentry *dentry);
 void ovl_path_upper(struct dentry *dentry, struct path *path);
@@ -630,6 +630,7 @@ int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs,
 void ovl_free_watch(struct ovl_fs *ofs);
 int __init ovl_fsnotify_init(void);
 void ovl_fsnotify_destroy(void);
+bool ovl_should_index_lowerdir(struct ovl_fs *ofs, struct dentry *lowerdir);
 #else
 static inline int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs,
 				struct path *lowerpath)
@@ -640,4 +641,10 @@ static inline int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs,
 static inline void ovl_free_watch(struct ovl_fs *ofs) { }
 static inline int ovl_fsnotify_init(void) { return 0; }
 static inline void ovl_fsnotify_destroy(void) { }
+
+static inline bool ovl_should_index_lowerdir(struct ovl_fs *ofs,
+					     struct dentry *lowerdir)
+{
+	return true;
+}
 #endif

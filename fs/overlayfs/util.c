@@ -78,7 +78,7 @@ bool ovl_dentry_remote(struct dentry *dentry)
 }
 
 void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
-			     unsigned int mask)
+			     struct dentry *index, unsigned int mask)
 {
 	struct ovl_entry *oe = OVL_E(dentry);
 	unsigned int i, flags = 0;
@@ -87,6 +87,11 @@ void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 		flags |= upperdentry->d_flags;
 	for (i = 0; i < oe->numlower; i++)
 		flags |= oe->lowerstack[i].dentry->d_flags;
+
+	/* Need to reval non-indexed dir inode in case it has been indexed */
+	if (OVL_FS(dentry->d_sb)->config.watch && !upperdentry && !index &&
+	    oe->numlower == 1 && d_is_dir(oe->lowerstack[0].dentry))
+		flags |= DCACHE_OP_REVALIDATE;
 
 	spin_lock(&dentry->d_lock);
 	dentry->d_flags &= ~mask;

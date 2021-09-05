@@ -154,6 +154,7 @@ int ovl_getattr(struct user_namespace *mnt_userns, const struct path *path,
 		struct kstat *stat, u32 request_mask, unsigned int flags)
 {
 	struct dentry *dentry = path->dentry;
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	enum ovl_path_type type;
 	struct path realpath;
 	const struct cred *old_cred;
@@ -249,6 +250,18 @@ int ovl_getattr(struct user_namespace *mnt_userns, const struct path *path,
 			stat->blocks = lowerdatastat.blocks;
 		}
 	}
+
+	/*
+	 * In an overlayfs watch mount, unmodified lower directories (i.e.
+	 * not indexed and not new) use the real lower dir st_dev/st_ino,
+	 * unlike modified and new directories that use the overlay st_dev,
+	 * so 'du -x' on the overlayfs mount will list only the modified and
+	 * new lower directories.
+	 */
+	if (ofs->config.watch && is_dir && !OVL_TYPE_UPPER(type) &&
+	    !ovl_test_flag(OVL_INDEX, d_inode(dentry)) &&
+	     ovl_should_index_lowerdir(ofs, realpath.dentry))
+		goto out;
 
 	ovl_map_dev_ino(dentry, stat, fsid);
 

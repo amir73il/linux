@@ -155,6 +155,14 @@ static int ovl_dentry_revalidate_common(struct dentry *dentry,
 
 static int ovl_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 {
+	struct inode *dir = dentry->d_inode;
+	bool is_dir = dir && S_ISDIR(dir->i_mode);
+
+	/* Invalidate non-indexed dir inode in case it has been indexed */
+	if (OVL_FS(dentry->d_sb)->config.watch && is_dir &&
+	    !ovl_i_dentry_upper(dir) && !ovl_test_flag(OVL_INDEX, dir))
+		return 0;
+
 	return ovl_dentry_revalidate_common(dentry, flags, false);
 }
 
@@ -1991,7 +1999,8 @@ static struct dentry *ovl_get_root(struct super_block *sb,
 	ovl_dentry_set_flag(OVL_E_CONNECTED, root);
 	ovl_set_upperdata(d_inode(root));
 	ovl_inode_init(d_inode(root), &oip, ino, fsid);
-	ovl_dentry_update_reval(root, upperdentry, DCACHE_OP_WEAK_REVALIDATE);
+	ovl_dentry_update_reval(root, upperdentry, NULL,
+				DCACHE_OP_WEAK_REVALIDATE);
 
 	return root;
 }
