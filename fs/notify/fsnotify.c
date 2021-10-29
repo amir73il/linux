@@ -279,6 +279,14 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 	    WARN_ON_ONCE(fsnotify_iter_vfsmount_mark(iter_info)))
 		return 0;
 
+	/*
+	 * For FS_RENAME, inode is old_dir and parent is new_dir.
+	 * The only ->handle_inode_event() backend that supports FS_RENAME is
+	 * dnotify, where it means file was renamed within same parent.
+	 */
+	if ((mask & FS_RENAME) && parent_mark != inode_mark)
+		return 0;
+
 	if (parent_mark) {
 		/*
 		 * parent_mark indicates that the parent inode is watching
@@ -470,6 +478,7 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	struct fsnotify_iter_info iter_info = {};
 	struct mount *mnt = NULL;
 	struct inode *parent = NULL;
+	struct dentry *moved;
 	int ret = 0;
 	__u32 test_mask, marks_mask;
 
@@ -479,6 +488,11 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	if (!inode) {
 		/* Dirent event - report on TYPE_INODE to dir */
 		inode = dir;
+		/* For FS_RENAME, inode is old_dir and parent is new_dir */
+		if (mask & FS_RENAME) {
+			moved = fsnotify_data_dentry(data, data_type);
+			parent = moved->d_parent->d_inode;
+		}
 	} else if (mask & FS_EVENT_ON_CHILD) {
 		/*
 		 * Event on child - report on TYPE_PARENT to dir if it is
