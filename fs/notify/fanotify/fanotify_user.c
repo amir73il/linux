@@ -134,7 +134,7 @@ static size_t fanotify_event_len(unsigned int info_mode,
 {
 	size_t event_len = FAN_EVENT_METADATA_LEN;
 	struct fanotify_info *info;
-	int dir_fh_len;
+	int dir_fh_len, dir2_fh_len;
 	int fh_len;
 	int dot_len = 0;
 
@@ -149,6 +149,11 @@ static size_t fanotify_event_len(unsigned int info_mode,
 	if (fanotify_event_has_dir_fh(event)) {
 		dir_fh_len = fanotify_event_dir_fh_len(event);
 		event_len += fanotify_fid_info_len(dir_fh_len, info->name_len);
+		if (info->name_len && fanotify_event_has_dir2_fh(event)) {
+			dir2_fh_len = fanotify_event_dir2_fh_len(event);
+			event_len += fanotify_fid_info_len(dir2_fh_len,
+							   info->name2_len);
+		}
 	} else if ((info_mode & FAN_REPORT_NAME) &&
 		   (event->mask & FAN_ONDIR)) {
 		/*
@@ -480,7 +485,10 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 	unsigned int pidfd_mode = info_mode & FAN_REPORT_PIDFD;
 
 	/*
-	 * Event info records order is as follows: dir fid + name, child fid.
+	 * Event info records order is as follows:
+	 * 1. dir fid + name
+	 * 2. (optional) new dir fid + new name
+	 * 3. (optional) child fid
 	 */
 	if (fanotify_event_has_dir_fh(event)) {
 		info_type = info->name_len ? FAN_EVENT_INFO_TYPE_DFID_NAME :
@@ -491,6 +499,24 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 					    FAN_EVENT_INFO_FID_OF_PARENT,
 					    fanotify_info_name(info),
 					    info->name_len, buf, count);
+		if (ret < 0)
+			return ret;
+
+		buf += ret;
+		count -= ret;
+		total_bytes += ret;
+	}
+
+	/* New dir fid + new name can only be reported after dir fid + name */
+	if (info_type && info->name_len && fanotify_event_has_dir2_fh(event)) {
+		info_type = info->name2_len ? FAN_EVENT_INFO_TYPE_DFID_NAME :
+					      FAN_EVENT_INFO_TYPE_DFID;
+		ret = copy_fid_info_to_user(fanotify_event_fsid(event),
+					    fanotify_info_dir2_fh(info),
+					    fid_mode, info_type,
+					    FAN_EVENT_INFO_FID_OF_PARENT2,
+					    fanotify_info_name2(info),
+					    info->name2_len, buf, count);
 		if (ret < 0)
 			return ret;
 

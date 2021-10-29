@@ -142,6 +142,7 @@ struct fanotify_event_metadata {
 /* Sub-types common to all three fid info types */
 #define FAN_EVENT_INFO_FID_OF_SELF	1
 #define FAN_EVENT_INFO_FID_OF_PARENT	2
+#define FAN_EVENT_INFO_FID_OF_PARENT2	3
 
 struct fanotify_event_info_header {
 	__u8 info_type;
