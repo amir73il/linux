@@ -131,6 +131,7 @@ struct fanotify_event_metadata {
 #define FAN_EVENT_INFO_TYPE_DFID	3
 #define FAN_EVENT_INFO_TYPE_PIDFD	4
 #define FAN_EVENT_INFO_TYPE_ERROR	5
+#define FAN_EVENT_INFO_TYPE_DFID_NAME2	6 /* For FAN_MOVED_FROM */
 
 /* Variable length info record following event metadata */
 struct fanotify_event_info_header {
