@@ -290,6 +290,7 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	__u32 marks_mask = 0, marks_ignored_mask = 0;
 	__u32 test_mask, user_mask = FANOTIFY_OUTGOING_EVENTS |
 				     FANOTIFY_EVENT_FLAGS;
+	__u32 moved_mask = 0;
 	const struct path *path = fsnotify_data_path(data, data_type);
 	unsigned int fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	struct fsnotify_mark *mark;
@@ -327,17 +328,44 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 			continue;
 
 		/*
-		 * If the event is on a child and this mark is on a parent not
-		 * watching children, don't send it!
+		 * In the special case of FAN_RENAME event, inode mark is the
+		 * mark on the old dir and parent mark is the mark on the new
+		 * dir.  We do not want to report the dirfid+name of a directory
+		 * whose inode/sb are not watched.  The FAN_MOVE flags
+		 * are used internally to indicate if we need to report only
+		 * the old parent+name, only the new parent+name or both.
 		 */
-		if (type == FSNOTIFY_OBJ_TYPE_PARENT &&
-		    !(mark->mask & FS_EVENT_ON_CHILD))
+		if (event_mask & FAN_RENAME) {
+			/* Old dir sb are watched - report old info */
+			if (type != FSNOTIFY_OBJ_TYPE_PARENT &&
+			    (mark->mask & FAN_RENAME))
+				moved_mask |= FAN_MOVED_FROM;
+			/* New dir sb are watched - report new info */
+			if (type != FSNOTIFY_OBJ_TYPE_INODE &&
+			    (mark->mask & FAN_RENAME))
+				moved_mask |= FAN_MOVED_TO;
+		} else if (type == FSNOTIFY_OBJ_TYPE_PARENT &&
+			   !(mark->mask & FS_EVENT_ON_CHILD)) {
+			/*
+			 * If the event is on a child and this mark is on
+			 * a parent not watching children, don't send it!
+			 */
 			continue;
+		}
 
 		marks_mask |= mark->mask;
 	}
 
 	test_mask = event_mask & marks_mask & ~marks_ignored_mask;
+	/*
+	 * Add the internal FAN_MOVE flags to FAN_RENAME event.
+	 * They will not be reported to user along with FAN_RENAME.
+	 */
+	if (test_mask & FAN_RENAME) {
+		if (WARN_ON_ONCE(test_mask & FAN_MOVE))
+			return 0;
+		test_mask |= moved_mask;
+	}
 
 	/*
 	 * For dirent modification events (create/delete/move) that do not carry
@@ -753,13 +781,28 @@ static struct fanotify_event *fanotify_alloc_event(struct fsnotify_group *group,
 		}
 
 		/*
-		 * In the special case of FAN_RENAME event, we record both
-		 * old and new parent+name.
+		 * In the special case of FAN_RENAME event, the FAN_MOVE flags
+		 * are only used internally to indicate if we need to report
+		 * only the old parent+name, only the new parent+name or both.
 		 * 'dirid' and 'file_name' are the old parent+name and
 		 * 'moved' has the new parent+name.
 		 */
 		if (mask & FAN_RENAME) {
-			moved = fsnotify_data_dentry(data, data_type);
+			/* Either old and/or new info must be reported */
+			if (WARN_ON_ONCE(!(mask & FAN_MOVE)))
+				return NULL;
+
+			if (!(mask & FAN_MOVED_FROM)) {
+				/* Do not report old parent+name */
+				dirid = NULL;
+				file_name = NULL;
+			}
+			if (mask & FAN_MOVED_TO) {
+				/* Report new parent+name */
+				moved = fsnotify_data_dentry(data, data_type);
+			}
+			/* Clear internal flags */
+			mask &= ~FAN_MOVE;
 			name_event = true;
 		}
 	}
