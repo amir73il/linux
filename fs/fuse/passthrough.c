@@ -15,29 +15,51 @@ struct fuse_aio_req {
 	struct timespec64 pre_atime;
 };
 
-static void fuse_copyattr(struct file *dst_file, struct file *src_file)
+static void fuse_file_start_write(struct file *fuse_filp,
+				  struct file *passthrough_filp,
+				  loff_t pos, size_t count)
 {
-	struct inode *dst = file_inode(dst_file);
-	struct inode *src = file_inode(src_file);
+	struct inode *inode = file_inode(fuse_filp);
+	struct fuse_inode *fi = get_fuse_inode(inode);
 
-	i_size_write(dst, i_size_read(src));
-	fuse_invalidate_attr(dst);
+	if (inode->i_size < pos + count)
+		set_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
+
+	file_start_write(passthrough_filp);
 }
 
-static void fuse_start_read(struct file *src_file, struct timespec64 *pre_atime)
+static void fuse_file_end_write(struct file *fuse_filp,
+				struct file *passthrough_filp,
+				loff_t pos, ssize_t res)
 {
-	*pre_atime = file_inode(src_file)->i_atime;
+	struct inode *inode = file_inode(fuse_filp);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	file_end_write(passthrough_filp);
+
+	if (res > 0)
+		fuse_write_update_size(inode, pos);
+
+	clear_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
+	fuse_invalidate_attr(inode);
 }
 
-static void fuse_end_read(struct file *dst_file, struct file *src_file,
-			  struct timespec64 *pre_atime)
+static void fuse_file_start_read(struct file *passthrough_filp,
+				 struct timespec64 *pre_atime)
+{
+	*pre_atime = file_inode(passthrough_filp)->i_atime;
+}
+
+static void fuse_file_end_read(struct file *fuse_filp,
+			       struct file *passthrough_filp,
+			       struct timespec64 *pre_atime)
 {
 	/* Mimic atime update policy of passthrough inode, not the value */
-	if (!timespec64_equal(&file_inode(src_file)->i_atime, pre_atime))
-		fuse_invalidate_atime(file_inode(dst_file));
+	if (!timespec64_equal(&file_inode(passthrough_filp)->i_atime, pre_atime))
+		fuse_invalidate_atime(file_inode(fuse_filp));
 }
 
-static void fuse_aio_cleanup_handler(struct fuse_aio_req *aio_req)
+static void fuse_aio_cleanup_handler(struct fuse_aio_req *aio_req, long res)
 {
 	struct kiocb *iocb = &aio_req->iocb;
 	struct kiocb *iocb_fuse = aio_req->iocb_fuse;
@@ -46,10 +68,9 @@ static void fuse_aio_cleanup_handler(struct fuse_aio_req *aio_req)
 
 	if (iocb->ki_flags & IOCB_WRITE) {
 		__sb_writers_acquired(file_inode(filp)->i_sb, SB_FREEZE_WRITE);
-		file_end_write(filp);
-		fuse_copyattr(fuse_filp, filp);
+		fuse_file_end_write(fuse_filp, filp, iocb->ki_pos, res);
 	} else {
-		fuse_end_read(fuse_filp, filp, &aio_req->pre_atime);
+		fuse_file_end_read(fuse_filp, filp, &aio_req->pre_atime);
 	}
 
 	iocb_fuse->ki_pos = iocb->ki_pos;
@@ -62,7 +83,7 @@ static void fuse_aio_rw_complete(struct kiocb *iocb, long res, long res2)
 		container_of(iocb, struct fuse_aio_req, iocb);
 	struct kiocb *iocb_fuse = aio_req->iocb_fuse;
 
-	fuse_aio_cleanup_handler(aio_req);
+	fuse_aio_cleanup_handler(aio_req, res);
 	iocb_fuse->ki_complete(iocb_fuse, res, res2);
 }
 
@@ -82,11 +103,11 @@ ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
 	if (is_sync_kiocb(iocb_fuse)) {
 		struct timespec64 pre_atime;
 
-		fuse_start_read(passthrough_filp, &pre_atime);
+		fuse_file_start_read(passthrough_filp, &pre_atime);
 		ret = vfs_iter_read(passthrough_filp, iter, &iocb_fuse->ki_pos,
 				    iocb_to_rw_flags(iocb_fuse->ki_flags,
 						     PASSTHROUGH_IOCB_MASK));
-		fuse_end_read(fuse_filp, passthrough_filp, &pre_atime);
+		fuse_file_end_read(fuse_filp, passthrough_filp, &pre_atime);
 	} else {
 		struct fuse_aio_req *aio_req;
 
@@ -97,12 +118,12 @@ ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
 		}
 
 		aio_req->iocb_fuse = iocb_fuse;
-		fuse_start_read(passthrough_filp, &aio_req->pre_atime);
+		fuse_file_start_read(passthrough_filp, &aio_req->pre_atime);
 		kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
 		aio_req->iocb.ki_complete = fuse_aio_rw_complete;
 		ret = call_read_iter(passthrough_filp, &aio_req->iocb, iter);
 		if (ret != -EIOCBQUEUED)
-			fuse_aio_cleanup_handler(aio_req);
+			fuse_aio_cleanup_handler(aio_req, ret);
 	}
 out:
 	revert_creds(old_cred);
@@ -120,20 +141,22 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 	struct inode *fuse_inode = file_inode(fuse_filp);
 	struct file *passthrough_filp = ff->passthrough.filp;
 	struct inode *passthrough_inode = file_inode(passthrough_filp);
+	size_t count = iov_iter_count(iter);
 
-	if (!iov_iter_count(iter))
+	if (!count)
 		return 0;
 
 	inode_lock(fuse_inode);
 
 	old_cred = override_creds(ff->passthrough.cred);
 	if (is_sync_kiocb(iocb_fuse)) {
-		file_start_write(passthrough_filp);
+		fuse_file_start_write(fuse_filp, passthrough_filp,
+				      iocb_fuse->ki_pos, count);
 		ret = vfs_iter_write(passthrough_filp, iter, &iocb_fuse->ki_pos,
 				     iocb_to_rw_flags(iocb_fuse->ki_flags,
 						      PASSTHROUGH_IOCB_MASK));
-		file_end_write(passthrough_filp);
-		fuse_copyattr(fuse_filp, passthrough_filp);
+		fuse_file_end_write(fuse_filp, passthrough_filp,
+				    iocb_fuse->ki_pos, ret);
 	} else {
 		struct fuse_aio_req *aio_req;
 
@@ -143,7 +166,8 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 			goto out;
 		}
 
-		file_start_write(passthrough_filp);
+		fuse_file_start_write(fuse_filp, passthrough_filp,
+				      iocb_fuse->ki_pos, count);
 		__sb_writers_release(passthrough_inode->i_sb, SB_FREEZE_WRITE);
 
 		aio_req->iocb_fuse = iocb_fuse;
@@ -151,7 +175,7 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 		aio_req->iocb.ki_complete = fuse_aio_rw_complete;
 		ret = call_write_iter(passthrough_filp, &aio_req->iocb, iter);
 		if (ret != -EIOCBQUEUED)
-			fuse_aio_cleanup_handler(aio_req);
+			fuse_aio_cleanup_handler(aio_req, ret);
 	}
 out:
 	revert_creds(old_cred);
