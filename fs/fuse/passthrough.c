@@ -12,6 +12,7 @@
 struct fuse_aio_req {
 	struct kiocb iocb;
 	struct kiocb *iocb_fuse;
+	struct timespec64 pre_atime;
 };
 
 static void fuse_copyattr(struct file *dst_file, struct file *src_file)
@@ -20,18 +21,35 @@ static void fuse_copyattr(struct file *dst_file, struct file *src_file)
 	struct inode *src = file_inode(src_file);
 
 	i_size_write(dst, i_size_read(src));
+	fuse_invalidate_attr(dst);
+}
+
+static void fuse_start_read(struct file *src_file, struct timespec64 *pre_atime)
+{
+	*pre_atime = file_inode(src_file)->i_atime;
+}
+
+static void fuse_end_read(struct file *dst_file, struct file *src_file,
+			  struct timespec64 *pre_atime)
+{
+	/* Mimic atime update policy of passthrough inode, not the value */
+	if (!timespec64_equal(&file_inode(src_file)->i_atime, pre_atime))
+		fuse_invalidate_atime(file_inode(dst_file));
 }
 
 static void fuse_aio_cleanup_handler(struct fuse_aio_req *aio_req)
 {
 	struct kiocb *iocb = &aio_req->iocb;
 	struct kiocb *iocb_fuse = aio_req->iocb_fuse;
+	struct file *filp = iocb->ki_filp;
+	struct file *fuse_filp = iocb_fuse->ki_filp;
 
 	if (iocb->ki_flags & IOCB_WRITE) {
-		__sb_writers_acquired(file_inode(iocb->ki_filp)->i_sb,
-				      SB_FREEZE_WRITE);
-		file_end_write(iocb->ki_filp);
-		fuse_copyattr(iocb_fuse->ki_filp, iocb->ki_filp);
+		__sb_writers_acquired(file_inode(filp)->i_sb, SB_FREEZE_WRITE);
+		file_end_write(filp);
+		fuse_copyattr(fuse_filp, filp);
+	} else {
+		fuse_end_read(fuse_filp, filp, &aio_req->pre_atime);
 	}
 
 	iocb_fuse->ki_pos = iocb->ki_pos;
@@ -62,9 +80,13 @@ ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
 
 	old_cred = override_creds(ff->passthrough.cred);
 	if (is_sync_kiocb(iocb_fuse)) {
+		struct timespec64 pre_atime;
+
+		fuse_start_read(passthrough_filp, &pre_atime);
 		ret = vfs_iter_read(passthrough_filp, iter, &iocb_fuse->ki_pos,
 				    iocb_to_rw_flags(iocb_fuse->ki_flags,
 						     PASSTHROUGH_IOCB_MASK));
+		fuse_end_read(fuse_filp, passthrough_filp, &pre_atime);
 	} else {
 		struct fuse_aio_req *aio_req;
 
@@ -75,6 +97,7 @@ ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
 		}
 
 		aio_req->iocb_fuse = iocb_fuse;
+		fuse_start_read(passthrough_filp, &aio_req->pre_atime);
 		kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
 		aio_req->iocb.ki_complete = fuse_aio_rw_complete;
 		ret = call_read_iter(passthrough_filp, &aio_req->iocb, iter);
@@ -110,8 +133,7 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 				     iocb_to_rw_flags(iocb_fuse->ki_flags,
 						      PASSTHROUGH_IOCB_MASK));
 		file_end_write(passthrough_filp);
-		if (ret > 0)
-			fuse_copyattr(fuse_filp, passthrough_filp);
+		fuse_copyattr(fuse_filp, passthrough_filp);
 	} else {
 		struct fuse_aio_req *aio_req;
 
