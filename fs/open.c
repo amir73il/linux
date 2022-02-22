@@ -187,12 +187,12 @@ long do_sys_ftruncate(unsigned int fd, loff_t length, int small)
 	/* Check IS_APPEND on real upper inode */
 	if (IS_APPEND(file_inode(f.file)))
 		goto out_putf;
-	sb_start_write(inode->i_sb);
+	file_start_write(f.file);
 	error = security_path_truncate(&f.file->f_path);
 	if (!error)
 		error = do_truncate(file_mnt_user_ns(f.file), dentry, length,
 				    ATTR_MTIME | ATTR_CTIME, f.file);
-	sb_end_write(inode->i_sb);
+	file_end_write(f.file);
 out_putf:
 	fdput(f);
 out:

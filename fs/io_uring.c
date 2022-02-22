@@ -3800,7 +3800,7 @@ static int io_write(struct io_kiocb *req, unsigned int issue_flags)
 	 * we return to userspace.
 	 */
 	if (req->flags & REQ_F_ISREG) {
-		sb_start_write(file_inode(req->file)->i_sb);
+		file_start_write(req->file);
 		__sb_writers_release(file_inode(req->file)->i_sb,
 					SB_FREEZE_WRITE);
 	}

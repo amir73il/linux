@@ -2930,11 +2930,13 @@ static inline bool inode_wrong_type(const struct inode *inode, umode_t mode)
 	return (inode->i_mode ^ mode) & S_IFMT;
 }
 
+extern void __file_start_write(struct file *file);
+
 static inline void file_start_write(struct file *file)
 {
 	if (!S_ISREG(file_inode(file)->i_mode))
 		return;
-	sb_start_write(file_inode(file)->i_sb);
+	__file_start_write(file);
 }
 
 static inline bool file_start_write_trylock(struct file *file)

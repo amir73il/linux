@@ -402,6 +402,14 @@ static inline int fsnotify_sb_error(struct super_block *sb, struct inode *inode,
  */
 
 /*
+ * fsnotify_want_write_file - file is about to be modified
+ */
+static inline int fsnotify_want_write_file(struct file *file)
+{
+	return fsnotify_file(file, FS_MODIFY_INTENT);
+}
+
+/*
  * fsnotify_want_write_path - object at path is about to be modified
  */
 static inline int fsnotify_want_write_path(const struct path *path)
