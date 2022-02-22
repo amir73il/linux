@@ -66,6 +66,12 @@
 #define FS_RENAME		0x10000000	/* File was renamed */
 #define FS_DN_MULTISHOT		0x20000000	/* dnotify multishot */
 #define FS_ISDIR		0x40000000	/* event occurred against dir */
+/*
+ * The object interest mask has a mix of events that marks want to get and
+ * events that marks want to ignore.  This flag is set in the object interest
+ * mask to indicate that some mark is interested to get some events.
+ */
+#define FS_OBJECT_WATCHING	0x80000000
 
 #define FS_MOVE			(FS_MOVED_FROM | FS_MOVED_TO)
 
@@ -737,6 +743,10 @@ static inline __u32 fsnotify_calc_mask(struct fsnotify_mark *mark)
 {
 	__u32 mask = mark->mask;
 
+	/* This mark wants to get events, not only to ignore them */
+	if (mask)
+		mask |= FS_OBJECT_WATCHING;
+
 	if (!fsnotify_ignored_events(mark))
 		return mask;
 
@@ -746,7 +756,7 @@ static inline __u32 fsnotify_calc_mask(struct fsnotify_mark *mark)
 
 	/*
 	 * If mark is interested in ignoring events on children, the object must
-	 * show interest in those events for fsnotify_parent() to notice it.
+	 * show interest in those events for fsnotify() to notice it.
 	 */
 	return mask | mark->ignore_mask;
 }
