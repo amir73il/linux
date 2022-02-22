@@ -56,6 +56,13 @@
 #define FS_OPEN_EXEC_PERM	0x00040000	/* open/exec event in a permission hook */
 
 /*
+ * Pre modification hooks for use by kernel internal backends only.
+ */
+#define FS_MODIFY_INTENT	0x01000000	/* File about to be modified */
+#define FS_NAME_INTENT		0x02000000	/* Subfile about to be linked/unlinked */
+#define FS_MOVE_INTENT		0x04000000	/* Subfile about to be moved */
+
+/*
  * Set on inode mark that cares about things that happen to its children.
  * Always set for dnotify and inotify.
  * Set on inode/sb/mount marks that care about parent/name info.
@@ -74,10 +81,18 @@
  * The watching parent may get an FS_ATTRIB|FS_EVENT_ON_CHILD event
  * when a directory entry inside a child subdir changes.
  */
-#define ALL_FSNOTIFY_DIRENT_EVENTS (FS_CREATE | FS_DELETE | FS_MOVE | FS_RENAME)
+#define ALL_FSNOTIFY_DIRENT_EVENTS (FS_CREATE | FS_DELETE | FS_MOVE | \
+				    FS_RENAME | \
+				    FS_NAME_INTENT | FS_MOVE_INTENT)
 
 #define ALL_FSNOTIFY_PERM_EVENTS (FS_OPEN_PERM | FS_ACCESS_PERM | \
 				  FS_OPEN_EXEC_PERM)
+
+#define ALL_FSNOTIFY_INTENT_EVENTS (FS_MODIFY_INTENT | FS_NAME_INTENT | \
+				    FS_MOVE_INTENT)
+
+#define ALL_FSNOTIFY_BLOCKING_EVENTS (ALL_FSNOTIFY_INTENT_EVENTS | \
+				      ALL_FSNOTIFY_PERM_EVENTS)
 
 /*
  * This is a list of all events that may get sent to a parent that is watching
@@ -86,7 +101,7 @@
 #define FS_EVENTS_POSS_ON_CHILD   (ALL_FSNOTIFY_PERM_EVENTS | \
 				   FS_ACCESS | FS_MODIFY | FS_ATTRIB | \
 				   FS_CLOSE_WRITE | FS_CLOSE_NOWRITE | \
-				   FS_OPEN | FS_OPEN_EXEC)
+				   FS_OPEN | FS_OPEN_EXEC | FS_MODIFY_INTENT)
 
 /*
  * This is a list of all events that may get sent with the parent inode as the

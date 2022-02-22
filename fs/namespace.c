@@ -383,6 +383,71 @@ int mnt_want_write(struct vfsmount *m)
 EXPORT_SYMBOL_GPL(mnt_want_write);
 
 /**
+ * mnt_want_write_path - get write access to a path's mount
+ * @path: the path who's mount on which to take a write
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ *
+ * After finished, mnt_drop_write must be called to drop the reference.
+ */
+int mnt_want_write_path(const struct path *path)
+{
+	int ret;
+
+	ret = fsnotify_want_write_path(path);
+	if (ret)
+		return ret;
+
+	return mnt_want_write(path->mnt);
+}
+EXPORT_SYMBOL_GPL(mnt_want_write_path);
+
+/**
+ * mnt_want_write_name - get write access to a path's mount before link/unlink
+ * @path: the path who's mount on which to take a write
+ * @name: name relative to path where entry is about to be linked/unlinked
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ *
+ * After finished, mnt_drop_write must be called to drop the reference.
+ */
+int mnt_want_write_name(const struct path *path, const struct qstr *name)
+{
+	int ret;
+
+	ret = fsnotify_want_write_name(path, name);
+	if (ret)
+		return ret;
+
+	return mnt_want_write(path->mnt);
+}
+EXPORT_SYMBOL_GPL(mnt_want_write_name);
+
+/**
+ * mnt_want_write_rename - get write access to a path's mount before rename
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ *
+ * After finished, mnt_drop_write must be called to drop the reference.
+ */
+int mnt_want_write_rename(const struct path *oldpath, const struct qstr *oldname,
+			  const struct path *newpath, const struct qstr *newname,
+			  unsigned int flags)
+{
+	int ret;
+
+	ret = fsnotify_want_write_rename(oldpath, oldname, newpath, newname, flags);
+	if (ret)
+		return ret;
+
+	return mnt_want_write(oldpath->mnt);
+}
+EXPORT_SYMBOL_GPL(mnt_want_write_rename);
+
+/**
  * __mnt_want_write_file - get write access to a file's mount
  * @file: the file who's mount on which to take a write
  *
