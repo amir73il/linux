@@ -425,6 +425,7 @@ struct fsnotify_mark_connector {
 	unsigned short type;	/* Type of object [lock] */
 #define FSNOTIFY_CONN_FLAG_HAS_FSID	0x01
 	unsigned short flags;	/* flags [lock] */
+	atomic_t proxy_iref;	/* marks that want inode reference held */
 	__kernel_fsid_t fsid;	/* fsid of filesystem containing object */
 	union {
 		/* Object pointer [lock] */
@@ -471,6 +472,7 @@ struct fsnotify_mark {
 	/* Events types to ignore [mark->lock, group->mark_mutex] */
 	__u32 ignored_mask;
 	/* Internal fsnotify flags */
+#define FSNOTIFY_MARK_FLAG_HAS_IREF		0x01
 #define FSNOTIFY_MARK_FLAG_ALIVE		0x02
 #define FSNOTIFY_MARK_FLAG_ATTACHED		0x04
 	/* Backend controlled flags */
@@ -637,6 +639,7 @@ extern int fsnotify_get_conn_fsid(const struct fsnotify_mark_connector *conn,
 /* attach the mark to the object */
 #define FSNOTIFY_ADD_MARK_ALLOW_DUPS	0x1
 #define FSNOTIFY_ADD_MARK_UPDATE_MASKS	0x2
+#define FSNOTIFY_ADD_MARK_NO_IREF	0x4
 
 extern int fsnotify_add_mark(struct fsnotify_mark *mark,
 			     fsnotify_connp_t *connp, unsigned int obj_type,

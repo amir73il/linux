@@ -213,6 +213,17 @@ static void *fsnotify_detach_connector_from_object(
 	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE) {
 		inode = fsnotify_conn_inode(conn);
 		inode->i_fsnotify_mask = 0;
+
+		pr_debug("%s: inode=%p iref=%u sb_connectors=%lu icount=%u\n",
+			 __func__, inode, atomic_read(&conn->proxy_iref),
+			 atomic_long_read(&inode->i_sb->s_fsnotify_connectors),
+			 atomic_read(&inode->i_count));
+
+		/* Unpin inode when detaching from connector */
+		if (atomic_read(&conn->proxy_iref))
+			atomic_set(&conn->proxy_iref, 0);
+		else
+			inode = NULL;
 	} else if (conn->type == FSNOTIFY_OBJ_TYPE_VFSMOUNT) {
 		fsnotify_conn_mount(conn)->mnt_fsnotify_mask = 0;
 	} else if (conn->type == FSNOTIFY_OBJ_TYPE_SB) {
@@ -240,12 +251,43 @@ static void fsnotify_final_mark_destroy(struct fsnotify_mark *mark)
 /* Drop object reference originally held by a connector */
 static void fsnotify_drop_object(unsigned int type, void *objp)
 {
+	struct inode *inode = objp;
+
 	if (!objp)
 		return;
 	/* Currently only inode references are passed to be dropped */
 	if (WARN_ON_ONCE(type != FSNOTIFY_OBJ_TYPE_INODE))
 		return;
-	fsnotify_put_inode_ref(objp);
+
+	pr_debug("%s: inode=%p sb_connectors=%lu, icount=%u\n", __func__,
+		 inode, atomic_long_read(&inode->i_sb->s_fsnotify_connectors),
+		 atomic_read(&inode->i_count));
+
+	fsnotify_put_inode_ref(inode);
+}
+
+/* Drop the proxy refcount on inode maintainted by connector */
+static struct inode *fsnotify_drop_iref(struct fsnotify_mark_connector *conn,
+					unsigned int *type)
+{
+	struct inode *inode = fsnotify_conn_inode(conn);
+
+	if (WARN_ON_ONCE(!inode || conn->type != FSNOTIFY_OBJ_TYPE_INODE))
+		return NULL;
+
+	pr_debug("%s: inode=%p iref=%u sb_connectors=%lu icount=%u\n",
+		 __func__, inode, atomic_read(&conn->proxy_iref),
+		 atomic_long_read(&inode->i_sb->s_fsnotify_connectors),
+		 atomic_read(&inode->i_count));
+
+	if (WARN_ON_ONCE(!atomic_read(&conn->proxy_iref)) ||
+	    !atomic_dec_and_test(&conn->proxy_iref))
+		return NULL;
+
+	fsnotify_put_inode_ref(inode);
+	*type = FSNOTIFY_OBJ_TYPE_INODE;
+
+	return inode;
 }
 
 void fsnotify_put_mark(struct fsnotify_mark *mark)
@@ -275,6 +317,9 @@ void fsnotify_put_mark(struct fsnotify_mark *mark)
 		free_conn = true;
 	} else {
 		__fsnotify_recalc_mask(conn);
+		/* Unpin inode on last mark that wants inode refcount held */
+		if (mark->flags & FSNOTIFY_MARK_FLAG_HAS_IREF)
+			objp = fsnotify_drop_iref(conn, &type);
 	}
 	WRITE_ONCE(mark->connector, NULL);
 	spin_unlock(&conn->lock);
@@ -499,7 +544,6 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 					       unsigned int obj_type,
 					       __kernel_fsid_t *fsid)
 {
-	struct inode *inode = NULL;
 	struct fsnotify_mark_connector *conn;
 
 	conn = kmem_cache_alloc(fsnotify_mark_connector_cachep, GFP_KERNEL);
@@ -507,6 +551,7 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 		return -ENOMEM;
 	spin_lock_init(&conn->lock);
 	INIT_HLIST_HEAD(&conn->list);
+	atomic_set(&conn->proxy_iref, 0);
 	conn->type = obj_type;
 	conn->obj = connp;
 	/* Cache fsid of filesystem containing the object */
@@ -517,10 +562,6 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 		conn->fsid.val[0] = conn->fsid.val[1] = 0;
 		conn->flags = 0;
 	}
-	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE) {
-		inode = fsnotify_conn_inode(conn);
-		fsnotify_get_inode_ref(inode);
-	}
 	fsnotify_get_sb_connectors(conn);
 
 	/*
@@ -529,8 +570,6 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 	 */
 	if (cmpxchg(connp, NULL, conn)) {
 		/* Someone else created list structure for us */
-		if (inode)
-			fsnotify_put_inode_ref(inode);
 		fsnotify_put_sb_connectors(conn);
 		kmem_cache_free(fsnotify_mark_connector_cachep, conn);
 	}
@@ -659,6 +698,21 @@ restart:
 	/* mark should be the last entry.  last is the current last entry */
 	hlist_add_behind_rcu(&mark->obj_list, &last->obj_list);
 added:
+	/* Pin inode on first mark that wants inode refcount held */
+	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE &&
+	    !(flags & FSNOTIFY_ADD_MARK_NO_IREF)) {
+		struct inode *inode = fsnotify_conn_inode(conn);
+
+		mark->flags |= FSNOTIFY_MARK_FLAG_HAS_IREF;
+		if (atomic_inc_return(&conn->proxy_iref) == 1)
+			fsnotify_get_inode_ref(inode);
+
+		pr_debug("%s: inode=%p iref=%u sb_connectors=%lu icount=%u\n",
+			 __func__, inode, atomic_read(&conn->proxy_iref),
+			 atomic_long_read(&inode->i_sb->s_fsnotify_connectors),
+			 atomic_read(&inode->i_count));
+	}
+
 	/*
 	 * Since connector is attached to object using cmpxchg() we are
 	 * guaranteed that connector initialization is fully visible by anyone
