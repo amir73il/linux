@@ -7,11 +7,13 @@
 static struct {
 	struct fault_attr attr;
 	bool ignore_gfp_reclaim;
+	u32 min_order;
 	bool cache_filter;
 } failslab = {
 	.attr = FAULT_ATTR_INITIALIZER,
 	.ignore_gfp_reclaim = true,
 	.cache_filter = false,
+	.min_order = 0,
 };
 
 bool __should_failslab(struct kmem_cache *s, gfp_t gfpflags)
@@ -29,6 +31,11 @@ bool __should_failslab(struct kmem_cache *s, gfp_t gfpflags)
 
 	if (failslab.cache_filter && !(s->flags & SLAB_FAILSLAB))
 		return false;
+
+#ifdef CONFIG_SLAB
+	if (s->gfporder < failslab.min_order)
+		return false;
+#endif
 
 	return should_fail(&failslab.attr, s->object_size);
 }
@@ -53,6 +60,9 @@ static int __init failslab_debugfs_init(void)
 			    &failslab.ignore_gfp_reclaim);
 	debugfs_create_bool("cache-filter", mode, dir,
 			    &failslab.cache_filter);
+#ifdef CONFIG_SLAB
+	debugfs_create_u32("min-order", mode, dir, &failslab.min_order);
+#endif
 
 	return 0;
 }

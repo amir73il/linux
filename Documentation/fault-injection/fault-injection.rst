@@ -143,6 +143,7 @@ configuration of fault-injection capabilities.
 	default is 'N', setting it to 'Y' will inject failures
 	only into non-sleep allocations (GFP_ATOMIC allocations).
 
+- /sys/kernel/debug/failslab/min-order:
 - /sys/kernel/debug/fail_page_alloc/min-order:
 
 	specifies the minimum page allocation order to be injected
