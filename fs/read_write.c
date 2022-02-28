@@ -21,6 +21,7 @@
 #include <linux/mount.h>
 #include <linux/fs.h>
 #include "internal.h"
+#include "mount.h"
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
@@ -33,6 +34,30 @@ const struct file_operations generic_ro_fops = {
 };
 
 EXPORT_SYMBOL(generic_ro_fops);
+
+static void file_add_rchar(struct file *file, struct task_struct *tsk, ssize_t amt)
+{
+	file_iostats_counter_add(file, MNTIOS_CHARS_RD, amt);
+	add_rchar(tsk, amt);
+}
+
+static void file_add_wchar(struct file *file, struct task_struct *tsk, ssize_t amt)
+{
+	file_iostats_counter_add(file, MNTIOS_CHARS_WR, amt);
+	add_wchar(tsk, amt);
+}
+
+static void file_inc_syscr(struct file *file, struct task_struct *tsk)
+{
+	file_iostats_counter_inc(file, MNTIOS_SYSCALLS_RD);
+	inc_syscr(current);
+}
+
+static void file_inc_syscw(struct file *file, struct task_struct *tsk)
+{
+	file_iostats_counter_inc(file, MNTIOS_SYSCALLS_WR);
+	inc_syscw(current);
+}
 
 static inline bool unsigned_offsets(struct file *file)
 {
@@ -441,9 +466,9 @@ ssize_t __kernel_read(struct file *file, void *buf, size_t count, loff_t *pos)
 		if (pos)
 			*pos = kiocb.ki_pos;
 		fsnotify_access(file);
-		add_rchar(current, ret);
+		file_add_rchar(file, current, ret);
 	}
-	inc_syscr(current);
+	file_inc_syscr(file, current);
 	return ret;
 }
 
@@ -483,9 +508,9 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		ret = -EINVAL;
 	if (ret > 0) {
 		fsnotify_access(file);
-		add_rchar(current, ret);
+		file_add_rchar(file, current, ret);
 	}
-	inc_syscr(current);
+	file_inc_syscr(file, current);
 	return ret;
 }
 
@@ -537,9 +562,9 @@ ssize_t __kernel_write(struct file *file, const void *buf, size_t count, loff_t 
 		if (pos)
 			*pos = kiocb.ki_pos;
 		fsnotify_modify(file);
-		add_wchar(current, ret);
+		file_add_wchar(file, current, ret);
 	}
-	inc_syscw(current);
+	file_inc_syscw(file, current);
 	return ret;
 }
 /*
@@ -592,9 +617,9 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 		ret = -EINVAL;
 	if (ret > 0) {
 		fsnotify_modify(file);
-		add_wchar(current, ret);
+		file_add_wchar(file, current, ret);
 	}
-	inc_syscw(current);
+	file_inc_syscw(file, current);
 	file_end_write(file);
 	return ret;
 }
@@ -947,8 +972,8 @@ static ssize_t do_readv(unsigned long fd, const struct iovec __user *vec,
 	}
 
 	if (ret > 0)
-		add_rchar(current, ret);
-	inc_syscr(current);
+		file_add_rchar(f.file, current, ret);
+	file_inc_syscr(f.file, current);
 	return ret;
 }
 
@@ -971,8 +996,8 @@ static ssize_t do_writev(unsigned long fd, const struct iovec __user *vec,
 	}
 
 	if (ret > 0)
-		add_wchar(current, ret);
-	inc_syscw(current);
+		file_add_wchar(f.file, current, ret);
+	file_inc_syscw(f.file, current);
 	return ret;
 }
 
@@ -1000,8 +1025,8 @@ static ssize_t do_preadv(unsigned long fd, const struct iovec __user *vec,
 	}
 
 	if (ret > 0)
-		add_rchar(current, ret);
-	inc_syscr(current);
+		file_add_rchar(f.file, current, ret);
+	file_inc_syscr(f.file, current);
 	return ret;
 }
 
@@ -1023,8 +1048,8 @@ static ssize_t do_pwritev(unsigned long fd, const struct iovec __user *vec,
 	}
 
 	if (ret > 0)
-		add_wchar(current, ret);
-	inc_syscw(current);
+		file_add_wchar(f.file, current, ret);
+	file_inc_syscw(f.file, current);
 	return ret;
 }
 
@@ -1250,8 +1275,8 @@ static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
 	}
 
 	if (retval > 0) {
-		add_rchar(current, retval);
-		add_wchar(current, retval);
+		file_add_rchar(in.file, current, retval);
+		file_add_wchar(out.file, current, retval);
 		fsnotify_access(in.file);
 		fsnotify_modify(out.file);
 		out.file->f_pos = out_pos;
@@ -1261,8 +1286,8 @@ static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
 			in.file->f_pos = pos;
 	}
 
-	inc_syscr(current);
-	inc_syscw(current);
+	file_inc_syscr(in.file, current);
+	file_inc_syscw(out.file, current);
 	if (pos > max)
 		retval = -EOVERFLOW;
 
@@ -1511,13 +1536,13 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 done:
 	if (ret > 0) {
 		fsnotify_access(file_in);
-		add_rchar(current, ret);
+		file_add_rchar(file_in, current, ret);
 		fsnotify_modify(file_out);
-		add_wchar(current, ret);
+		file_add_wchar(file_out, current, ret);
 	}
 
-	inc_syscr(current);
-	inc_syscw(current);
+	file_inc_syscr(file_in, current);
+	file_inc_syscw(file_out, current);
 
 	file_end_write(file_out);
 

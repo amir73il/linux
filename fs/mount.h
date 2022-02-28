@@ -165,6 +165,16 @@ static inline bool is_anon_ns(struct mnt_namespace *ns)
 
 extern void mnt_cursor_del(struct mnt_namespace *ns, struct mount *cursor);
 
+static inline bool mnt_has_stats(struct vfsmount *mnt)
+{
+#ifdef CONFIG_FS_MOUNT_STATS
+	/* Should this also be configurable per mount? */
+	return (mnt->mnt_sb->s_type->fs_flags & FS_MOUNT_STATS);
+#else
+	return false;
+#endif
+}
+
 static inline void mnt_iostats_counter_inc(struct mount *mnt, int id)
 {
 #ifdef CONFIG_FS_MOUNT_STATS
@@ -176,6 +186,22 @@ static inline void mnt_iostats_counter_add(struct mount *mnt, int id, s64 n)
 {
 #ifdef CONFIG_FS_MOUNT_STATS
 	this_cpu_add(mnt->mnt_pcp->iostats.counter[id], n);
+#endif
+}
+
+static inline void file_iostats_counter_inc(struct file *file, int id)
+{
+#ifdef CONFIG_FS_MOUNT_STATS
+	if (file && mnt_has_stats(file->f_path.mnt))
+		mnt_iostats_counter_inc(real_mount(file->f_path.mnt), id);
+#endif
+}
+
+static inline void file_iostats_counter_add(struct file *file, int id, s64 n)
+{
+#ifdef CONFIG_FS_MOUNT_STATS
+	if (file && mnt_has_stats(file->f_path.mnt))
+		mnt_iostats_counter_add(real_mount(file->f_path.mnt), id, n);
 #endif
 }
 

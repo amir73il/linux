@@ -2434,6 +2434,7 @@ struct file_system_type {
 #define FS_USERNS_MOUNT		(1<<3)	/* Can be mounted by userns root */
 #define FS_DISALLOW_NOTIFY_PERM	(1<<4)	/* Disable fanotify permission events */
 #define FS_ALLOW_IDMAP		(1<<5)	/* FS can handle vfs idmappings */
+#define FS_MOUNT_STATS		(1<<6)	/* FS has generic proc/pid/mountstats */
 #define FS_RENAME_DOES_D_MOVE	(1<<15)	/* FS will handle d_move() internally */
 	int (*init_fs_context)(struct fs_context *);
 	const struct fs_parameter_spec *parameters;
