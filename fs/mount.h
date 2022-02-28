@@ -24,9 +24,25 @@ struct mnt_namespace {
 	unsigned int		pending_mounts;
 } __randomize_layout;
 
+/* Similar to task_io_accounting members */
+enum {
+	MNTIOS_CHARS_RD,	/* bytes read via syscalls */
+	MNTIOS_CHARS_WR,	/* bytes written via syscalls */
+	MNTIOS_SYSCALLS_RD,	/* # of read syscalls */
+	MNTIOS_SYSCALLS_WR,	/* # of write syscalls */
+	_MNTIOS_COUNTERS_NUM
+};
+
+struct mnt_iostats {
+	s64 counter[_MNTIOS_COUNTERS_NUM];
+};
+
 struct mnt_pcp {
 	int mnt_count;
 	int mnt_writers;
+#ifdef CONFIG_FS_MOUNT_STATS
+	struct mnt_iostats iostats;
+#endif
 };
 
 struct mountpoint {
@@ -148,3 +164,19 @@ static inline bool is_anon_ns(struct mnt_namespace *ns)
 }
 
 extern void mnt_cursor_del(struct mnt_namespace *ns, struct mount *cursor);
+
+static inline void mnt_iostats_counter_inc(struct mount *mnt, int id)
+{
+#ifdef CONFIG_FS_MOUNT_STATS
+	this_cpu_inc(mnt->mnt_pcp->iostats.counter[id]);
+#endif
+}
+
+static inline void mnt_iostats_counter_add(struct mount *mnt, int id, s64 n)
+{
+#ifdef CONFIG_FS_MOUNT_STATS
+	this_cpu_add(mnt->mnt_pcp->iostats.counter[id], n);
+#endif
+}
+
+extern s64 mnt_iostats_counter_read(struct mount *mnt, int id);

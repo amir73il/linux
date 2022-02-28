@@ -306,6 +306,23 @@ static unsigned int mnt_get_writers(struct mount *mnt)
 #endif
 }
 
+s64 mnt_iostats_counter_read(struct mount *mnt, int id)
+{
+	s64 count = 0;
+#ifdef CONFIG_FS_MOUNT_STATS
+	/*
+	 * MOUNT_STATS depends on SMP.
+	 * Should be trivial to implement for !SMP if anyone cares...
+	 */
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		count += per_cpu_ptr(mnt->mnt_pcp, cpu)->iostats.counter[id];
+	}
+#endif
+	return count;
+}
+
 static int mnt_is_readonly(struct vfsmount *mnt)
 {
 	if (mnt->mnt_sb->s_readonly_remount)

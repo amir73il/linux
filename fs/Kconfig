@@ -15,6 +15,15 @@ config VALIDATE_FS_PARSER
 	  Enable this to perform validation of the parameter description for a
 	  filesystem when it is registered.
 
+config FS_MOUNT_STATS
+	bool "Enable per-mount I/O statistics"
+	depends on SMP
+	help
+	  Enable this to allow collecting per-mount I/O statistics and display
+	  them in /proc/<pid>/mountstats.
+
+	  Say N if unsure.
+
 config FS_IOMAP
 	bool
 
