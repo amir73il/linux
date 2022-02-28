@@ -36,6 +36,7 @@
 #include <linux/lockdep.h>
 #include <linux/user_namespace.h>
 #include <linux/fs_context.h>
+#include <linux/fs_iostats.h>
 #include <uapi/linux/mount.h>
 #include "internal.h"
 
@@ -179,6 +180,7 @@ static void destroy_unused_super(struct super_block *s)
 	up_write(&s->s_umount);
 	list_lru_destroy(&s->s_dentry_lru);
 	list_lru_destroy(&s->s_inode_lru);
+	sb_iostats_destroy(s);
 	security_sb_free(s);
 	put_user_ns(s->s_user_ns);
 	kfree(s->s_subtype);
@@ -228,6 +230,9 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags,
 	down_write_nested(&s->s_umount, SINGLE_DEPTH_NESTING);
 
 	if (security_sb_alloc(s))
+		goto fail;
+
+	if (type->fs_flags & FS_SB_IOSTATS && sb_iostats_init(s))
 		goto fail;
 
 	for (i = 0; i < SB_FREEZE_LEVELS; i++) {
@@ -290,6 +295,7 @@ static void __put_super(struct super_block *s)
 		WARN_ON(s->s_dentry_lru.node);
 		WARN_ON(s->s_inode_lru.node);
 		WARN_ON(!list_empty(&s->s_mounts));
+		sb_iostats_destroy(s);
 		security_sb_free(s);
 		fscrypt_sb_free(s);
 		put_user_ns(s->s_user_ns);

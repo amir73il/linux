@@ -1455,6 +1455,8 @@ struct sb_writers {
 	struct percpu_rw_semaphore	rw_sem[SB_FREEZE_LEVELS];
 };
 
+struct sb_iostats;
+
 struct super_block {
 	struct list_head	s_list;		/* Keep this first */
 	dev_t			s_dev;		/* search index; _not_ kdev_t */
@@ -1509,8 +1511,12 @@ struct super_block {
 	/* Granularity of c/m/atime in ns (cannot be worse than a second) */
 	u32			s_time_gran;
 	/* Time limits for c/m/atime in seconds */
-	time64_t		   s_time_min;
-	time64_t		   s_time_max;
+	time64_t		s_time_min;
+	time64_t		s_time_max;
+#ifdef CONFIG_FS_IOSTATS
+	/* Optional per-sb I/O stats */
+	struct sb_iostats	*s_iostats;
+#endif
 #ifdef CONFIG_FSNOTIFY
 	__u32			s_fsnotify_mask;
 	struct fsnotify_mark_connector __rcu	*s_fsnotify_marks;
@@ -2435,6 +2441,7 @@ struct file_system_type {
 #define FS_USERNS_MOUNT		(1<<3)	/* Can be mounted by userns root */
 #define FS_DISALLOW_NOTIFY_PERM	(1<<4)	/* Disable fanotify permission events */
 #define FS_ALLOW_IDMAP		(1<<5)	/* FS can handle vfs idmappings */
+#define FS_SB_IOSTATS		(1<<6)	/* FS has generic per-sb I/O stats */
 #define FS_RENAME_DOES_D_MOVE	(1<<15)	/* FS will handle d_move() internally */
 	int (*init_fs_context)(struct fs_context *);
 	const struct fs_parameter_spec *parameters;
