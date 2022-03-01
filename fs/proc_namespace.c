@@ -11,6 +11,7 @@
 #include <linux/nsproxy.h>
 #include <linux/security.h>
 #include <linux/fs_struct.h>
+#include <linux/fs_iostats.h>
 #include <linux/sched/task.h>
 
 #include "proc/internal.h" /* only for get_proc_task() in ->open() */
@@ -232,6 +233,21 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 	if (sb->s_op->show_stats) {
 		seq_putc(m, ' ');
 		err = sb->s_op->show_stats(m, mnt_path.dentry);
+	} else if (sb_has_iostats(sb)) {
+		struct sb_iostats *iostats = sb_iostats(sb);
+
+		/* Similar to /proc/<pid>/io */
+		seq_printf(m, "\n"
+			   "\ttimes: %lld %lld\n"
+			   "\trchar: %lld\n"
+			   "\twchar: %lld\n"
+			   "\tsyscr: %lld\n"
+			   "\tsyscw: %lld\n",
+			   iostats->start_time, ktime_get_seconds(),
+			   sb_iostats_counter_read(sb, SB_IOSTATS_CHARS_RD),
+			   sb_iostats_counter_read(sb, SB_IOSTATS_CHARS_WR),
+			   sb_iostats_counter_read(sb, SB_IOSTATS_SYSCALLS_RD),
+			   sb_iostats_counter_read(sb, SB_IOSTATS_SYSCALLS_WR));
 	}
 
 	seq_putc(m, '\n');
