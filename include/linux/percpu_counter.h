@@ -193,4 +193,33 @@ static inline void percpu_counter_sub(struct percpu_counter *fbc, s64 amount)
 	percpu_counter_add(fbc, -amount);
 }
 
+/*
+ * Helpers for percpu counters for which per-cpu drift doesn't matter.
+ * This is typically the case for statistics counters that are read with
+ * percpu_counter_sum{,_positive}().
+ */
+#define PERCPU_COUNTER_LARGE_BATCH	(INT_MAX / 2)
+
+static inline void percpu_counter_add_relaxed(struct percpu_counter *fbc,
+					      s64 amount)
+{
+	percpu_counter_add_batch(fbc, amount, PERCPU_COUNTER_LARGE_BATCH);
+}
+
+static inline void percpu_counter_sub_relaxed(struct percpu_counter *fbc,
+					      s64 amount)
+{
+	percpu_counter_add_relaxed(fbc, amount);
+}
+
+static inline void percpu_counter_inc_relaxed(struct percpu_counter *fbc)
+{
+	percpu_counter_add_relaxed(fbc, 1);
+}
+
+static inline void percpu_counter_dec_relaxed(struct percpu_counter *fbc)
+{
+	percpu_counter_add_relaxed(fbc, -1);
+}
+
 #endif /* _LINUX_PERCPU_COUNTER_H */
