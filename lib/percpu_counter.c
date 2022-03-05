@@ -181,6 +181,33 @@ void percpu_counter_destroy(struct percpu_counter *fbc)
 }
 EXPORT_SYMBOL(percpu_counter_destroy);
 
+int percpu_counters_init(struct percpu_counter counters[], int num, s64 amount,
+			 gfp_t gfp)
+{
+	int i, err = 0;
+
+	for (i = 0; !err && i < num; i++)
+		err = percpu_counter_init(&counters[i], amount, gfp);
+
+	if (!err)
+		return 0;
+
+	for (; i > 0; i--)
+		percpu_counter_destroy(&counters[i-1]);
+
+	return err;
+}
+EXPORT_SYMBOL(percpu_counters_init);
+
+void percpu_counters_destroy(struct percpu_counter counters[], int num)
+{
+	int i;
+
+	for (i = 0; i < num; i++)
+		percpu_counter_destroy(&counters[i]);
+}
+EXPORT_SYMBOL(percpu_counters_destroy);
+
 int percpu_counter_batch __read_mostly = 32;
 EXPORT_SYMBOL(percpu_counter_batch);
 

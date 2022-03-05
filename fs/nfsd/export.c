@@ -334,17 +334,21 @@ static void nfsd4_fslocs_free(struct nfsd4_fs_locations *fsloc)
 static int export_stats_init(struct export_stats *stats)
 {
 	stats->start_time = ktime_get_seconds();
-	return nfsd_percpu_counters_init(stats->counter, EXP_STATS_COUNTERS_NUM);
+	return percpu_counters_init(stats->counter, EXP_STATS_COUNTERS_NUM, 0,
+				    GFP_KERNEL);
 }
 
 static void export_stats_reset(struct export_stats *stats)
 {
-	nfsd_percpu_counters_reset(stats->counter, EXP_STATS_COUNTERS_NUM);
+	int i;
+
+	for (i = 0; i < EXP_STATS_COUNTERS_NUM; i++)
+		percpu_counter_set(&stats->counter[i], 0);
 }
 
 static void export_stats_destroy(struct export_stats *stats)
 {
-	nfsd_percpu_counters_destroy(stats->counter, EXP_STATS_COUNTERS_NUM);
+	percpu_counters_destroy(stats->counter, EXP_STATS_COUNTERS_NUM);
 }
 
 static void svc_export_put(struct kref *ref)

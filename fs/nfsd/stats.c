@@ -84,46 +84,15 @@ static const struct proc_ops nfsd_proc_ops = {
 	.proc_release	= single_release,
 };
 
-int nfsd_percpu_counters_init(struct percpu_counter counters[], int num)
-{
-	int i, err = 0;
-
-	for (i = 0; !err && i < num; i++)
-		err = percpu_counter_init(&counters[i], 0, GFP_KERNEL);
-
-	if (!err)
-		return 0;
-
-	for (; i > 0; i--)
-		percpu_counter_destroy(&counters[i-1]);
-
-	return err;
-}
-
-void nfsd_percpu_counters_reset(struct percpu_counter counters[], int num)
-{
-	int i;
-
-	for (i = 0; i < num; i++)
-		percpu_counter_set(&counters[i], 0);
-}
-
-void nfsd_percpu_counters_destroy(struct percpu_counter counters[], int num)
-{
-	int i;
-
-	for (i = 0; i < num; i++)
-		percpu_counter_destroy(&counters[i]);
-}
-
 static int nfsd_stat_counters_init(void)
 {
-	return nfsd_percpu_counters_init(nfsdstats.counter, NFSD_STATS_COUNTERS_NUM);
+	return percpu_counters_init(nfsdstats.counter, NFSD_STATS_COUNTERS_NUM,
+				    0, GFP_KERNEL);
 }
 
 static void nfsd_stat_counters_destroy(void)
 {
-	nfsd_percpu_counters_destroy(nfsdstats.counter, NFSD_STATS_COUNTERS_NUM);
+	percpu_counters_destroy(nfsdstats.counter, NFSD_STATS_COUNTERS_NUM);
 }
 
 int nfsd_stat_init(void)

@@ -150,12 +150,13 @@ void nfsd_drc_slab_free(void)
 
 static int nfsd_reply_cache_stats_init(struct nfsd_net *nn)
 {
-	return nfsd_percpu_counters_init(nn->counter, NFSD_NET_COUNTERS_NUM);
+	return percpu_counters_init(nn->counter, NFSD_NET_COUNTERS_NUM, 0,
+				    GFP_KERNEL);
 }
 
 static void nfsd_reply_cache_stats_destroy(struct nfsd_net *nn)
 {
-	nfsd_percpu_counters_destroy(nn->counter, NFSD_NET_COUNTERS_NUM);
+	percpu_counters_destroy(nn->counter, NFSD_NET_COUNTERS_NUM);
 }
 
 int nfsd_reply_cache_init(struct nfsd_net *nn)
