@@ -232,7 +232,12 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags,
 	if (security_sb_alloc(s))
 		goto fail;
 
-	if (type->fs_flags & FS_SB_IOSTATS && sb_iostats_init(s))
+	/*
+	 * Account per-sb I/O stats for all blockdev filesystems and for
+	 * filesystems that opt-in with FS_SB_IOSTATS.
+	 */
+	if (type->fs_flags & (FS_SB_IOSTATS | FS_REQUIRES_DEV) &&
+	    sb_iostats_init(s))
 		goto fail;
 
 	for (i = 0; i < SB_FREEZE_LEVELS; i++) {
