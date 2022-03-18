@@ -435,6 +435,7 @@ out:
 static int ovl_set_upper_acl(struct dentry *upperdentry, const char *name,
 			     const struct posix_acl *acl)
 {
+	struct ovl_fs *ofs = OVL_FS(upperdentry->d_sb);
 	void *buffer;
 	size_t size;
 	int err;
@@ -451,7 +452,8 @@ static int ovl_set_upper_acl(struct dentry *upperdentry, const char *name,
 	if (err < 0)
 		goto out_free;
 
-	err = vfs_setxattr(&init_user_ns, upperdentry, name, buffer, size, XATTR_CREATE);
+	err = ovl_do_setxattr(ofs, upperdentry, name, buffer, size,
+			      XATTR_CREATE);
 out_free:
 	kfree(buffer);
 	return err;
