@@ -495,16 +495,31 @@ int fsnotify_compare_groups(struct fsnotify_group *a, struct fsnotify_group *b)
 	return -1;
 }
 
+struct fsnotify_mark_connector *fsnotify_conn_alloc(gfp_t gfp_flags)
+{
+	return kmem_cache_alloc(fsnotify_mark_connector_cachep, gfp_flags);
+}
+
+void fsnotify_conn_free(struct fsnotify_mark_connector *conn)
+{
+	kmem_cache_free(fsnotify_mark_connector_cachep, conn);
+}
+
 static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 					       unsigned int obj_type,
-					       __kernel_fsid_t *fsid)
+					       __kernel_fsid_t *fsid,
+					       void **prealloc_conn)
 {
 	struct inode *inode = NULL;
 	struct fsnotify_mark_connector *conn;
 
-	conn = kmem_cache_alloc(fsnotify_mark_connector_cachep, GFP_KERNEL);
+	if (prealloc_conn)
+		conn = *prealloc_conn;
+	else
+		conn = fsnotify_conn_alloc(GFP_KERNEL);
 	if (!conn)
 		return -ENOMEM;
+
 	spin_lock_init(&conn->lock);
 	INIT_HLIST_HEAD(&conn->list);
 	conn->type = obj_type;
@@ -532,7 +547,9 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 		if (inode)
 			fsnotify_put_inode_ref(inode);
 		fsnotify_put_sb_connectors(conn);
-		kmem_cache_free(fsnotify_mark_connector_cachep, conn);
+	} else if (prealloc_conn) {
+		/* Take ownership of preallocated conn */
+		*prealloc_conn = NULL;
 	}
 
 	return 0;
@@ -574,7 +591,8 @@ out:
 static int fsnotify_add_mark_list(struct fsnotify_mark *mark,
 				  fsnotify_connp_t *connp,
 				  unsigned int obj_type,
-				  int allow_dups, __kernel_fsid_t *fsid)
+				  int allow_dups, __kernel_fsid_t *fsid,
+				  void **prealloc_conn)
 {
 	struct fsnotify_mark *lmark, *last = NULL;
 	struct fsnotify_mark_connector *conn;
@@ -594,7 +612,7 @@ restart:
 	if (!conn) {
 		spin_unlock(&mark->lock);
 		err = fsnotify_attach_connector_to_object(connp, obj_type,
-							  fsid);
+							  fsid, prealloc_conn);
 		if (err)
 			return err;
 		goto restart;
@@ -668,7 +686,8 @@ out_err:
  */
 int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 			     fsnotify_connp_t *connp, unsigned int obj_type,
-			     int allow_dups, __kernel_fsid_t *fsid)
+			     int allow_dups, __kernel_fsid_t *fsid,
+			     void **prealloc_conn)
 {
 	struct fsnotify_group *group = mark->group;
 	int ret = 0;
@@ -688,7 +707,8 @@ int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 	fsnotify_get_mark(mark); /* for g_list */
 	spin_unlock(&mark->lock);
 
-	ret = fsnotify_add_mark_list(mark, connp, obj_type, allow_dups, fsid);
+	ret = fsnotify_add_mark_list(mark, connp, obj_type, allow_dups, fsid,
+				     prealloc_conn);
 	if (ret)
 		goto err;
 
@@ -713,10 +733,20 @@ int fsnotify_add_mark(struct fsnotify_mark *mark, fsnotify_connp_t *connp,
 {
 	int ret;
 	struct fsnotify_group *group = mark->group;
+	void *prealloc_conn;
+
+	prealloc_conn = fsnotify_conn_alloc(GFP_KERNEL);
+	if (!prealloc_conn)
+		return -ENOMEM;
 
 	mutex_lock(&group->mark_mutex);
-	ret = fsnotify_add_mark_locked(mark, connp, obj_type, allow_dups, fsid);
+	ret = fsnotify_add_mark_locked(mark, connp, obj_type, allow_dups, fsid,
+				       &prealloc_conn);
 	mutex_unlock(&group->mark_mutex);
+
+	if (prealloc_conn)
+		fsnotify_conn_free(prealloc_conn);
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(fsnotify_add_mark);

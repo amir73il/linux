@@ -621,6 +621,8 @@ static inline __u32 fsnotify_calc_mask(struct fsnotify_mark *mark)
 	return mask | (mark->ignored_mask & ALL_FSNOTIFY_EVENTS);
 }
 
+extern struct fsnotify_mark_connector *fsnotify_conn_alloc(gfp_t gfp_flags);
+extern void fsnotify_conn_free(struct fsnotify_mark_connector *conn);
 /* Get mask of events for a list of marks */
 extern __u32 fsnotify_conn_mask(struct fsnotify_mark_connector *conn);
 /* Calculate mask of events for a list of marks */
@@ -640,7 +642,8 @@ extern int fsnotify_add_mark(struct fsnotify_mark *mark,
 extern int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 				    fsnotify_connp_t *connp,
 				    unsigned int obj_type, int allow_dups,
-				    __kernel_fsid_t *fsid);
+				    __kernel_fsid_t *fsid,
+				    void **prealloc_conn);
 
 /* attach the mark to the inode */
 static inline int fsnotify_add_inode_mark(struct fsnotify_mark *mark,
@@ -656,7 +659,7 @@ static inline int fsnotify_add_inode_mark_locked(struct fsnotify_mark *mark,
 {
 	return fsnotify_add_mark_locked(mark, &inode->i_fsnotify_marks,
 					FSNOTIFY_OBJ_TYPE_INODE, allow_dups,
-					NULL);
+					NULL, NULL);
 }
 
 /* given a group and a mark, flag mark to be freed when all references are dropped */
