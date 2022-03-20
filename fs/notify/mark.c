@@ -591,7 +591,7 @@ out:
 static int fsnotify_add_mark_list(struct fsnotify_mark *mark,
 				  fsnotify_connp_t *connp,
 				  unsigned int obj_type,
-				  int allow_dups, __kernel_fsid_t *fsid,
+				  int flags, __kernel_fsid_t *fsid,
 				  void **prealloc_conn)
 {
 	struct fsnotify_mark *lmark, *last = NULL;
@@ -651,7 +651,7 @@ restart:
 
 		if ((lmark->group == mark->group) &&
 		    (lmark->flags & FSNOTIFY_MARK_FLAG_ATTACHED) &&
-		    !allow_dups) {
+		    !(flags & FSNOTIFY_ADD_MARK_ALLOW_DUPS)) {
 			err = -EEXIST;
 			goto out_err;
 		}
@@ -686,7 +686,7 @@ out_err:
  */
 int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 			     fsnotify_connp_t *connp, unsigned int obj_type,
-			     int allow_dups, __kernel_fsid_t *fsid,
+			     int flags, __kernel_fsid_t *fsid,
 			     void **prealloc_conn)
 {
 	struct fsnotify_group *group = mark->group;
@@ -707,7 +707,7 @@ int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 	fsnotify_get_mark(mark); /* for g_list */
 	spin_unlock(&mark->lock);
 
-	ret = fsnotify_add_mark_list(mark, connp, obj_type, allow_dups, fsid,
+	ret = fsnotify_add_mark_list(mark, connp, obj_type, flags, fsid,
 				     prealloc_conn);
 	if (ret)
 		goto err;
@@ -728,8 +728,7 @@ err:
 }
 
 int fsnotify_add_mark(struct fsnotify_mark *mark, fsnotify_connp_t *connp,
-		      unsigned int obj_type, int allow_dups,
-		      __kernel_fsid_t *fsid)
+		      unsigned int obj_type, int flags, __kernel_fsid_t *fsid)
 {
 	int ret;
 	struct fsnotify_group *group = mark->group;
@@ -740,7 +739,7 @@ int fsnotify_add_mark(struct fsnotify_mark *mark, fsnotify_connp_t *connp,
 		return -ENOMEM;
 
 	mutex_lock(&group->mark_mutex);
-	ret = fsnotify_add_mark_locked(mark, connp, obj_type, allow_dups, fsid,
+	ret = fsnotify_add_mark_locked(mark, connp, obj_type, flags, fsid,
 				       &prealloc_conn);
 	mutex_unlock(&group->mark_mutex);
 
