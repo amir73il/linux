@@ -1084,6 +1084,9 @@ static int fanotify_remove_inode_mark(struct fsnotify_group *group,
 static int fanotify_mark_update_flags(struct fsnotify_mark *fsn_mark,
 				      unsigned int flags, bool *recalc)
 {
+	unsigned int want_iref = (flags & FAN_MARK_EVICTABLE) ? 0 :
+				 FSNOTIFY_MARK_FLAG_WANT_IREF;
+
 	/*
 	 * Setting FAN_MARK_IGNORED_SURV_MODIFY for the first time may lead to
 	 * the removal of the FS_MODIFY bit in calculated mask if it was set
@@ -1096,6 +1099,20 @@ static int fanotify_mark_update_flags(struct fsnotify_mark *fsn_mark,
 		if (!(fsn_mark->mask & FS_MODIFY))
 			*recalc = true;
 	}
+
+	if (fsn_mark->connector->type != FSNOTIFY_OBJ_TYPE_INODE ||
+	    want_iref == (fsn_mark->flags & FSNOTIFY_MARK_FLAG_WANT_IREF))
+		return 0;
+
+	/*
+	 * FAN_MARK_EVICTABLE may be removed from a mark, but not added.
+	 * When removed, fsnotify_recalc_mask() will take the inode ref.
+	 */
+	if (!want_iref)
+		return -EEXIST;
+
+	fsn_mark->flags |= FSNOTIFY_MARK_FLAG_WANT_IREF;
+	*recalc = true;
 
 	return 0;
 }
@@ -1130,6 +1147,7 @@ static int fanotify_mark_add_to_mask(struct fsnotify_mark *fsn_mark,
 static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 						   fsnotify_connp_t *connp,
 						   unsigned int obj_type,
+						   unsigned int fan_flags,
 						   __kernel_fsid_t *fsid,
 						   void **prealloc_mark,
 						   void **prealloc_conn)
@@ -1137,6 +1155,8 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 	struct ucounts *ucounts = group->fanotify_data.ucounts;
 	struct fsnotify_mark *mark;
 	int ret;
+	unsigned int add_flags = (fan_flags & FAN_MARK_EVICTABLE) ?
+				 FSNOTIFY_ADD_MARK_NO_IREF : 0;
 
 	/*
 	 * Enforce per user marks limits per user in all containing user ns.
@@ -1151,7 +1171,7 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 	mark = *prealloc_mark;
 	*prealloc_mark = NULL;
 	fsnotify_init_mark(mark, group);
-	ret = fsnotify_add_mark_locked(mark, connp, obj_type, 0, fsid,
+	ret = fsnotify_add_mark_locked(mark, connp, obj_type, add_flags, fsid,
 				       prealloc_conn);
 	if (ret) {
 		fsnotify_put_mark(mark);
@@ -1203,8 +1223,8 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 	if (!fsn_mark)
 		fsn_mark = fsnotify_find_mark(connp, group);
 	if (!fsn_mark) {
-		fsn_mark = fanotify_add_new_mark(group, connp, obj_type, fsid,
-						 &prealloc_mark,
+		fsn_mark = fanotify_add_new_mark(group, connp, obj_type, flags,
+						 fsid, &prealloc_mark,
 						 &prealloc_conn);
 		if (IS_ERR(fsn_mark)) {
 			ret = PTR_ERR(fsn_mark);
@@ -1629,6 +1649,14 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		goto fput_and_out;
 
 	/*
+	 * Evictable is only relevant for inode marks, because only inode object
+	 * can be evicted on memory pressure.
+	 */
+	if (flags & FAN_MARK_EVICTABLE &&
+	     mark_type != FAN_MARK_INODE)
+		goto fput_and_out;
+
+	/*
 	 * Events that do not carry enough information to report
 	 * event->fd require a group that supports reporting fid.  Those
 	 * events are not supported on a mount mark, because they do not
@@ -1780,7 +1808,7 @@ static int __init fanotify_user_setup(void)
 
 	BUILD_BUG_ON(FANOTIFY_INIT_FLAGS & FANOTIFY_INTERNAL_GROUP_FLAGS);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 12);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 9);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 10);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);
