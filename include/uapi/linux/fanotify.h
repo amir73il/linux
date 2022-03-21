@@ -89,6 +89,10 @@
 #define FAN_MARK_MOUNT		0x00000010
 #define FAN_MARK_FILESYSTEM	0x00000100
 
+/* Convenience macro - those usually go together */
+#define FAN_MARK_IGNORED	(FAN_MARK_IGNORED_MASK | \
+				 FAN_MARK_IGNORED_SURV_MODIFY)
+
 /* Deprecated - do not use this in programs and do not add new flags here! */
 #define FAN_ALL_MARK_FLAGS	(FAN_MARK_ADD |\
 				 FAN_MARK_REMOVE |\
