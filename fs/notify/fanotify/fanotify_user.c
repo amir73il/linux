@@ -1130,7 +1130,9 @@ static int fanotify_mark_add_to_mask(struct fsnotify_mark *fsn_mark,
 static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 						   fsnotify_connp_t *connp,
 						   unsigned int obj_type,
-						   __kernel_fsid_t *fsid)
+						   __kernel_fsid_t *fsid,
+						   void **prealloc_mark,
+						   void **prealloc_conn)
 {
 	struct ucounts *ucounts = group->fanotify_data.ucounts;
 	struct fsnotify_mark *mark;
@@ -1145,14 +1147,12 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 	    !inc_ucount(ucounts->ns, ucounts->uid, UCOUNT_FANOTIFY_MARKS))
 		return ERR_PTR(-ENOSPC);
 
-	mark = kmem_cache_alloc(fanotify_mark_cache, GFP_KERNEL);
-	if (!mark) {
-		ret = -ENOMEM;
-		goto out_dec_ucounts;
-	}
-
+	/* new mark it will be freed via fsnotify_put_mark() */
+	mark = *prealloc_mark;
+	*prealloc_mark = NULL;
 	fsnotify_init_mark(mark, group);
-	ret = fsnotify_add_mark_locked(mark, connp, obj_type, 0, fsid, NULL);
+	ret = fsnotify_add_mark_locked(mark, connp, obj_type, 0, fsid,
+				       prealloc_conn);
 	if (ret) {
 		fsnotify_put_mark(mark);
 		goto out_dec_ucounts;
@@ -1181,16 +1181,35 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 			     __u32 mask, unsigned int flags,
 			     __kernel_fsid_t *fsid)
 {
-	struct fsnotify_mark *fsn_mark;
-	int ret = 0;
+	struct fsnotify_mark *fsn_mark = NULL;
+	void *prealloc_conn = NULL, *prealloc_mark = NULL;
+	int ret = -ENOMEM;
+
+	fsn_mark = fsnotify_find_mark(connp, group);
+	/* Preallocate new mark and connector outside of group lock */
+	if (!fsn_mark) {
+		prealloc_conn = fsnotify_conn_alloc(GFP_KERNEL);
+		if (!prealloc_conn)
+			goto out;
+
+		prealloc_mark = kmem_cache_alloc(fanotify_mark_cache,
+						 GFP_KERNEL);
+		if (!prealloc_mark)
+			goto out;
+	}
 
 	mutex_lock(&group->mark_mutex);
-	fsn_mark = fsnotify_find_mark(connp, group);
+	/* Check again under lock - if found will not use preallocated mark */
+	if (!fsn_mark)
+		fsn_mark = fsnotify_find_mark(connp, group);
 	if (!fsn_mark) {
-		fsn_mark = fanotify_add_new_mark(group, connp, obj_type, fsid);
+		fsn_mark = fanotify_add_new_mark(group, connp, obj_type, fsid,
+						 &prealloc_mark,
+						 &prealloc_conn);
 		if (IS_ERR(fsn_mark)) {
-			mutex_unlock(&group->mark_mutex);
-			return PTR_ERR(fsn_mark);
+			ret = PTR_ERR(fsn_mark);
+			fsn_mark = NULL;
+			goto out_unlock;
 		}
 	}
 
@@ -1201,15 +1220,22 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 	if (!(flags & FAN_MARK_IGNORED_MASK) && (mask & FAN_FS_ERROR)) {
 		ret = fanotify_group_init_error_pool(group);
 		if (ret)
-			goto out;
+			goto out_unlock;
 	}
 
 	ret = fanotify_mark_add_to_mask(fsn_mark, mask, flags);
 
-out:
+out_unlock:
 	mutex_unlock(&group->mark_mutex);
 
-	fsnotify_put_mark(fsn_mark);
+out:
+	if (fsn_mark)
+		fsnotify_put_mark(fsn_mark);
+	if (prealloc_mark)
+		kmem_cache_free(fanotify_mark_cache, prealloc_mark);
+	if (prealloc_conn)
+		fsnotify_conn_free(prealloc_conn);
+
 	return ret;
 }
 
