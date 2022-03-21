@@ -1081,42 +1081,50 @@ static int fanotify_remove_inode_mark(struct fsnotify_group *group,
 				    flags, umask);
 }
 
-static void fanotify_mark_add_ignored_mask(struct fsnotify_mark *fsn_mark,
-					   __u32 mask, unsigned int flags,
-					   __u32 *removed)
+static int fanotify_mark_update_flags(struct fsnotify_mark *fsn_mark,
+				      unsigned int flags, bool *recalc)
 {
-	fsn_mark->ignored_mask |= mask;
-
 	/*
 	 * Setting FAN_MARK_IGNORED_SURV_MODIFY for the first time may lead to
 	 * the removal of the FS_MODIFY bit in calculated mask if it was set
 	 * because of an ignored mask that is now going to survive FS_MODIFY.
 	 */
 	if ((flags & FAN_MARK_IGNORED_SURV_MODIFY) &&
+	    (flags & FAN_MARK_IGNORED_MASK) &&
 	    !(fsn_mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY)) {
 		fsn_mark->flags |= FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY;
 		if (!(fsn_mark->mask & FS_MODIFY))
-			*removed = FS_MODIFY;
+			*recalc = true;
 	}
+
+	return 0;
 }
 
-static __u32 fanotify_mark_add_to_mask(struct fsnotify_mark *fsn_mark,
-				       __u32 mask, unsigned int flags,
-				       __u32 *removed)
+static int fanotify_mark_add_to_mask(struct fsnotify_mark *fsn_mark,
+				     __u32 mask, unsigned int flags)
 {
-	__u32 oldmask, newmask;
+	__u32 oldmask;
+	bool recalc = false;
+	int ret;
 
 	spin_lock(&fsn_mark->lock);
 	oldmask = fsnotify_calc_mask(fsn_mark);
 	if (!(flags & FAN_MARK_IGNORED_MASK)) {
 		fsn_mark->mask |= mask;
 	} else {
-		fanotify_mark_add_ignored_mask(fsn_mark, mask, flags, removed);
+		fsn_mark->ignored_mask |= mask;
 	}
-	newmask = fsnotify_calc_mask(fsn_mark);
+
+	recalc = fsnotify_calc_mask(fsn_mark) & ~oldmask &
+		~fsnotify_conn_mask(fsn_mark->connector);
+
+	ret = fanotify_mark_update_flags(fsn_mark, flags, &recalc);
 	spin_unlock(&fsn_mark->lock);
 
-	return newmask & ~oldmask;
+	if (recalc)
+		fsnotify_recalc_mask(fsn_mark->connector);
+
+	return ret;
 }
 
 static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
@@ -1144,7 +1152,7 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 	}
 
 	fsnotify_init_mark(mark, group);
-	ret = fsnotify_add_mark_locked(mark, connp, obj_type, 0, fsid);
+	ret = fsnotify_add_mark_locked(mark, connp, obj_type, 0, fsid, NULL);
 	if (ret) {
 		fsnotify_put_mark(mark);
 		goto out_dec_ucounts;
@@ -1174,7 +1182,6 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 			     __kernel_fsid_t *fsid)
 {
 	struct fsnotify_mark *fsn_mark;
-	__u32 added, removed = 0;
 	int ret = 0;
 
 	mutex_lock(&group->mark_mutex);
@@ -1197,9 +1204,7 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 			goto out;
 	}
 
-	added = fanotify_mark_add_to_mask(fsn_mark, mask, flags, &removed);
-	if (removed || (added & ~fsnotify_conn_mask(fsn_mark->connector)))
-		fsnotify_recalc_mask(fsn_mark->connector);
+	ret = fanotify_mark_add_to_mask(fsn_mark, mask, flags);
 
 out:
 	mutex_unlock(&group->mark_mutex);
