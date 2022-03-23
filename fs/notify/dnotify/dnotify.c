@@ -139,6 +139,7 @@ static void dnotify_free_mark(struct fsnotify_mark *fsn_mark)
 }
 
 static const struct fsnotify_ops dnotify_fsnotify_ops = {
+	.group_flags = FSNOTIFY_GROUP_NOFS,
 	.handle_inode_event = dnotify_handle_event,
 	.free_mark = dnotify_free_mark,
 };
@@ -158,6 +159,7 @@ void dnotify_flush(struct file *filp, fl_owner_t id)
 	struct dnotify_struct **prev;
 	struct inode *inode;
 	bool free = false;
+	unsigned int nofs;
 
 	inode = file_inode(filp);
 	if (!S_ISDIR(inode->i_mode))
@@ -168,7 +170,7 @@ void dnotify_flush(struct file *filp, fl_owner_t id)
 		return;
 	dn_mark = container_of(fsn_mark, struct dnotify_mark, fsn_mark);
 
-	mutex_lock(&dnotify_group->mark_mutex);
+	nofs = fsnotify_group_nofs_lock(dnotify_group);
 
 	spin_lock(&fsn_mark->lock);
 	prev = &dn_mark->dn;
@@ -191,7 +193,7 @@ void dnotify_flush(struct file *filp, fl_owner_t id)
 		free = true;
 	}
 
-	mutex_unlock(&dnotify_group->mark_mutex);
+	fsnotify_group_nofs_unlock(dnotify_group, nofs);
 
 	if (free)
 		fsnotify_free_mark(fsn_mark);
@@ -267,6 +269,7 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned long arg)
 	fl_owner_t id = current->files;
 	struct file *f;
 	int destroy = 0, error = 0;
+	unsigned int nofs;
 	__u32 mask;
 
 	/* we use these to tell if we need to kfree */
@@ -324,7 +327,7 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned long arg)
 	new_dn_mark->dn = NULL;
 
 	/* this is needed to prevent the fcntl/close race described below */
-	mutex_lock(&dnotify_group->mark_mutex);
+	nofs = fsnotify_group_nofs_lock(dnotify_group);
 
 	/* add the new_fsn_mark or find an old one. */
 	fsn_mark = fsnotify_find_mark(&inode->i_fsnotify_marks, dnotify_group);
@@ -334,7 +337,7 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned long arg)
 	} else {
 		error = fsnotify_add_inode_mark_locked(new_fsn_mark, inode, 0);
 		if (error) {
-			mutex_unlock(&dnotify_group->mark_mutex);
+			fsnotify_group_nofs_unlock(dnotify_group, nofs);
 			goto out_err;
 		}
 		spin_lock(&new_fsn_mark->lock);
@@ -383,7 +386,7 @@ out:
 
 	if (destroy)
 		fsnotify_detach_mark(fsn_mark);
-	mutex_unlock(&dnotify_group->mark_mutex);
+	fsnotify_group_nofs_unlock(dnotify_group, nofs);
 	if (destroy)
 		fsnotify_free_mark(fsn_mark);
 	fsnotify_put_mark(fsn_mark);
