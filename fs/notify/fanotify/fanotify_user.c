@@ -928,6 +928,16 @@ static long fanotify_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 		spin_unlock(&group->notification_lock);
 		ret = put_user(send_len, (int __user *) p);
 		break;
+	case FAN_IOC_SET_MARK_PAGE_ORDER:
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
+		mutex_lock(&group->mark_mutex);
+		group->fanotify_data.mark_page_order = (unsigned int)arg;
+		pr_info("fanotify: set mark size page order to %u",
+			group->fanotify_data.mark_page_order);
+		ret = 0;
+		mutex_unlock(&group->mark_mutex);
+		break;
 	}
 
 	return ret;
@@ -1150,6 +1160,7 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 						   __kernel_fsid_t *fsid)
 {
 	struct ucounts *ucounts = group->fanotify_data.ucounts;
+	unsigned int order = group->fanotify_data.mark_page_order;
 	struct fsnotify_mark *mark;
 	int ret;
 
@@ -1162,7 +1173,21 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 	    !inc_ucount(ucounts->ns, ucounts->uid, UCOUNT_FANOTIFY_MARKS))
 		return ERR_PTR(-ENOSPC);
 
-	mark = kmem_cache_alloc(fanotify_mark_cache, GFP_KERNEL);
+	/*
+	 * If requested to test direct reclaim in mark allocation context,
+	 * start by trying to allocate requested page order per mark and
+	 * fall back to allocation size that is likely to trigger direct
+	 * reclaim but not too large to trigger compaction.
+	 */
+	if (order) {
+		mark = kmalloc(PAGE_SIZE << order,
+			       GFP_KERNEL_ACCOUNT | __GFP_NOWARN);
+		if (!mark && order > PAGE_ALLOC_COSTLY_ORDER)
+			mark = kmalloc(PAGE_SIZE << PAGE_ALLOC_COSTLY_ORDER,
+				       GFP_KERNEL_ACCOUNT | __GFP_NOWARN);
+	} else {
+		mark = kmem_cache_alloc(fanotify_mark_cache, GFP_KERNEL);
+	}
 	if (!mark) {
 		ret = -ENOMEM;
 		goto out_dec_ucounts;
@@ -1171,6 +1196,15 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 	fsnotify_init_mark(mark, group);
 	if (fan_flags & FAN_MARK_EVICTABLE)
 		mark->flags |= FSNOTIFY_MARK_FLAG_NO_IREF;
+	/*
+	 * Allow adding multiple large marks per object for testing.
+	 * FAN_MARK_REMOVE refers to the first mark of the group, so one
+	 * FAN_MARK_REMOVE is needed for every added large mark (or use
+	 * FAN_MARK_FLUSH to remove all marks).
+	 */
+	if (order)
+		mark->flags |= FSNOTIFY_MARK_FLAG_KMALLOC |
+			       FSNOTIFY_MARK_FLAG_ALLOW_DUPS;
 
 	ret = fsnotify_add_mark_locked(mark, connp, obj_type, fsid);
 	if (ret) {
@@ -1201,11 +1235,13 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 			     __u32 mask, unsigned int flags,
 			     __kernel_fsid_t *fsid)
 {
-	struct fsnotify_mark *fsn_mark;
+	struct fsnotify_mark *fsn_mark = NULL;
 	int ret = 0;
 
 	mutex_lock(&group->mark_mutex);
-	fsn_mark = fsnotify_find_mark(connp, group);
+	/* Allow adding multiple large marks per object for testing */
+	if (!group->fanotify_data.mark_page_order)
+		fsn_mark = fsnotify_find_mark(connp, group);
 	if (!fsn_mark) {
 		fsn_mark = fanotify_add_new_mark(group, connp, obj_type, flags,
 						 fsid);

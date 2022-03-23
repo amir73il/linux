@@ -1075,7 +1075,10 @@ static void fanotify_freeing_mark(struct fsnotify_mark *mark,
 
 static void fanotify_free_mark(struct fsnotify_mark *fsn_mark)
 {
-	kmem_cache_free(fanotify_mark_cache, fsn_mark);
+	if (fsn_mark->flags & FSNOTIFY_MARK_FLAG_KMALLOC)
+		kfree(fsn_mark);
+	else
+		kmem_cache_free(fanotify_mark_cache, fsn_mark);
 }
 
 const struct fsnotify_ops fanotify_fsnotify_ops = {
