@@ -1082,6 +1082,7 @@ static void fanotify_free_mark(struct fsnotify_mark *fsn_mark)
 }
 
 const struct fsnotify_ops fanotify_fsnotify_ops = {
+	.group_flags = FSNOTIFY_GROUP_NOFS,
 	.handle_event = fanotify_handle_event,
 	.free_group_priv = fanotify_free_group_priv,
 	.free_event = fanotify_free_event,

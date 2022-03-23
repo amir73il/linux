@@ -931,12 +931,12 @@ static long fanotify_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	case FAN_IOC_SET_MARK_PAGE_ORDER:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
-		mutex_lock(&group->mark_mutex);
+		fsnotify_group_lock(group);
 		group->fanotify_data.mark_page_order = (unsigned int)arg;
 		pr_info("fanotify: set mark size page order to %u",
 			group->fanotify_data.mark_page_order);
 		ret = 0;
-		mutex_unlock(&group->mark_mutex);
+		fsnotify_group_unlock(group);
 		break;
 	}
 
@@ -1044,11 +1044,12 @@ static int fanotify_remove_mark(struct fsnotify_group *group,
 	struct fsnotify_mark *fsn_mark = NULL;
 	__u32 removed;
 	int destroy_mark;
+	unsigned int nofs;
 
-	mutex_lock(&group->mark_mutex);
+	nofs = fsnotify_group_nofs_lock(group);
 	fsn_mark = fsnotify_find_mark(connp, group);
 	if (!fsn_mark) {
-		mutex_unlock(&group->mark_mutex);
+		fsnotify_group_nofs_unlock(group, nofs);
 		return -ENOENT;
 	}
 
@@ -1058,7 +1059,7 @@ static int fanotify_remove_mark(struct fsnotify_group *group,
 		fsnotify_recalc_mask(fsn_mark->connector);
 	if (destroy_mark)
 		fsnotify_detach_mark(fsn_mark);
-	mutex_unlock(&group->mark_mutex);
+	fsnotify_group_nofs_unlock(group, nofs);
 	if (destroy_mark)
 		fsnotify_free_mark(fsn_mark);
 
@@ -1236,9 +1237,10 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 			     __kernel_fsid_t *fsid)
 {
 	struct fsnotify_mark *fsn_mark = NULL;
+	unsigned int nofs;
 	int ret = 0;
 
-	mutex_lock(&group->mark_mutex);
+	nofs = fsnotify_group_nofs_lock(group);
 	/* Allow adding multiple large marks per object for testing */
 	if (!group->fanotify_data.mark_page_order)
 		fsn_mark = fsnotify_find_mark(connp, group);
@@ -1246,7 +1248,7 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 		fsn_mark = fanotify_add_new_mark(group, connp, obj_type, flags,
 						 fsid);
 		if (IS_ERR(fsn_mark)) {
-			mutex_unlock(&group->mark_mutex);
+			fsnotify_group_nofs_unlock(group, nofs);
 			return PTR_ERR(fsn_mark);
 		}
 	}
@@ -1264,7 +1266,7 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 	ret = fanotify_mark_add_to_mask(fsn_mark, mask, flags);
 
 out:
-	mutex_unlock(&group->mark_mutex);
+	fsnotify_group_nofs_unlock(group, nofs);
 
 	fsnotify_put_mark(fsn_mark);
 	return ret;
