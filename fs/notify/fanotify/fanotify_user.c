@@ -1084,6 +1084,8 @@ static int fanotify_remove_inode_mark(struct fsnotify_group *group,
 static int fanotify_mark_update_flags(struct fsnotify_mark *fsn_mark,
 				      unsigned int flags, bool *recalc)
 {
+	bool want_iref = !(flags & FAN_MARK_EVICTABLE);
+
 	/*
 	 * Setting FAN_MARK_IGNORED_SURV_MODIFY for the first time may lead to
 	 * the removal of the FS_MODIFY bit in calculated mask if it was set
@@ -1096,6 +1098,20 @@ static int fanotify_mark_update_flags(struct fsnotify_mark *fsn_mark,
 		if (!(fsn_mark->mask & FS_MODIFY))
 			*recalc = true;
 	}
+
+	if (fsn_mark->connector->type != FSNOTIFY_OBJ_TYPE_INODE ||
+	    want_iref == !(fsn_mark->flags & FSNOTIFY_MARK_FLAG_NO_IREF))
+		return 0;
+
+	/*
+	 * NO_IREF may be removed from a mark, but not added.
+	 * When removed, fsnotify_recalc_mask() will take the inode ref.
+	 */
+	if (!want_iref)
+		return -EEXIST;
+
+	fsn_mark->flags &= ~FSNOTIFY_MARK_FLAG_NO_IREF;
+	*recalc = true;
 
 	return 0;
 }
@@ -1130,6 +1146,7 @@ static int fanotify_mark_add_to_mask(struct fsnotify_mark *fsn_mark,
 static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 						   fsnotify_connp_t *connp,
 						   unsigned int obj_type,
+						   unsigned int fan_flags,
 						   __kernel_fsid_t *fsid)
 {
 	struct ucounts *ucounts = group->fanotify_data.ucounts;
@@ -1152,6 +1169,9 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 	}
 
 	fsnotify_init_mark(mark, group);
+	if (fan_flags & FAN_MARK_EVICTABLE)
+		mark->flags |= FSNOTIFY_MARK_FLAG_NO_IREF;
+
 	ret = fsnotify_add_mark_locked(mark, connp, obj_type, fsid);
 	if (ret) {
 		fsnotify_put_mark(mark);
@@ -1187,7 +1207,8 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 	mutex_lock(&group->mark_mutex);
 	fsn_mark = fsnotify_find_mark(connp, group);
 	if (!fsn_mark) {
-		fsn_mark = fanotify_add_new_mark(group, connp, obj_type, fsid);
+		fsn_mark = fanotify_add_new_mark(group, connp, obj_type, flags,
+						 fsid);
 		if (IS_ERR(fsn_mark)) {
 			mutex_unlock(&group->mark_mutex);
 			return PTR_ERR(fsn_mark);
@@ -1600,6 +1621,14 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 
 	if (mask & FAN_FS_ERROR &&
 	    mark_type != FAN_MARK_FILESYSTEM)
+		goto fput_and_out;
+
+	/*
+	 * Evictable is only relevant for inode marks, because only inode object
+	 * can be evicted on memory pressure.
+	 */
+	if (flags & FAN_MARK_EVICTABLE &&
+	     mark_type != FAN_MARK_INODE)
 		goto fput_and_out;
 
 	/*
