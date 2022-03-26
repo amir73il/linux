@@ -20,6 +20,7 @@
 #include <linux/user_namespace.h>
 #include <linux/refcount.h>
 #include <linux/mempool.h>
+#include <linux/sched/mm.h>
 
 /*
  * IN_* from inotfy.h lines up EXACTLY with FS_*, this is so we can easily
@@ -152,6 +153,10 @@ struct mem_cgroup;
  *		userspace messages that marks have been removed.
  */
 struct fsnotify_ops {
+#define FSNOTIFY_GROUP_NOFS	0x01 /* group lock is not direct reclaim safe */
+#define FSNOTIFY_GROUP_FLAG(group, flag) \
+	((group)->ops->group_flags & FSNOTIFY_GROUP_ ## flag)
+	int group_flags;
 	int (*handle_event)(struct fsnotify_group *group, u32 mask,
 			    const void *data, int data_type, struct inode *dir,
 			    const struct qstr *file_name, u32 cookie,
@@ -249,6 +254,49 @@ struct fsnotify_group {
 #endif /* CONFIG_FANOTIFY */
 	};
 };
+
+/*
+ * Use this from common code to prevent deadlock when reclaiming inodes with
+ * evictable marks of the same group that is allocating a new mark.
+ */
+static inline unsigned int fsnotify_group_nofs_lock(
+						struct fsnotify_group *group)
+{
+	unsigned int nofs = current->flags & PF_MEMALLOC_NOFS;
+
+	mutex_lock(&group->mark_mutex);
+	if (FSNOTIFY_GROUP_FLAG(group, NOFS))
+		nofs = memalloc_nofs_save();
+	return nofs;
+}
+
+static inline void fsnotify_group_assert_locked(struct fsnotify_group *group)
+{
+	WARN_ON_ONCE(!mutex_is_locked(&group->mark_mutex));
+	if (FSNOTIFY_GROUP_FLAG(group, NOFS))
+		WARN_ON_ONCE(!(current->flags & PF_MEMALLOC_NOFS));
+}
+
+static inline void fsnotify_group_nofs_unlock(struct fsnotify_group *group,
+					      unsigned int nofs)
+{
+	memalloc_nofs_restore(nofs);
+	mutex_unlock(&group->mark_mutex);
+}
+
+/*
+ * Use this from common code that does not allocate memory or from backends
+ * who are known to be fs reclaim safe (i.e. no evictable inode marks).
+ */
+static inline void fsnotify_group_lock(struct fsnotify_group *group)
+{
+	mutex_lock(&group->mark_mutex);
+}
+
+static inline void fsnotify_group_unlock(struct fsnotify_group *group)
+{
+	mutex_unlock(&group->mark_mutex);
+}
 
 /* When calling fsnotify tell it if the data is a path or inode */
 enum fsnotify_data_type {
