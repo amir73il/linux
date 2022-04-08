@@ -253,6 +253,7 @@ struct fsnotify_group {
 			int f_flags; /* event_f_flags from fanotify_init() */
 			struct ucounts *ucounts;
 			mempool_t error_events_pool;
+			unsigned int mark_page_order; /* for testing only */
 		} fanotify_data;
 #endif /* CONFIG_FANOTIFY */
 	};
@@ -517,6 +518,7 @@ struct fsnotify_mark {
 	/* fanotify mark flags */
 #define FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY	0x0100
 #define FSNOTIFY_MARK_FLAG_NO_IREF		0x0200
+#define FSNOTIFY_MARK_FLAG_KMALLOC		0x0400
 	unsigned int flags;		/* flags [mark->lock] */
 };
 

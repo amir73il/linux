@@ -3,6 +3,7 @@
 #define _UAPI_LINUX_FANOTIFY_H
 
 #include <linux/types.h>
+#include <linux/ioctl.h>
 
 /* the following events that user-space can register for */
 #define FAN_ACCESS		0x00000001	/* File was accessed */
@@ -205,5 +206,8 @@ struct fanotify_response {
 #define FAN_EVENT_OK(meta, len)	((long)(len) >= (long)FAN_EVENT_METADATA_LEN && \
 				(long)(meta)->event_len >= (long)FAN_EVENT_METADATA_LEN && \
 				(long)(meta)->event_len <= (long)(len))
+
+/* Only for testing. Not useful otherwise */
+#define	FAN_IOC_SET_MARK_PAGE_ORDER	_IOW(0xfa, 1, long)
 
 #endif /* _UAPI_LINUX_FANOTIFY_H */
