@@ -20,6 +20,7 @@
 #include <linux/user_namespace.h>
 #include <linux/refcount.h>
 #include <linux/mempool.h>
+#include <linux/sched/mm.h>
 
 /*
  * IN_* from inotfy.h lines up EXACTLY with FS_*, this is so we can easily
@@ -211,9 +212,11 @@ struct fsnotify_group {
 	bool shutdown;		/* group is being shut down, don't queue more events */
 
 #define FSNOTIFY_GROUP_USER	0x01 /* user allocated group */
+#define FSNOTIFY_GROUP_NOFS	0x02 /* group lock is not direct reclaim safe */
 #define FSNOTIFY_GROUP_FLAG(group, flag) \
 	((group)->flags & FSNOTIFY_GROUP_ ## flag)
 	int flags;
+	unsigned int owner_flags;	/* stored flags of mark_mutex owner */
 
 	/* stores all fastpath marks assoc with this group so they can be cleaned on unregister */
 	struct mutex mark_mutex;	/* protect marks_list */
@@ -254,6 +257,31 @@ struct fsnotify_group {
 #endif /* CONFIG_FANOTIFY */
 	};
 };
+
+/*
+ * These helpers are used to prevent deadlock when reclaiming inodes with
+ * evictable marks of the same group that is allocating a new mark.
+ */
+static inline void fsnotify_group_lock(struct fsnotify_group *group)
+{
+	mutex_lock(&group->mark_mutex);
+	if (FSNOTIFY_GROUP_FLAG(group, NOFS))
+		group->owner_flags = memalloc_nofs_save();
+}
+
+static inline void fsnotify_group_unlock(struct fsnotify_group *group)
+{
+	if (FSNOTIFY_GROUP_FLAG(group, NOFS))
+		memalloc_nofs_restore(group->owner_flags);
+	mutex_unlock(&group->mark_mutex);
+}
+
+static inline void fsnotify_group_assert_locked(struct fsnotify_group *group)
+{
+	WARN_ON_ONCE(!mutex_is_locked(&group->mark_mutex));
+	if (FSNOTIFY_GROUP_FLAG(group, NOFS))
+		WARN_ON_ONCE(!(current->flags & PF_MEMALLOC_NOFS));
+}
 
 /* When calling fsnotify tell it if the data is a path or inode */
 enum fsnotify_data_type {
