@@ -780,9 +780,9 @@ static struct fanotify_event *fanotify_alloc_event(
 			report_old = report_new =
 				match_mask & (1U << FSNOTIFY_ITER_TYPE_SB);
 			report_old |=
-				match_mask & (1U << FSNOTIFY_ITER_TYPE_INODE);
+				match_mask & (1U << FSNOTIFY_ITER_TYPE_OLD_DIR);
 			report_new |=
-				match_mask & (1U << FSNOTIFY_ITER_TYPE_INODE2);
+				match_mask & (1U << FSNOTIFY_ITER_TYPE_NEW_DIR);
 
 			if (!report_old) {
 				/* Do not report old parent+name */

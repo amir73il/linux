@@ -277,19 +277,19 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 	    WARN_ON_ONCE(fsnotify_iter_vfsmount_mark(iter_info)))
 		return 0;
 
-	/*
-	 * For FS_RENAME, 'dir' is old dir and 'data' is new dentry.
-	 * The only ->handle_inode_event() backend that supports FS_RENAME is
-	 * dnotify, where it means file was renamed within same parent.
-	 */
 	if (mask & FS_RENAME) {
-		struct dentry *moved = fsnotify_data_dentry(data, data_type);
+		inode_mark = fsnotify_iter_old_dir_mark(iter_info);
+		parent_mark = fsnotify_iter_new_dir_mark(iter_info);
 
-		if (dir != moved->d_parent->d_inode)
+		/*
+		 * The only ->handle_inode_event() backend that supports
+		 * FS_RENAME is dnotify, where DN_RENAME means that file
+		 * was renamed within the same parent.
+		 */
+		if (WARN_ON_ONCE(!inode_mark) ||
+		    inode_mark != parent_mark)
 			return 0;
-	}
-
-	if (parent_mark) {
+	} else if (parent_mark) {
 		/*
 		 * parent_mark indicates that the parent inode is watching
 		 * children and interested in this event, which is an event
@@ -479,9 +479,9 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	struct super_block *sb = fsnotify_data_sb(data, data_type);
 	struct fsnotify_iter_info iter_info = {};
 	struct mount *mnt = NULL;
-	struct inode *inode2 = NULL;
+	struct inode *dir1, *dir2;
 	struct dentry *moved;
-	int inode2_type;
+	int dir1_type = 0;
 	int ret = 0;
 	__u32 test_mask, marks_mask;
 
@@ -491,19 +491,31 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	if (!inode) {
 		/* Dirent event - report on TYPE_INODE to dir */
 		inode = dir;
-		/* For FS_RENAME, inode is old_dir and inode2 is new_dir */
-		if (mask & FS_RENAME) {
-			moved = fsnotify_data_dentry(data, data_type);
-			inode2 = moved->d_parent->d_inode;
-			inode2_type = FSNOTIFY_ITER_TYPE_INODE2;
-		}
+	} else if (mask & FS_RENAME) {
+		/* For FS_RENAME, dir1 is old_dir and dir2 is new_dir */
+		moved = fsnotify_data_dentry(data, data_type);
+		dir1 = dir;
+		dir2 = moved->d_parent->d_inode;
+		if (dir1->i_fsnotify_marks || dir2->i_fsnotify_marks)
+			dir1_type = FSNOTIFY_ITER_TYPE_OLD_DIR;
+		/*
+		 * Send FS_RENAME to groups watching the moved inode itself
+		 * only if the moved inode is a non-dir.
+		 * Sending FS_RENAME to a moved watched directory would be
+		 * confusing and FS_MOVE_SELF provided enough information to
+		 * track the movements of a watched directory.
+		 */
+		if (mask & FS_ISDIR)
+			inode = NULL;
 	} else if (mask & FS_EVENT_ON_CHILD) {
 		/*
 		 * Event on child - report on TYPE_PARENT to dir if it is
 		 * watching children and on TYPE_INODE to child.
 		 */
-		inode2 = dir;
-		inode2_type = FSNOTIFY_ITER_TYPE_PARENT;
+		dir1 = dir;
+		dir2 = NULL;
+		if (dir1->i_fsnotify_marks)
+			dir1_type = FSNOTIFY_ITER_TYPE_PARENT;
 	}
 
 	/*
@@ -516,7 +528,7 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	if (!sb->s_fsnotify_marks &&
 	    (!mnt || !mnt->mnt_fsnotify_marks) &&
 	    (!inode || !inode->i_fsnotify_marks) &&
-	    (!inode2 || !inode2->i_fsnotify_marks))
+	    !dir1_type)
 		return 0;
 
 	marks_mask = sb->s_fsnotify_mask;
@@ -524,8 +536,12 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		marks_mask |= mnt->mnt_fsnotify_mask;
 	if (inode)
 		marks_mask |= inode->i_fsnotify_mask;
-	if (inode2)
-		marks_mask |= inode2->i_fsnotify_mask;
+	if (dir1_type) {
+		if (dir1)
+			marks_mask |= dir1->i_fsnotify_mask;
+		if (dir2)
+			marks_mask |= dir2->i_fsnotify_mask;
+	}
 
 
 	/*
@@ -550,9 +566,13 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		iter_info.marks[FSNOTIFY_ITER_TYPE_INODE] =
 			fsnotify_first_mark(&inode->i_fsnotify_marks);
 	}
-	if (inode2) {
-		iter_info.marks[inode2_type] =
-			fsnotify_first_mark(&inode2->i_fsnotify_marks);
+	if (dir1_type) {
+		if (dir1)
+			iter_info.marks[dir1_type] =
+				fsnotify_first_mark(&dir1->i_fsnotify_marks);
+		if (dir2)
+			iter_info.marks[FSNOTIFY_ITER_TYPE_NEW_DIR] =
+				fsnotify_first_mark(&dir2->i_fsnotify_marks);
 	}
 
 	/*

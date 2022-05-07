@@ -374,11 +374,13 @@ static inline struct fs_error_report *fsnotify_data_error_report(
  * For example, both parent and child are watching an object of type inode.
  */
 enum fsnotify_iter_type {
+	FSNOTIFY_ITER_TYPE_NONE = 0,
 	FSNOTIFY_ITER_TYPE_INODE,
 	FSNOTIFY_ITER_TYPE_VFSMOUNT,
 	FSNOTIFY_ITER_TYPE_SB,
 	FSNOTIFY_ITER_TYPE_PARENT,
-	FSNOTIFY_ITER_TYPE_INODE2,
+	FSNOTIFY_ITER_TYPE_OLD_DIR,
+	FSNOTIFY_ITER_TYPE_NEW_DIR,
 	FSNOTIFY_ITER_TYPE_COUNT
 };
 
@@ -433,6 +435,8 @@ static inline struct fsnotify_mark *fsnotify_iter_##name##_mark( \
 
 FSNOTIFY_ITER_FUNCS(inode, INODE)
 FSNOTIFY_ITER_FUNCS(parent, PARENT)
+FSNOTIFY_ITER_FUNCS(old_dir, OLD_DIR)
+FSNOTIFY_ITER_FUNCS(new_dir, NEW_DIR)
 FSNOTIFY_ITER_FUNCS(vfsmount, VFSMOUNT)
 FSNOTIFY_ITER_FUNCS(sb, SB)
 

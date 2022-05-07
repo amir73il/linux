@@ -28,18 +28,19 @@
  */
 static inline int fsnotify_name(__u32 mask, const void *data, int data_type,
 				struct inode *dir, const struct qstr *name,
-				u32 cookie)
+				struct inode *inode, u32 cookie)
 {
 	if (atomic_long_read(&dir->i_sb->s_fsnotify_connectors) == 0)
 		return 0;
 
-	return fsnotify(mask, data, data_type, dir, name, NULL, cookie);
+	return fsnotify(mask, data, data_type, dir, name, inode, cookie);
 }
 
 static inline void fsnotify_dirent(struct inode *dir, struct dentry *dentry,
 				   __u32 mask)
 {
-	fsnotify_name(mask, dentry, FSNOTIFY_EVENT_DENTRY, dir, &dentry->d_name, 0);
+	fsnotify_name(mask, dentry, FSNOTIFY_EVENT_DENTRY, dir, &dentry->d_name,
+		      NULL, 0);
 }
 
 static inline void fsnotify_inode(struct inode *inode, __u32 mask)
@@ -154,13 +155,13 @@ static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
 	}
 
 	/* Event with information about both old and new parent+name */
-	fsnotify_name(rename_mask, moved, FSNOTIFY_EVENT_DENTRY,
-		      old_dir, old_name, 0);
+	fsnotify(rename_mask, moved, FSNOTIFY_EVENT_DENTRY,
+		 old_dir, old_name, source, 0);
 
 	fsnotify_name(old_dir_mask, source, FSNOTIFY_EVENT_INODE,
-		      old_dir, old_name, fs_cookie);
+		      old_dir, old_name, NULL, fs_cookie);
 	fsnotify_name(new_dir_mask, source, FSNOTIFY_EVENT_INODE,
-		      new_dir, new_name, fs_cookie);
+		      new_dir, new_name, NULL, fs_cookie);
 
 	if (target)
 		fsnotify_link_count(target);
@@ -221,7 +222,7 @@ static inline void fsnotify_link(struct inode *dir, struct inode *inode,
 	audit_inode_child(dir, new_dentry, AUDIT_TYPE_CHILD_CREATE);
 
 	fsnotify_name(FS_CREATE, inode, FSNOTIFY_EVENT_INODE,
-		      dir, &new_dentry->d_name, 0);
+		      dir, &new_dentry->d_name, NULL, 0);
 }
 
 /*
@@ -241,7 +242,7 @@ static inline void fsnotify_delete(struct inode *dir, struct inode *inode,
 		mask |= FS_ISDIR;
 
 	fsnotify_name(mask, inode, FSNOTIFY_EVENT_INODE, dir, &dentry->d_name,
-		      0);
+		      NULL, 0);
 }
 
 /**
