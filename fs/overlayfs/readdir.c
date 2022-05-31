@@ -733,6 +733,7 @@ static int ovl_iterate(struct file *file, struct dir_context *ctx)
 {
 	struct ovl_dir_file *od = file->private_data;
 	struct dentry *dentry = file->f_path.dentry;
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	struct ovl_cache_entry *p;
 	const struct cred *old_cred;
 	int err;
@@ -742,6 +743,17 @@ static int ovl_iterate(struct file *file, struct dir_context *ctx)
 		ovl_dir_reset(file);
 
 	if (od->is_real) {
+		/*
+		 * In an overlayfs watch mount, let unmodified lower directories
+		 * (i.e. not indexed and not new) appear empty, so 'find' on the
+		 * mount will only list the new and modified directories.
+		 */
+		err = 0;
+		if (ofs->config.watch && !od->is_upper &&
+		    !ovl_test_flag(OVL_INDEX, d_inode(dentry)) &&
+		    ovl_should_index_lowerdir(ofs, od->realfile->f_path.dentry))
+			goto out;
+
 		/*
 		 * If parent is merge, then need to adjust d_ino for '..', if
 		 * dir is impure then need to adjust d_ino for copied up
