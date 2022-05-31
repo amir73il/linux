@@ -409,7 +409,8 @@ static int ovl_remount(struct super_block *sb, int *flags, char *data)
 	struct super_block *upper_sb;
 	int ret = 0;
 
-	if (!(*flags & SB_RDONLY) && ovl_force_readonly(ofs))
+	if (!(*flags & SB_RDONLY) &&
+	    (ovl_force_readonly(ofs) || ofs->config.watch))
 		return -EROFS;
 
 	if (*flags & SB_RDONLY && !sb_rdonly(sb)) {
@@ -2153,6 +2154,9 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 		err = ovl_get_watch(sb, ofs, &lowerpath);
 		if (err)
 			goto out_free_oe;
+
+		/* Force r/o mount with watch mount */
+		sb->s_flags |= SB_RDONLY;
 	}
 	path_put_init(&lowerpath);
 
