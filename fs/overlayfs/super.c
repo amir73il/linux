@@ -1431,6 +1431,9 @@ int ovl_fill_super(struct super_block *sb, struct fs_context *fc)
 		err = ovl_get_watch(sb, ofs, &ctx->lower[0].path);
 		if (err)
 			goto out_free_oe;
+
+		/* Force r/o mount with watch mount */
+		sb->s_flags |= SB_RDONLY;
 	}
 
 	err = ovl_check_overlapping_layers(sb, ofs);

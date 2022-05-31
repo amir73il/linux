@@ -672,7 +672,8 @@ static int ovl_reconfigure(struct fs_context *fc)
 	struct super_block *upper_sb;
 	int ret = 0;
 
-	if (!(fc->sb_flags & SB_RDONLY) && ovl_force_readonly(ofs))
+	if (!(fc->sb_flags & SB_RDONLY) &&
+	    (ovl_force_readonly(ofs) || ofs->config.watch))
 		return -EROFS;
 
 	if (fc->sb_flags & SB_RDONLY && !sb_rdonly(sb)) {
