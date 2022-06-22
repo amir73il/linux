@@ -279,18 +279,24 @@ xfs_file_buffered_aio_read(
 	struct iov_iter		*to)
 {
 	struct xfs_inode	*ip = XFS_I(file_inode(iocb->ki_filp));
+	bool			atomic_rdrw = xfs_is_atomic_rdrw(ip);
 	ssize_t			ret;
 
 	trace_xfs_file_buffered_read(ip, iov_iter_count(to), iocb->ki_pos);
 
-	if (iocb->ki_flags & IOCB_NOWAIT) {
+	if (!atomic_rdrw) {
+		/* prefer performance */
+	} else if (iocb->ki_flags & IOCB_NOWAIT) {
 		if (!xfs_ilock_nowait(ip, XFS_IOLOCK_SHARED))
 			return -EAGAIN;
 	} else {
 		xfs_ilock(ip, XFS_IOLOCK_SHARED);
 	}
+
 	ret = generic_file_read_iter(iocb, to);
-	xfs_iunlock(ip, XFS_IOLOCK_SHARED);
+
+	if (atomic_rdrw)
+		xfs_iunlock(ip, XFS_IOLOCK_SHARED);
 
 	return ret;
 }

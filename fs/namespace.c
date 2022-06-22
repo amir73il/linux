@@ -1708,8 +1708,8 @@ static bool may_mandlock(void)
 #else
 static inline bool may_mandlock(void)
 {
-	pr_warn("VFS: \"mand\" mount option not supported");
-	return false;
+	pr_warn("XFS: \"mand\" mount option may hurt concurrent rdwr performance");
+	return true;
 }
 #endif
 

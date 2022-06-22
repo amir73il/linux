@@ -79,4 +79,16 @@ int xfs_bmap_count_blocks(struct xfs_trans *tp, struct xfs_inode *ip,
 int	xfs_flush_unmap_range(struct xfs_inode *ip, xfs_off_t offset,
 			      xfs_off_t len);
 
+static inline bool xfs_is_atomic_rdrw(struct xfs_inode *ip)
+{
+	struct inode		*inode = VFS_I(ip);
+
+	/*
+	 * When mandatory locking is disabled, reuse -omand option
+	 * to opt-in for xfs legacy atomic read/write sematics.
+	 */
+	return IS_ENABLED(CONFIG_MANDATORY_FILE_LOCKING) ||
+		inode->i_sb->s_flags & SB_MANDLOCK;
+}
+
 #endif	/* __XFS_BMAP_UTIL_H__ */

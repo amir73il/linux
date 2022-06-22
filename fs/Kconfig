@@ -104,7 +104,7 @@ config FILE_LOCKING
 config MANDATORY_FILE_LOCKING
 	bool "Enable Mandatory file locking"
 	depends on FILE_LOCKING
-	default y
+	default n
 	help
 	  This option enables files appropriately marked files on appropriely
 	  mounted filesystems to support mandatory locking.
