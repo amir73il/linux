@@ -862,6 +862,7 @@ xfs_file_fallocate(
 	uint			iolock = XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL;
 	loff_t			new_size = 0;
 	bool			do_file_insert = false;
+	bool			atomic_rdrw = xfs_is_atomic_rdrw(ip);
 
 	if (!S_ISREG(inode->i_mode))
 		return -EINVAL;
@@ -1030,8 +1031,27 @@ xfs_file_fallocate(
 	 * leave shifted extents past EOF and hence losing access to
 	 * the data that is contained within them.
 	 */
-	if (do_file_insert)
+	if (do_file_insert) {
 		error = xfs_insert_file_space(ip, offset, len);
+		if (error)
+			goto out_unlock;
+	}
+
+	/*
+	 * Without atomic_rdrw protection, page fault could have come in after
+	 * xfs_flush_unmap_range() above and read stale data into page cache.
+	 * Make sure that stale data does not remain in page cache after
+	 * fallocate() returns success.
+	 * For insert and collapse we need to clear page cache up to EOF
+	 * as does xfs_prepare_shift().
+	 */
+	if (!atomic_rdrw &&
+	    mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE |
+		    FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_INSERT_RANGE)) {
+		if (mode & (FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_INSERT_RANGE))
+			len = XFS_ISIZE(ip) - offset;
+		error = xfs_flush_unmap_range(ip, offset, len);
+	}
 
 out_unlock:
 	xfs_iunlock(ip, iolock);
@@ -1092,6 +1112,7 @@ xfs_file_remap_range(
 	struct inode		*inode_out = file_inode(file_out);
 	struct xfs_inode	*dest = XFS_I(inode_out);
 	struct xfs_mount	*mp = src->i_mount;
+	bool			atomic_rdrw = xfs_is_atomic_rdrw(dest);
 	loff_t			remapped = 0;
 	xfs_extlen_t		cowextsize;
 	int			ret;
@@ -1137,6 +1158,16 @@ xfs_file_remap_range(
 
 	if (xfs_file_sync_writes(file_in) || xfs_file_sync_writes(file_out))
 		xfs_log_force_inode(dest);
+
+	/*
+	 * Without atomic_rdrw protection, page fault could have come in after
+	 * xfs_reflink_remap_prep() and read stale data into page cache.
+	 * Make sure that stale data does not remain in page cache after
+	 * clone_file_range() returns success.
+	 */
+	if (!atomic_rdrw && !(remap_flags & REMAP_FILE_DEDUP))
+		ret = xfs_flush_unmap_range(dest, pos_out, len);
+
 out_unlock:
 	xfs_iunlock2_io_mmap(src, dest);
 	if (ret)

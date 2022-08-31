@@ -1567,6 +1567,7 @@ xfs_swap_extents(
 	struct xfs_inode	*tip,	/* tmp inode */
 	struct xfs_swapext	*sxp)
 {
+	bool			atomic_rdrw = xfs_is_atomic_rdrw(ip);
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_trans	*tp;
 	struct xfs_bstat	*sbp = &sxp->sx_stat;
@@ -1775,6 +1776,17 @@ xfs_swap_extents(
 
 	trace_xfs_swap_extent_after(ip, 0);
 	trace_xfs_swap_extent_after(tip, 1);
+
+	/*
+	 * Without atomic_rdrw protection, page fault could have come in after
+	 * xfs_swap_extent_flush() above and read stale data into page cache.
+	 * Make sure that stale data does not remain in page cache after
+	 * xfs_swap_extents() returns success.
+	 */
+	if (!atomic_rdrw && !error)
+		error = xfs_swap_extent_flush(ip);
+	if (!atomic_rdrw && !error)
+		error = xfs_swap_extent_flush(tip);
 
 out_unlock:
 	xfs_iunlock(ip, lock_flags);
