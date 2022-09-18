@@ -869,7 +869,8 @@ static int do_dentry_open(struct file *f,
 	f->f_sb_err = file_sample_sb_err(f);
 
 	if (unlikely(f->f_flags & O_PATH)) {
-		f->f_mode = FMODE_PATH | FMODE_OPENED;
+		f->f_mode &= FMODE_NONOTIFY;
+		f->f_mode |= FMODE_PATH | FMODE_OPENED;
 		f->f_op = &empty_fops;
 		return 0;
 	}
