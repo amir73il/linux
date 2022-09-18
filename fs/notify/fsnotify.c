@@ -356,6 +356,13 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 	if (!(test_mask & marks_mask & ~marks_ignore_mask))
 		return 0;
 
+	/*
+	 * Event handler may sleep past this point.
+	 * None of the backends currently support non-blocking event handler.
+	 */
+	if (mask & FS_NONBLOCK)
+		return -EAGAIN;
+
 	if (group->ops->handle_event) {
 		return group->ops->handle_event(group, mask, data, data_type, dir,
 						file_name, cookie, iter_info);
@@ -579,6 +586,12 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 out:
 	srcu_read_unlock(&fsnotify_mark_srcu, iter_info.srcu_idx);
 
+	/*
+	 * Fall back from RCU walk if any backend needs to get the event.
+	 */
+	if (ret == -EAGAIN && mask & FS_NONBLOCK && mask & FS_LOOKUP_PERM)
+		ret = -ECHILD;
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(fsnotify);
@@ -587,7 +600,7 @@ static __init int fsnotify_init(void)
 {
 	int ret;
 
-	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 23);
+	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 24);
 
 	ret = init_srcu_struct(&fsnotify_mark_srcu);
 	if (ret)
