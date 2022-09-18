@@ -82,6 +82,10 @@
 #define FANOTIFY_PATH_EVENTS	(FAN_ACCESS | FAN_MODIFY | \
 				 FAN_CLOSE | FAN_OPEN | FAN_OPEN_EXEC)
 
+/* Events that require a permission response from user */
+#define FANOTIFY_PERM_EVENTS	(FAN_ACCESS_PERM | FAN_LOOKUP_PERM | \
+				 FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM)
+
 /*
  * Directory entry modification events - reported only to directory
  * where entry is modified and not to a watching parent.
@@ -103,10 +107,6 @@
 #define FANOTIFY_EVENTS		(FANOTIFY_PATH_EVENTS | \
 				 FANOTIFY_INODE_EVENTS | \
 				 FANOTIFY_ERROR_EVENTS)
-
-/* Events that require a permission response from user */
-#define FANOTIFY_PERM_EVENTS	(FAN_OPEN_PERM | FAN_ACCESS_PERM | \
-				 FAN_OPEN_EXEC_PERM)
 
 /* Extra flags that may be reported with event or control handling of events */
 #define FANOTIFY_EVENT_FLAGS	(FAN_EVENT_ON_CHILD | FAN_ONDIR)
