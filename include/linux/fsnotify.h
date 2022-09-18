@@ -121,7 +121,7 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 	 * FMODE_PATH fds (involves open & close events) as they are just
 	 * handle creation / destruction events and not "real" file events.
 	 */
-	if (FMODE_FSNOTIFY_NONE(file->f_mode))
+	if (FMODE_FSNOTIFY_NONE(file->f_mode) || (file->f_mode & FMODE_PATH))
 		return 0;
 
 	return fsnotify_path(&file->f_path, mask);
