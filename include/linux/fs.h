@@ -210,14 +210,16 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 #define FMODE_FSNOTIFY_MASK \
 	(FMODE_NONOTIFY | FMODE_NONOTIFY_PERM)
 
+#define FMODE_FSNOTIFY(mode) \
+	(mode & FMODE_FSNOTIFY_MASK)
 #define FMODE_FSNOTIFY_NONE(mode) \
-	((mode & FMODE_FSNOTIFY_MASK) == FMODE_NONOTIFY)
+	(FMODE_FSNOTIFY(mode) == FMODE_NONOTIFY)
 #ifdef CONFIG_FANOTIFY_ACCESS_PERMISSIONS
 #define FMODE_FSNOTIFY_PERM(mode) \
-	((mode & FMODE_FSNOTIFY_MASK) == 0 || \
-	 (mode & FMODE_FSNOTIFY_MASK) == (FMODE_NONOTIFY | FMODE_NONOTIFY_PERM))
+	(FMODE_FSNOTIFY(mode) == 0 || \
+	 FMODE_FSNOTIFY(mode) == (FMODE_NONOTIFY | FMODE_NONOTIFY_PERM))
 #define FMODE_FSNOTIFY_HSM(mode) \
-	((mode & FMODE_FSNOTIFY_MASK) == 0)
+	(FMODE_FSNOTIFY(mode) == 0)
 #else
 #define FMODE_FSNOTIFY_PERM(mode)	0
 #define FMODE_FSNOTIFY_HSM(mode)	0

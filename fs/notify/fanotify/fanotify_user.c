@@ -105,7 +105,7 @@ static void __init fanotify_sysctls_init(void)
 #define	FANOTIFY_INIT_ALL_EVENT_F_BITS				( \
 		O_ACCMODE	| O_APPEND	| O_NONBLOCK	| \
 		__O_SYNC	| O_DSYNC	| O_CLOEXEC     | \
-		O_LARGEFILE	| O_NOATIME	)
+		O_LARGEFILE	| O_NOATIME	| O_PATH)
 
 extern const struct fsnotify_ops fanotify_fsnotify_ops;
 
