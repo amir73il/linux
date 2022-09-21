@@ -703,7 +703,7 @@ xfs_file_buffered_write(
 {
 	struct inode		*inode = iocb->ki_filp->f_mapping->host;
 	struct xfs_inode	*ip = XFS_I(inode);
-	ssize_t			ret = 0;
+	ssize_t			ret = inode->i_sb->s_flags & SB_MANDLOCK;
 	off_t			end_pos = iocb->ki_pos + iov_iter_count(from);
 	bool			cleared_space = false;
 	unsigned int		iolock;
