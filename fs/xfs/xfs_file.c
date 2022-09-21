@@ -703,12 +703,29 @@ xfs_file_buffered_write(
 {
 	struct inode		*inode = iocb->ki_filp->f_mapping->host;
 	struct xfs_inode	*ip = XFS_I(inode);
-	ssize_t			ret;
+	ssize_t			ret = 0;
+	off_t			end_pos = iocb->ki_pos + iov_iter_count(from);
 	bool			cleared_space = false;
 	unsigned int		iolock;
 
 write_retry:
 	iolock = XFS_IOLOCK_EXCL;
+	/*
+	 * When write range is within the bounds of a single page, the page
+	 * lock guarantees that the write is atomic w.r.t buffered reads.
+	 * In that case, take shared iolock to avoid contention on iolock in
+	 * concurrent mixed read-write workloads.
+	 *
+	 * Write retry after space cleanup is not interesting to optimize,
+	 * so don't bother optimizing this case.
+	 *
+	 * TODO: Expand this optimization to write range that may fall within
+	 * the bounds of a single folio, ask iomap to try to write into a single
+	 * folio and if that fails, write_retry with exclusive iolock.
+	 */
+	if (!ret && iocb->ki_pos >> PAGE_SHIFT == (end_pos - 1) >> PAGE_SHIFT)
+		iolock = XFS_IOLOCK_SHARED;
+
 	ret = xfs_ilock_iocb(iocb, iolock);
 	if (ret)
 		return ret;
@@ -740,6 +757,7 @@ write_retry:
 		xfs_iunlock(ip, iolock);
 		xfs_blockgc_free_quota(ip, XFS_ICWALK_FLAG_SYNC);
 		cleared_space = true;
+		ret = -EAGAIN;
 		goto write_retry;
 	} else if (ret == -ENOSPC && !cleared_space) {
 		struct xfs_icwalk	icw = {0};
@@ -750,6 +768,7 @@ write_retry:
 		xfs_iunlock(ip, iolock);
 		icw.icw_flags = XFS_ICWALK_FLAG_SYNC;
 		xfs_blockgc_free_space(ip->i_mount, &icw);
+		ret = -EAGAIN;
 		goto write_retry;
 	}
 
