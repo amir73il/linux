@@ -38,12 +38,14 @@ struct ovl_dir_cache {
 struct ovl_readdir_data {
 	struct dir_context ctx;
 	struct dentry *dentry;
+	struct file *realfile;
 	bool is_lowest;
 	struct rb_root *root;
 	struct list_head *list;
 	struct list_head middle;
 	struct ovl_cache_entry *first_maybe_whiteout;
 	int count;
+	int limit;
 	int err;
 	bool is_upper;
 	bool d_type_supported;
@@ -291,32 +293,61 @@ static int ovl_check_whiteouts(struct path *path, struct ovl_readdir_data *rdd)
 	return err;
 }
 
-static inline int ovl_dir_read(struct path *realpath,
-			       struct ovl_readdir_data *rdd)
+static int ovl_readdir_begin(struct path *realpath,
+			     struct ovl_readdir_data *rdd)
 {
 	struct file *realfile;
-	int err;
 
 	realfile = ovl_path_open(realpath, O_RDONLY | O_LARGEFILE);
 	if (IS_ERR(realfile))
 		return PTR_ERR(realfile);
 
+	rdd->realfile = realfile;
 	rdd->first_maybe_whiteout = NULL;
 	rdd->ctx.pos = 0;
+
+	return 0;
+}
+
+/* Returns non-negative number of entries in batch or error */
+static int ovl_readdir_batch(struct ovl_readdir_data *rdd)
+{
+	int err;
+
+	rdd->count = 0;
+	rdd->err = 0;
+	err = iterate_dir(rdd->realfile, &rdd->ctx);
+	if (err < 0)
+		rdd->err = err;
+
+	return rdd->err ?: rdd->count;
+}
+
+static void ovl_readdir_end(struct ovl_readdir_data *rdd)
+{
+	if (rdd->realfile)
+		fput(rdd->realfile);
+}
+
+/* Returns 0 for success, negative on error */
+static int ovl_dir_read(struct path *realpath, struct ovl_readdir_data *rdd)
+{
+	int err;
+
+	err = ovl_readdir_begin(realpath, rdd);
+	if (err)
+		return err;
+
 	do {
-		rdd->count = 0;
-		rdd->err = 0;
-		err = iterate_dir(realfile, &rdd->ctx);
-		if (err >= 0)
-			err = rdd->err;
-	} while (!err && rdd->count);
+		err = ovl_readdir_batch(rdd);
+	} while (err > 0);
 
-	if (!err && rdd->first_maybe_whiteout && rdd->dentry)
-		err = ovl_check_whiteouts(realpath, rdd);
+	if (err >= 0 && rdd->first_maybe_whiteout && rdd->dentry)
+		err = ovl_check_whiteouts(&rdd->realfile->f_path, rdd);
 
-	fput(realfile);
+	ovl_readdir_end(rdd);
 
-	return err;
+	return err < 0 ? err : rdd->err;
 }
 
 static void ovl_dir_reset(struct file *file)
@@ -543,6 +574,9 @@ static int ovl_fill_plain(struct dir_context *ctx, const char *name,
 		return -ENOMEM;
 	}
 	list_add_tail(&p->l_node, rdd->list);
+
+	if (rdd->limit && rdd->count >= rdd->limit)
+		return 1;
 
 	return 0;
 }
@@ -1147,6 +1181,8 @@ int ovl_workdir_cleanup(struct ovl_fs *ofs, struct inode *dir,
 	return err;
 }
 
+#define OVL_INDEXDIR_BATCH 1000
+
 int ovl_indexdir_cleanup(struct ovl_fs *ofs)
 {
 	int err;
@@ -1155,23 +1191,39 @@ int ovl_indexdir_cleanup(struct ovl_fs *ofs)
 	struct inode *dir = indexdir->d_inode;
 	struct path path = { .mnt = ovl_upper_mnt(ofs), .dentry = indexdir };
 	LIST_HEAD(list);
-	struct ovl_cache_entry *p;
+	LIST_HEAD(to_cleanup);
+	int ntemp = 0, nstale = 0, norphan = 0;
+	struct ovl_cache_entry *p, *n;
 	struct ovl_readdir_data rdd = {
 		.ctx.actor = ovl_fill_plain,
+		.limit = OVL_INDEXDIR_BATCH,
 		.list = &list,
 	};
 
-	err = ovl_dir_read(&path, &rdd);
+	err = ovl_readdir_begin(&path, &rdd);
 	if (err)
 		goto out;
 
+next_batch:
+	err = ovl_readdir_batch(&rdd);
+	if (err < 0)
+		goto out;
+	else if (!err)
+		goto cleanup;
+
+	err = 0;
 	inode_lock_nested(dir, I_MUTEX_PARENT);
-	list_for_each_entry(p, &list, l_node) {
+	list_for_each_entry_safe(p, n, &list, l_node) {
 		if (p->name[0] == '.') {
 			if (p->len == 1)
 				continue;
 			if (p->len == 2 && p->name[1] == '.')
 				continue;
+		}
+		if (p->name[0] == '#') {
+			list_move_tail(&p->l_node, &to_cleanup);
+			ntemp++;
+			continue;
 		}
 		index = ovl_lookup_upper(ofs, p->name, indexdir, p->len);
 		if (IS_ERR(index)) {
@@ -1179,48 +1231,79 @@ int ovl_indexdir_cleanup(struct ovl_fs *ofs)
 			index = NULL;
 			break;
 		}
-		/* Cleanup leftover from index create/cleanup attempt */
-		if (index->d_name.name[0] == '#') {
-			err = ovl_workdir_cleanup(ofs, dir, path.mnt, index, 1);
-			if (err)
-				break;
-			goto next;
-		}
 		err = ovl_verify_index(ofs, index);
-		if (!err) {
-			goto next;
-		} else if (err == -ESTALE) {
+		if (err == -ESTALE) {
 			/* Cleanup stale index entries */
-			err = ovl_cleanup(ofs, dir, index);
-		} else if (err != -ENOENT) {
+			list_move_tail(&p->l_node, &to_cleanup);
+			nstale++;
+		} else if (err == -ENOENT) {
+			/*
+			 * Whiteout orphan index to block future open by
+			 * handle after overlay nlink dropped to zero.
+			 */
+			p->is_whiteout = ofs->config.nfs_export;
+			/* Cleanup orphan index entries */
+			list_move_tail(&p->l_node, &to_cleanup);
+			norphan++;
+		} else if (err) {
 			/*
 			 * Abort mount to avoid corrupting the index if
 			 * an incompatible index entry was found or on out
 			 * of memory.
 			 */
 			break;
-		} else if (ofs->config.nfs_export) {
-			/*
-			 * Whiteout orphan index to block future open by
-			 * handle after overlay nlink dropped to zero.
-			 */
+		}
+
+		dput(index);
+		index = NULL;
+		err = 0;
+	}
+	dput(index);
+	inode_unlock(dir);
+
+	pr_debug("checked %d index entries (err=%i, #temp=%d, #stale=%d, #orphan=%d)\n",
+		 rdd.count, err, ntemp, nstale, norphan);
+
+	if (err)
+		goto out;
+
+	ovl_cache_free(&list);
+	goto next_batch;
+
+cleanup:
+	err = 0;
+	inode_lock_nested(dir, I_MUTEX_PARENT);
+	list_for_each_entry(p, &to_cleanup, l_node) {
+		index = ovl_lookup_upper(ofs, p->name, indexdir, p->len);
+		if (IS_ERR(index)) {
+			err = PTR_ERR(index);
+			index = NULL;
+			break;
+		}
+		if (p->name[0] == '#') {
+			/* Cleanup leftover from index create/cleanup attempt */
+			err = ovl_workdir_cleanup(ofs, dir, path.mnt, index, 1);
+		} else if (p->is_whiteout) {
+			/* Whiteout orphan index entries for nfs_export */
 			err = ovl_cleanup_and_whiteout(ofs, dir, index);
 		} else {
-			/* Cleanup orphan index entries */
+			/* Cleanup stale/orphan index entries */
 			err = ovl_cleanup(ofs, dir, index);
 		}
 
 		if (err)
 			break;
 
-next:
 		dput(index);
 		index = NULL;
 	}
 	dput(index);
 	inode_unlock(dir);
+
 out:
+	ovl_readdir_end(&rdd);
 	ovl_cache_free(&list);
+	ovl_cache_free(&to_cleanup);
 	if (err)
 		pr_err("failed index dir cleanup (%i)\n", err);
 	return err;
