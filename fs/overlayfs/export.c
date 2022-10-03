@@ -339,7 +339,7 @@ out_iput:
 	return dentry;
 }
 
-/* Get the upper or lower dentry in stach whose on layer @idx */
+/* Get the upper or lower dentry in stack whose on layer @idx */
 static struct dentry *ovl_dentry_real_at(struct dentry *dentry, int idx)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
@@ -796,7 +796,7 @@ static struct ovl_fh *ovl_fid_to_fh(struct fid *fid, int buflen, int fh_type)
 		return ERR_PTR(-ENOMEM);
 
 	/* Copy unaligned inner fh into aligned buffer */
-	memcpy(&fh->fb, fid, buflen - OVL_FH_WIRE_OFFSET);
+	memcpy(fh->buf, fid, buflen - OVL_FH_WIRE_OFFSET);
 	return fh;
 }
 
