@@ -171,6 +171,10 @@ static void *__fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 		    !(mark->flags & FSNOTIFY_MARK_FLAG_NO_IREF))
 			want_iref = true;
 	}
+
+	/* FS_ISDIR in object mask means parent/name info is needed in event */
+	new_mask &= ~FS_ISDIR;
+
 	*fsnotify_conn_mask_p(conn) = new_mask;
 
 	return fsnotify_update_iref(conn, want_iref);

@@ -144,11 +144,8 @@ void __fsnotify_update_child_dentry_flags(struct inode *inode)
 static bool fsnotify_event_needs_parent(struct inode *inode, struct mount *mnt,
 					__u32 mask)
 {
+	bool is_dir = mask & FS_ISDIR;
 	__u32 marks_mask = 0;
-
-	/* We only send parent/name to inode/sb/mount for events on non-dir */
-	if (mask & FS_ISDIR)
-		return false;
 
 	/*
 	 * All events that are possible on child can also may be reported with
@@ -158,10 +155,13 @@ static bool fsnotify_event_needs_parent(struct inode *inode, struct mount *mnt,
 	BUILD_BUG_ON(FS_EVENTS_POSS_ON_CHILD & ~FS_EVENTS_POSS_TO_PARENT);
 
 	/* Did either inode/sb/mount subscribe for events with parent/name? */
-	marks_mask |= fsnotify_parent_needed_mask(inode->i_fsnotify_mask);
-	marks_mask |= fsnotify_parent_needed_mask(inode->i_sb->s_fsnotify_mask);
+	marks_mask |= fsnotify_parent_needed_mask(inode->i_fsnotify_mask,
+						  is_dir);
+	marks_mask |= fsnotify_parent_needed_mask(inode->i_sb->s_fsnotify_mask,
+						  is_dir);
 	if (mnt)
-		marks_mask |= fsnotify_parent_needed_mask(mnt->mnt_fsnotify_mask);
+		marks_mask |= fsnotify_parent_needed_mask(mnt->mnt_fsnotify_mask,
+							  is_dir);
 
 	/* Did they subscribe for this event with parent/name info? */
 	return mask & marks_mask;

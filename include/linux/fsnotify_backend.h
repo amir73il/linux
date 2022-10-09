@@ -560,11 +560,22 @@ extern void __fsnotify_vfsmount_delete(struct vfsmount *mnt);
 extern void fsnotify_sb_delete(struct super_block *sb);
 extern u32 fsnotify_get_cookie(void);
 
-static inline __u32 fsnotify_parent_needed_mask(__u32 mask)
+static inline __u32 fsnotify_parent_needed_mask(__u32 mask, bool is_dir)
 {
-	/* FS_EVENT_ON_CHILD is set on marks that want parent/name info */
-	if (!(mask & FS_EVENT_ON_CHILD))
+	/* FS_ISDIR in object mask means parent/name info is needed */
+	__u32 interested = FS_ISDIR;
+
+	/*
+	 * FS_EVENT_ON_CHILD in object mask means parent/name info is needed
+	 * in events on non-dir.
+	 */
+	if (!is_dir)
+		interested |= FS_EVENT_ON_CHILD;
+
+	/* Is object interested in parent/name info? */
+	if (!(mask & interested))
 		return 0;
+
 	/*
 	 * This object might be watched by a mark that cares about parent/name
 	 * info, does it care about the specific set of events that can be
