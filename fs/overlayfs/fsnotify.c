@@ -402,7 +402,9 @@ static int ovl_whiteout_lowerdir_index(struct super_block *sb,
 		return err;
 
 	old_cred = ovl_override_creds(sb);
-	inode_lock_nested(dir, I_MUTEX_PARENT);
+	err = ovl_lock_rename_workdir(ofs->workdir, ofs->indexdir);
+	if (err)
+		goto out_revert_creds;
 
 	index = ovl_lookup_lowerdir_index_locked(ofs, lowerdir);
 	if (IS_ERR_OR_NULL(index)) {
@@ -419,7 +421,8 @@ static int ovl_whiteout_lowerdir_index(struct super_block *sb,
 		!err ? (index ? "exists" : "new") :
 			err > 0 ? "created" : "failed");
 
-	inode_unlock(dir);
+	unlock_rename(ofs->workdir, ofs->indexdir);
+out_revert_creds:
 	revert_creds(old_cred);
 	mnt_drop_write(ovl_upper_mnt(ofs));
 

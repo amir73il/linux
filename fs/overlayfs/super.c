@@ -840,17 +840,20 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 		goto out;
 	}
 
-	/* index dir will act also as workdir */
-	iput(ofs->workdir_trap);
-	ofs->workdir_trap = NULL;
-	dput(ofs->workdir);
-	ofs->workdir = NULL;
+	if (!ofs->config.watch) {
+		/* index dir will act also as workdir */
+		iput(ofs->workdir_trap);
+		ofs->workdir_trap = NULL;
+		dput(ofs->workdir);
+		ofs->workdir = NULL;
+	}
 	indexdir = ovl_workdir_create(ofs, OVL_INDEXDIR_NAME, true);
 	if (IS_ERR(indexdir)) {
 		err = PTR_ERR(indexdir);
 	} else if (indexdir) {
 		ofs->indexdir = indexdir;
-		ofs->workdir = dget(indexdir);
+		if (!ofs->config.watch)
+			ofs->workdir = dget(indexdir);
 
 		err = ovl_setup_trap(sb, ofs->indexdir, &ofs->indexdir_trap,
 				     "indexdir");
@@ -879,7 +882,7 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 			pr_err("failed to verify index dir 'upper' xattr\n");
 
 		/* Cleanup bad/stale/orphan index entries */
-		if (!err)
+		if (!err && !ofs->config.watch)
 			err = ovl_indexdir_cleanup(ofs);
 	}
 	if (err || !ofs->indexdir)
