@@ -372,16 +372,21 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 				     file_name, cookie, iter_info);
 }
 
-static struct fsnotify_mark *fsnotify_first_mark(struct fsnotify_mark_connector **connp)
+static void fsnotify_iter_init(struct fsnotify_iter_info *iter_info,
+			       int iter_type, __u32 mask,
+			       struct fsnotify_mark_connector **connp)
 {
 	struct fsnotify_mark_connector *conn;
-	struct hlist_node *node = NULL;
+	struct hlist_node *node;
 
+	iter_info->marks[iter_type] = NULL;
 	conn = srcu_dereference(*connp, &fsnotify_mark_srcu);
-	if (conn)
-		node = srcu_dereference(conn->list.first, &fsnotify_mark_srcu);
+	if (!conn)
+		return;
 
-	return hlist_entry_safe(node, struct fsnotify_mark, obj_list);
+	node = srcu_dereference(conn->list.first, &fsnotify_mark_srcu);
+	iter_info->marks[iter_type] =
+		hlist_entry_safe(node, struct fsnotify_mark, obj_list);
 }
 
 static struct fsnotify_mark *fsnotify_next_mark(struct fsnotify_mark *mark)
@@ -540,7 +545,6 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	if (inode2)
 		marks_mask |= inode2->i_fsnotify_mask;
 
-
 	/*
 	 * If this is a modify event we may need to clear some ignore masks.
 	 * In that case, the object with ignore masks will have the FS_MODIFY
@@ -553,19 +557,19 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 
 	iter_info.srcu_idx = srcu_read_lock(&fsnotify_mark_srcu);
 
-	iter_info.marks[FSNOTIFY_ITER_TYPE_SB] =
-		fsnotify_first_mark(&sb->s_fsnotify_marks);
+	fsnotify_iter_init(&iter_info, FSNOTIFY_ITER_TYPE_SB,
+			   mask, &sb->s_fsnotify_marks);
 	if (mnt) {
-		iter_info.marks[FSNOTIFY_ITER_TYPE_VFSMOUNT] =
-			fsnotify_first_mark(&mnt->mnt_fsnotify_marks);
+		fsnotify_iter_init(&iter_info, FSNOTIFY_ITER_TYPE_VFSMOUNT,
+				   mask, &mnt->mnt_fsnotify_marks);
 	}
 	if (inode) {
-		iter_info.marks[FSNOTIFY_ITER_TYPE_INODE] =
-			fsnotify_first_mark(&inode->i_fsnotify_marks);
+		fsnotify_iter_init(&iter_info, FSNOTIFY_ITER_TYPE_INODE,
+				   mask, &inode->i_fsnotify_marks);
 	}
 	if (inode2) {
-		iter_info.marks[inode2_type] =
-			fsnotify_first_mark(&inode2->i_fsnotify_marks);
+		fsnotify_iter_init(&iter_info, inode2_type,
+				   mask, &inode2->i_fsnotify_marks);
 	}
 
 	/*
