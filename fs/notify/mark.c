@@ -217,6 +217,15 @@ static void fsnotify_connector_destroy_workfn(struct work_struct *work)
 	}
 }
 
+static void fsnotify_free_conn(struct fsnotify_mark_connector *conn)
+{
+	spin_lock(&destroy_lock);
+	conn->destroy_next = connector_destroy_list;
+	connector_destroy_list = conn;
+	spin_unlock(&destroy_lock);
+	queue_work(system_unbound_wq, &connector_reaper_work);
+}
+
 static void fsnotify_put_inode_ref(struct inode *inode)
 {
 	struct super_block *sb = inode->i_sb;
@@ -328,13 +337,9 @@ void fsnotify_put_mark(struct fsnotify_mark *mark)
 
 	fsnotify_drop_object(type, objp);
 
-	if (free_conn) {
-		spin_lock(&destroy_lock);
-		conn->destroy_next = connector_destroy_list;
-		connector_destroy_list = conn;
-		spin_unlock(&destroy_lock);
-		queue_work(system_unbound_wq, &connector_reaper_work);
-	}
+	if (free_conn)
+		fsnotify_free_conn(conn);
+
 	/*
 	 * Note that we didn't update flags telling whether inode cares about
 	 * what's happening with children. We update these flags from
@@ -842,6 +847,7 @@ void fsnotify_destroy_marks(fsnotify_connp_t *connp)
 	conn = fsnotify_grab_connector(connp);
 	if (!conn)
 		return;
+
 	/*
 	 * We have to be careful since we can race with e.g.
 	 * fsnotify_clear_marks_by_group() and once we drop the conn->lock, the
@@ -865,8 +871,18 @@ void fsnotify_destroy_marks(fsnotify_connp_t *connp)
 	 */
 	objp = fsnotify_detach_connector_from_object(conn, &type);
 	spin_unlock(&conn->lock);
+	/*
+	 * If connector had attached marks, drop our last mark reference.
+	 * Marks that were attached to this connector can still have elevated
+	 * references from elsewhere and the last mark reference to be dropped
+	 * will also free the connector.
+	 * If there were no attched marks when we started destroying the object,
+	 * we also need to free the connector.
+	 */
 	if (old_mark)
 		fsnotify_put_mark(old_mark);
+	else
+		fsnotify_free_conn(conn);
 	fsnotify_drop_object(type, objp);
 }
 
