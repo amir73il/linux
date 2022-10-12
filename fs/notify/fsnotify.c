@@ -349,6 +349,11 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 			fsnotify_effective_ignore_mask(mark, is_dir, type);
 	}
 
+	/* Should group respect persistent xattr ignore mask? */
+	if (iter_info->xattr_ignore_mask &&
+	    iter_info->current_group->flags & FSNOTIFY_GROUP_CHECK_XATTR)
+		marks_ignore_mask |= iter_info->xattr_ignore_mask;
+
 	pr_debug("%s: group=%p mask=%x marks_mask=%x marks_ignore_mask=%x data=%p data_type=%d dir=%p cookie=%d\n",
 		 __func__, group, mask, marks_mask, marks_ignore_mask,
 		 data, data_type, dir, cookie);
@@ -372,6 +377,49 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 				     file_name, cookie, iter_info);
 }
 
+static int fsnotify_check_xattr(__u32 mask, const struct path *path,
+				struct inode *inode, struct inode *dir)
+{
+	if (!fsnotify_should_init_xattr(inode) &&
+	    !fsnotify_should_init_xattr(dir))
+		return 0;
+
+	/* Cannot read xattr from non-blocking context */
+	if (mask & FS_NONBLOCK)
+		return -EAGAIN;
+
+	/* Permission events are expected to have path info */
+	if (WARN_ON_ONCE(!path || inode != d_inode(path->dentry)))
+		return -EPERM;
+
+	/* Best effort - try to initialize xattr ignore mask */
+	fsnotify_check_xattr_ignore_mask(path->dentry);
+	if (mask & FS_EVENT_ON_CHILD) {
+		struct dentry *parent = dget_parent(path->dentry);
+
+		fsnotify_check_xattr_ignore_mask(parent);
+		dput(parent);
+	}
+
+	return 0;
+}
+
+static __u32 fsnotify_xattr_ignore_mask(struct fsnotify_mark_connector *conn,
+					bool is_dir, int iter_type)
+{
+	__u32 xattr_ignore_mask;
+
+	if (WARN_ON_ONCE(conn->type != FSNOTIFY_OBJ_TYPE_INODE) ||
+	    fsnotify_should_init_xattr(fsnotify_conn_inode(conn)))
+		return 0;
+
+	xattr_ignore_mask = READ_ONCE(conn->xattr_ignore_mask);
+	if (!fsnotify_mask_applicable(xattr_ignore_mask, is_dir, iter_type))
+		return 0;
+
+	return xattr_ignore_mask;
+}
+
 static void fsnotify_iter_init(struct fsnotify_iter_info *iter_info,
 			       int iter_type, __u32 mask,
 			       struct fsnotify_mark_connector **connp)
@@ -387,6 +435,13 @@ static void fsnotify_iter_init(struct fsnotify_iter_info *iter_info,
 	node = srcu_dereference(conn->list.first, &fsnotify_mark_srcu);
 	iter_info->marks[iter_type] =
 		hlist_entry_safe(node, struct fsnotify_mark, obj_list);
+
+	if (iter_type == FSNOTIFY_ITER_TYPE_INODE ||
+	    iter_type == FSNOTIFY_ITER_TYPE_PARENT) {
+		iter_info->xattr_ignore_mask |=
+			fsnotify_xattr_ignore_mask(conn, mask & FS_ISDIR,
+						   iter_type);
+	}
 }
 
 static struct fsnotify_mark *fsnotify_next_mark(struct fsnotify_mark *mark)
@@ -551,8 +606,8 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	 * event in its mask.
 	 * Otherwise, return if none of the marks care about this type of event.
 	 */
-	test_mask = (mask & ALL_FSNOTIFY_EVENTS);
-	if (!(test_mask & marks_mask))
+	test_mask = mask & marks_mask & ALL_FSNOTIFY_EVENTS;
+	if (!test_mask)
 		return 0;
 
 	iter_info.srcu_idx = srcu_read_lock(&fsnotify_mark_srcu);
@@ -564,6 +619,19 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 				   mask, &mnt->mnt_fsnotify_marks);
 	}
 	if (inode) {
+		/*
+		 * Persistent ignore masks are initialized when adding inode
+		 * marks with permission events, but inode may have marks and
+		 * have persistent ignore mask in xattr that needs to be
+		 * checked, so permissions event trigger auto-init of
+		 * persistent ignore mask before being sent to groups.
+		 */
+		if (test_mask & FS_EVENTS_POSS_IN_XATTR) {
+			ret = fsnotify_check_xattr(mask, path, inode, dir);
+			if (ret)
+				goto out;
+		}
+
 		fsnotify_iter_init(&iter_info, FSNOTIFY_ITER_TYPE_INODE,
 				   mask, &inode->i_fsnotify_marks);
 	}

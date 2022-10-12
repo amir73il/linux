@@ -70,6 +70,7 @@
 #include <linux/spinlock.h>
 #include <linux/srcu.h>
 #include <linux/ratelimit.h>
+#include <linux/xattr.h>
 
 #include <linux/atomic.h>
 
@@ -157,12 +158,14 @@ static void *__fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 {
 	u32 new_mask = 0;
 	bool want_iref = false;
+	bool want_xattr = false;
 	struct fsnotify_mark *mark;
 
 	assert_spin_locked(&conn->lock);
 	/* We can get detached connector here when inode is getting unlinked. */
 	if (!fsnotify_valid_obj_type(conn->type))
 		return NULL;
+
 	hlist_for_each_entry(mark, &conn->list, obj_list) {
 		if (!(mark->flags & FSNOTIFY_MARK_FLAG_ATTACHED))
 			continue;
@@ -170,12 +173,26 @@ static void *__fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 		if (conn->type == FSNOTIFY_OBJ_TYPE_INODE &&
 		    !(mark->flags & FSNOTIFY_MARK_FLAG_NO_IREF))
 			want_iref = true;
+		if (mark->group->flags & FSNOTIFY_GROUP_CHECK_XATTR)
+			want_xattr = true;
 	}
 
-	/* FS_ISDIR in object mask means parent/name info is needed in event */
-	new_mask &= ~FS_ISDIR;
+	/* If xattr mask is initialized, add it to inode interest mask */
+	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE &&
+	    conn->flags & FSNOTIFY_CONN_FLAG_XATTR_CACHED)
+		new_mask |= FS_XATTR_CACHED | conn->xattr_ignore_mask;
 
-	*fsnotify_conn_mask_p(conn) = new_mask;
+	/*
+	 * FS_ISDIR in object mask means parent/name info is needed in event.
+	 * A group with support for xattr ignore masks need the parent in event
+	 * to check if parent has an xattr ignore mask.
+	 */
+	if (want_xattr)
+		new_mask |= FS_ISDIR;
+	else
+		new_mask &= ~FS_ISDIR;
+
+	WRITE_ONCE(*fsnotify_conn_mask_p(conn), new_mask);
 
 	return fsnotify_update_iref(conn, want_iref);
 }
@@ -263,7 +280,7 @@ static void *fsnotify_detach_connector_from_object(
 
 	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE) {
 		inode = fsnotify_conn_inode(conn);
-		inode->i_fsnotify_mask = 0;
+		WRITE_ONCE(inode->i_fsnotify_mask, 0);
 
 		/* Unpin inode when detaching from connector */
 		if (!(conn->flags & FSNOTIFY_CONN_FLAG_HAS_IREF))
@@ -325,7 +342,9 @@ void fsnotify_put_mark(struct fsnotify_mark *mark)
 		return;
 
 	hlist_del_init_rcu(&mark->obj_list);
-	if (hlist_empty(&conn->list)) {
+	/* Keep connector attached to cache persistent inode masks */
+	if (hlist_empty(&conn->list) &&
+	    !(conn->flags & FSNOTIFY_CONN_FLAG_XATTR_CACHED)) {
 		objp = fsnotify_detach_connector_from_object(conn, &type);
 		free_conn = true;
 	} else {
@@ -607,6 +626,60 @@ static struct fsnotify_mark_connector *fsnotify_grab_connector(
 out:
 	srcu_read_unlock(&fsnotify_mark_srcu, idx);
 	return conn;
+}
+
+/*
+ * Initialize persistent inode ignore mask from xattr.
+ * Attach a connector to store the persistent ignore mask if needed.
+ */
+int fsnotify_init_xattr_ignore_mask(struct dentry *dentry)
+{
+	struct inode *inode = d_inode(dentry);
+	fsnotify_connp_t *connp = &inode->i_fsnotify_marks;
+	struct fsnotify_mark_connector *conn;
+	__u32 xattr_mask = 0;
+	__be32 xattr_buf;
+	int err = 0;
+
+	inode_lock(inode);
+	if (!fsnotify_should_init_xattr(inode))
+		goto out_unlock;
+
+	err = __vfs_getxattr(dentry, inode, FSNOTIFY_XATTR_NAME_IGNORE_MASK,
+			     (char *)&xattr_buf, sizeof(xattr_buf));
+	/* If we read no xattr we cache an empty xattr_ignore_mask */
+	if (err == sizeof(xattr_buf))
+		xattr_mask = be32_to_cpu(xattr_buf) & FS_ALL_XATTR_BITS;
+
+	err = 0;
+retry:
+	/* Attach connector to inode if not attached */
+	conn = fsnotify_grab_connector(connp);
+	if (!conn) {
+		/* Abort if failed grabbing connector after attach */
+		if (WARN_ON_ONCE(err))
+			goto out_unlock;
+
+		err = fsnotify_attach_connector_to_object(connp,
+						  FSNOTIFY_OBJ_TYPE_INODE,
+						  NULL);
+		if (err)
+			goto out_unlock;
+
+		err = -ENOENT;
+		goto retry;
+	}
+
+	/* Cache persistent ignore mask in connector */
+	conn->flags |= FSNOTIFY_CONN_FLAG_XATTR_CACHED;
+	WRITE_ONCE(conn->xattr_ignore_mask, xattr_mask);
+	__fsnotify_recalc_mask(conn);
+	spin_unlock(&conn->lock);
+	err = 0;
+
+out_unlock:
+	inode_unlock(inode);
+	return err;
 }
 
 /*

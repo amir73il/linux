@@ -45,14 +45,17 @@
 #define FS_UNMOUNT		0x00002000	/* inode on umount fs */
 
 /*
- * FS_Q_OVERFLOW and FS_NONBLOCK are overloaded.
+ * FS_Q_OVERFLOW, FS_NONBLOCK and FS_XATTR_CACHED are overloaded.
  * Only FS_Q_OVERFLOW is reported to user.
  * FS_NONBLOCK is used internally by fnotify hooks to indicate that the hook is
  * called in a context that cannot sleep.
+ * FS_XATTR_CACHED is only set in commulative inode mask to indicate that the
+ * inode persistent inode masks are initialized.
  * None of them are set in mark masks.
  */
 #define FS_Q_OVERFLOW		0x00004000	/* Event queued overflowed */
 #define FS_NONBLOCK		0x00004000	/* lookup event in RCU walk */
+#define FS_XATTR_CACHED		0x00004000	/* Initialized xattr masks */
 
 /*
  * FS_IN_IGNORED overloads FS_ERROR.  It is only used internally by inotify
@@ -108,6 +111,13 @@
  */
 #define FS_EVENTS_POSS_TO_PARENT (FS_EVENTS_POSS_ON_CHILD)
 
+/* Events that may be set in an xattr ignore mask */
+#define FS_EVENTS_POSS_IN_XATTR  (ALL_FSNOTIFY_PERM_EVENTS)
+/* Flags that may be set in an xattr ignore mask */
+#define FS_FLAGS_POSS_IN_XATTR   (FS_ISDIR | FS_EVENT_ON_CHILD)
+
+#define FS_ALL_XATTR_BITS (FS_EVENTS_POSS_IN_XATTR | FS_FLAGS_POSS_IN_XATTR)
+
 /* Events that can be reported to backends */
 #define ALL_FSNOTIFY_EVENTS (ALL_FSNOTIFY_DIRENT_EVENTS | \
 			     ALL_FSNOTIFY_PERM_EVENTS | \
@@ -120,6 +130,11 @@
 #define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT)
 
 #define ALL_FSNOTIFY_BITS   (ALL_FSNOTIFY_EVENTS | ALL_FSNOTIFY_FLAGS)
+
+/* xattr to store persistent inode masks */
+#define FSNOTIFY_XATTR_NAMESPACE "fsnotify."
+#define FSNOTIFY_XATTR_PREFIX XATTR_SECURITY_PREFIX FSNOTIFY_XATTR_NAMESPACE
+#define FSNOTIFY_XATTR_NAME_IGNORE_MASK FSNOTIFY_XATTR_PREFIX "ignore_mask"
 
 struct fsnotify_group;
 struct fsnotify_event;
@@ -226,6 +241,7 @@ struct fsnotify_group {
 #define FSNOTIFY_GROUP_USER	0x01 /* user allocated group */
 #define FSNOTIFY_GROUP_DUPS	0x02 /* allow multiple marks per object */
 #define FSNOTIFY_GROUP_NOFS	0x04 /* group lock is not direct reclaim safe */
+#define FSNOTIFY_GROUP_CHECK_XATTR 0x08 /* consult persistent xattr masks */
 	int flags;
 	unsigned int owner_flags;	/* stored flags of mark_mutex owner */
 
@@ -413,6 +429,7 @@ struct fsnotify_iter_info {
 	struct fsnotify_mark *marks[FSNOTIFY_ITER_TYPE_COUNT];
 	struct fsnotify_group *current_group;
 	unsigned int report_mask;
+	__u32 xattr_ignore_mask;
 	int srcu_idx;
 };
 
@@ -486,8 +503,10 @@ struct fsnotify_mark_connector {
 	unsigned short type;	/* Type of object [lock] */
 #define FSNOTIFY_CONN_FLAG_HAS_FSID	0x01
 #define FSNOTIFY_CONN_FLAG_HAS_IREF	0x02
+#define FSNOTIFY_CONN_FLAG_XATTR_CACHED	0x04
 	unsigned short flags;	/* flags [lock] */
 	__kernel_fsid_t fsid;	/* fsid of filesystem containing object */
+	__u32 xattr_ignore_mask; /* persistent ignore mask in xattr [lock] */
 	union {
 		/* Object pointer [lock] */
 		fsnotify_connp_t *obj;
@@ -810,6 +829,23 @@ static inline int fsnotify_add_inode_mark_locked(struct fsnotify_mark *mark,
 	return fsnotify_add_mark_locked(mark, &inode->i_fsnotify_marks,
 					FSNOTIFY_OBJ_TYPE_INODE, add_flags,
 					NULL);
+}
+
+/* Initialize persistent inode ignore mask from xattr */
+extern int fsnotify_init_xattr_ignore_mask(struct dentry *dentry);
+
+static inline bool fsnotify_should_init_xattr(struct inode *inode)
+{
+	if (!inode)
+		return false;
+	return !(READ_ONCE(inode->i_fsnotify_mask) & FS_XATTR_CACHED);
+}
+
+static inline int fsnotify_check_xattr_ignore_mask(struct dentry *dentry)
+{
+	if (!fsnotify_should_init_xattr(d_inode(dentry)))
+		return 0;
+	return fsnotify_init_xattr_ignore_mask(dentry);
 }
 
 /* given a group and a mark, flag mark to be freed when all references are dropped */

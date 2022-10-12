@@ -1783,6 +1783,13 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 			mask |= FAN_EVENT_ON_CHILD;
 	}
 
+	/* Initialize persistent xattr inode masks */
+	if (mark_type == FAN_MARK_INODE && mask & FANOTIFY_PERM_EVENTS) {
+		ret = fsnotify_check_xattr_ignore_mask(path.dentry);
+		if (ret)
+			goto path_put_and_out;
+	}
+
 	/* create/update an inode mark */
 	switch (mark_cmd) {
 	case FAN_MARK_ADD:
