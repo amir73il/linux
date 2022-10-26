@@ -411,4 +411,32 @@ static inline int fsnotify_sb_error(struct super_block *sb, struct inode *inode,
 			NULL, NULL, NULL, 0);
 }
 
+/*
+ * Pre modify hooks
+ *
+ * Caller must NOT hold any filesystem locks, because backend may need to
+ * write to filesystem.
+ */
+
+/*
+ * fsnotify_change_perm - object at path is about to be modified
+ */
+static inline int fsnotify_change_perm(const struct path *path)
+{
+	__u32 mask = FS_MODIFY_PERM;
+
+	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
+}
+
+/*
+ * fsnotify_modify_perm - file is about to be modified
+ */
+static inline int fsnotify_modify_perm(struct file *file)
+{
+	if (file->f_mode & FMODE_NONOTIFY)
+		return 0;
+
+	return fsnotify_change_perm(&file->f_path);
+}
+
 #endif	/* _LINUX_FS_NOTIFY_H */
