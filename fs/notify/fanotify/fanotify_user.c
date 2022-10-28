@@ -1593,6 +1593,22 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 	return 0;
 }
 
+static int fanotify_update_xattr_masks(struct dentry *dentry,
+				       unsigned int flags, __u32 mask)
+{
+	__u32 add_mask = 0;
+	__u32 rm_mask = 0;
+
+	if (flags & FAN_MARK_XATTR) {
+		if (flags & FAN_MARK_ADD)
+			add_mask = mask;
+		if (flags & FAN_MARK_REMOVE)
+			rm_mask = mask;
+	}
+
+	return fsnotify_update_xattr_ignore_mask(dentry, add_mask, rm_mask);
+}
+
 static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 			    int dfd, const char  __user *pathname)
 {
@@ -1719,6 +1735,17 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		goto fput_and_out;
 
 	/*
+	 * Persistent xattr mask is only supported for inode ignore mask and
+	 * only allowed with groups that opted in for FAN_XATTR_IGNORE_MASK.
+	 * There is no option to flush all persistent xattr masks.
+	 */
+	if (flags & FAN_MARK_XATTR &&
+	    (!(group->flags & FSNOTIFY_GROUP_CHECK_XATTR) ||
+	     mark_type != FAN_MARK_INODE || ignore != FAN_MARK_IGNORE ||
+	     mark_cmd == FAN_MARK_FLUSH))
+		return -EINVAL;
+
+	/*
 	 * Events that do not carry enough information to report
 	 * event->fd require a group that supports reporting fid.  Those
 	 * events are not supported on a mount mark, because they do not
@@ -1779,9 +1806,9 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		mnt = path.mnt;
 
 	ret = mnt ? -EINVAL : -EISDIR;
-	/* FAN_MARK_IGNORE requires SURV_MODIFY for sb/mount/dir marks */
+	/* FAN_MARK_IGNORE requires SURV_MODIFY for sb/mount/dir/xattr marks */
 	if (mark_cmd == FAN_MARK_ADD && ignore == FAN_MARK_IGNORE &&
-	    (mnt || S_ISDIR(inode->i_mode)) &&
+	    (mnt || S_ISDIR(inode->i_mode) || flags & FAN_MARK_XATTR) &&
 	    !(flags & FAN_MARK_IGNORED_SURV_MODIFY))
 		goto path_put_and_out;
 
@@ -1798,8 +1825,12 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 			mask |= FAN_EVENT_ON_CHILD;
 	}
 
-	/* Initialize persistent xattr inode masks */
-	if (mark_type == FAN_MARK_INODE && mask & FANOTIFY_PERM_EVENTS) {
+	/* Initialize/update persistent xattr inode masks */
+	if (flags & FAN_MARK_XATTR) {
+		ret = fanotify_update_xattr_masks(path.dentry, flags, mask);
+		/* Not updating any mark masks */
+		goto path_put_and_out;
+	} else if (mark_type == FAN_MARK_INODE && mask & FANOTIFY_PERM_EVENTS) {
 		ret = fsnotify_check_xattr_ignore_mask(path.dentry);
 		if (ret)
 			goto path_put_and_out;
@@ -1903,7 +1934,7 @@ static int __init fanotify_user_setup(void)
 
 	BUILD_BUG_ON(FANOTIFY_INIT_FLAGS & FANOTIFY_INTERNAL_GROUP_FLAGS);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 13);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 12);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 13);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);

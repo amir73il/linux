@@ -90,6 +90,7 @@
 /* This bit is mutually exclusive with FAN_MARK_IGNORED_MASK bit */
 #define FAN_MARK_IGNORE		0x00000400
 #define FAN_MARK_SYNC		0x00000800
+#define FAN_MARK_XATTR		0x00001000
 
 /* These are NOT bitwise flags.  Both bits can be used togther.  */
 #define FAN_MARK_INODE		0x00000000

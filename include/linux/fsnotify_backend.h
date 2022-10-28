@@ -831,8 +831,9 @@ static inline int fsnotify_add_inode_mark_locked(struct fsnotify_mark *mark,
 					NULL);
 }
 
-/* Initialize persistent inode ignore mask from xattr */
-extern int fsnotify_init_xattr_ignore_mask(struct dentry *dentry);
+/* Initialize/update persistent inode ignore mask from xattr */
+extern int fsnotify_update_xattr_ignore_mask(struct dentry *dentry,
+					     __u32 add_mask, __u32 rm_mask);
 
 static inline bool fsnotify_should_init_xattr(struct inode *inode)
 {
@@ -845,7 +846,7 @@ static inline int fsnotify_check_xattr_ignore_mask(struct dentry *dentry)
 {
 	if (!fsnotify_should_init_xattr(d_inode(dentry)))
 		return 0;
-	return fsnotify_init_xattr_ignore_mask(dentry);
+	return fsnotify_update_xattr_ignore_mask(dentry, 0, 0);
 }
 
 /* given a group and a mark, flag mark to be freed when all references are dropped */

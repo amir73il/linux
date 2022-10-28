@@ -629,10 +629,11 @@ out:
 }
 
 /*
- * Initialize persistent inode ignore mask from xattr.
+ * Initialize and maybe update persistent ignore mask from xattr.
  * Attach a connector to store the persistent ignore mask if needed.
  */
-int fsnotify_init_xattr_ignore_mask(struct dentry *dentry)
+int fsnotify_update_xattr_ignore_mask(struct dentry *dentry,
+				      __u32 add_mask, __u32 rm_mask)
 {
 	struct inode *inode = d_inode(dentry);
 	fsnotify_connp_t *connp = &inode->i_fsnotify_marks;
@@ -641,8 +642,11 @@ int fsnotify_init_xattr_ignore_mask(struct dentry *dentry)
 	__be32 xattr_buf;
 	int err = 0;
 
+	if (add_mask & ~FS_ALL_XATTR_BITS)
+		return -EINVAL;
+
 	inode_lock(inode);
-	if (!fsnotify_should_init_xattr(inode))
+	if (!fsnotify_should_init_xattr(inode) && !add_mask && !rm_mask)
 		goto out_unlock;
 
 	err = __vfs_getxattr(dentry, inode, FSNOTIFY_XATTR_NAME_IGNORE_MASK,
@@ -676,6 +680,26 @@ retry:
 	__fsnotify_recalc_mask(conn);
 	spin_unlock(&conn->lock);
 	err = 0;
+
+	if (add_mask || rm_mask) {
+		xattr_mask |= add_mask;
+		xattr_mask &= ~rm_mask;
+		xattr_buf = cpu_to_be32(xattr_mask);
+		if (xattr_mask & FS_EVENTS_POSS_IN_XATTR)
+			err = __vfs_setxattr_noperm(&init_user_ns, dentry,
+						FSNOTIFY_XATTR_NAME_IGNORE_MASK,
+						(char *)&xattr_buf,
+						sizeof(xattr_buf), 0);
+		else
+			err = __vfs_removexattr(&init_user_ns, dentry,
+						FSNOTIFY_XATTR_NAME_IGNORE_MASK);
+		if (!err) {
+			spin_lock(&conn->lock);
+			conn->xattr_ignore_mask = xattr_mask;
+			__fsnotify_recalc_mask(conn);
+			spin_unlock(&conn->lock);
+		}
+	}
 
 out_unlock:
 	inode_unlock(inode);
