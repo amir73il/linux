@@ -1815,6 +1815,25 @@ path_put_and_out:
 	path_put(&path);
 fput_and_out:
 	fdput(f);
+	/*
+	 * Synchronous add of mark or remove/flush of marks with ignore mask
+	 * provides a mothod for safe handover of event handling between two
+	 * groups:
+	 *
+	 * - First, group A subscribes to some events with FAN_MARK_SYNC
+	 * - Then, group B unsubscribes from those events
+	 *
+	 * This method guarantees that any event that both groups subscribed
+	 * to will be delivered either or both of the groups.
+	 *
+	 * Note that FAN_MARK_SYNC provides no synchronization to the object
+	 * interest masks, which are checked outside srcu read side.
+	 * Therefore, this method does not provide any guarantee regarding
+	 * delivery of events which only one of the group is subscribed to.
+	 */
+	if (!ret && flags & FAN_MARK_SYNC)
+		fsnotify_wait_handle_events();
+
 	return ret;
 }
 
@@ -1862,7 +1881,7 @@ static int __init fanotify_user_setup(void)
 
 	BUILD_BUG_ON(FANOTIFY_INIT_FLAGS & FANOTIFY_INTERNAL_GROUP_FLAGS);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 12);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 11);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 12);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);

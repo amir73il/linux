@@ -909,3 +909,10 @@ void fsnotify_wait_marks_destroyed(void)
 	flush_delayed_work(&reaper_work);
 }
 EXPORT_SYMBOL_GPL(fsnotify_wait_marks_destroyed);
+
+/* Wait for all in-progress event handling to be completed */
+void fsnotify_wait_handle_events(void)
+{
+	synchronize_srcu(&fsnotify_mark_srcu);
+}
+EXPORT_SYMBOL_GPL(fsnotify_wait_handle_events);
