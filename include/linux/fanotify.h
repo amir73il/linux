@@ -27,6 +27,10 @@
 
 #define FANOTIFY_INFO_MODES	(FANOTIFY_FID_BITS | FAN_REPORT_PIDFD)
 
+#define FANOTIFY_LIMIT_BITS	(FAN_UNLIMITED_QUEUE | FAN_UNLIMITED_MARKS)
+
+#define FANOTIFY_XATTR_BITS	(FAN_XATTR_IGNORE_MASK)
+
 /*
  * fanotify_init() flags that require CAP_SYS_ADMIN.
  * We do not allow unprivileged groups to request permission events.
@@ -36,8 +40,8 @@
 #define FANOTIFY_ADMIN_INIT_FLAGS	(FANOTIFY_PERM_CLASSES | \
 					 FAN_REPORT_TID | \
 					 FAN_REPORT_PIDFD | \
-					 FAN_UNLIMITED_QUEUE | \
-					 FAN_UNLIMITED_MARKS)
+					 FANOTIFY_LIMIT_BITS | \
+					 FANOTIFY_XATTR_BITS)
 
 /*
  * fanotify_init() flags that are allowed for user without CAP_SYS_ADMIN.

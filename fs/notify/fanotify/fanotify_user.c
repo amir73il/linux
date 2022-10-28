@@ -1400,6 +1400,10 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if (fid_mode && class != FAN_CLASS_NOTIF)
 		return -EINVAL;
 
+	/* For now, persistent masks are only for use of pre content hooks */
+	if (flags & FANOTIFY_XATTR_BITS && class != FAN_CLASS_PRE_CONTENT)
+		return -EINVAL;
+
 	/*
 	 * Child name is reported with parent fid so requires dir fid.
 	 * We can report both child fid and dir fid with or without name.
@@ -1428,6 +1432,9 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if (IS_ERR(group)) {
 		return PTR_ERR(group);
 	}
+
+	if (flags & FAN_XATTR_IGNORE_MASK)
+		group->flags |= FSNOTIFY_GROUP_CHECK_XATTR;
 
 	/* Enforce groups limits per user in all containing user ns */
 	group->fanotify_data.ucounts = inc_ucount(current_user_ns(),
@@ -1691,6 +1698,14 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	    group->priority == FS_PRIO_0)
 		goto fput_and_out;
 
+	/*
+	 * FAN_XATTR_IGNORE_MASK groups are not allowed to set anything but
+	 * permissions events.
+	 */
+	if (group->flags & FSNOTIFY_GROUP_CHECK_XATTR &&
+	    mask & ~(FANOTIFY_PERM_EVENTS|FANOTIFY_EVENT_FLAGS))
+		goto fput_and_out;
+
 	if (mask & FAN_FS_ERROR &&
 	    mark_type != FAN_MARK_FILESYSTEM)
 		goto fput_and_out;
@@ -1887,7 +1902,7 @@ static int __init fanotify_user_setup(void)
 				     FANOTIFY_DEFAULT_MAX_USER_MARKS);
 
 	BUILD_BUG_ON(FANOTIFY_INIT_FLAGS & FANOTIFY_INTERNAL_GROUP_FLAGS);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 12);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 13);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 12);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
