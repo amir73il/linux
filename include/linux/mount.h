@@ -20,6 +20,7 @@ struct file_system_type;
 struct fs_context;
 struct file;
 struct path;
+struct lookup_result;
 
 #define MNT_NOSUID	0x01
 #define MNT_NODEV	0x02
@@ -81,6 +82,7 @@ static inline struct user_namespace *mnt_user_ns(const struct vfsmount *mnt)
 
 extern int mnt_want_write(struct vfsmount *mnt);
 extern int mnt_want_write_file(struct file *file);
+extern int path_want_write(const struct path *path, unsigned int attr);
 extern void mnt_drop_write(struct vfsmount *mnt);
 extern void mnt_drop_write_file(struct file *file);
 extern void mntput(struct vfsmount *mnt);

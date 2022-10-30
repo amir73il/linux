@@ -399,6 +399,28 @@ int mnt_want_write(struct vfsmount *m)
 EXPORT_SYMBOL_GPL(mnt_want_write);
 
 /**
+ * path_want_write - get write access to a path's mount
+ * @path: the path who's mount on which to take a write
+ * @attr: indicate when changing attribute (0 for data)
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ *
+ * After finished, mnt_drop_write must be called to drop the reference.
+ */
+int path_want_write(const struct path *path, unsigned int attr)
+{
+	int ret;
+
+	ret = fsnotify_change_perm(path, attr);
+	if (ret)
+		return ret;
+
+	return mnt_want_write(path->mnt);
+}
+EXPORT_SYMBOL_GPL(path_want_write);
+
+/**
  * __mnt_want_write_file - get write access to a file's mount
  * @file: the file who's mount on which to take a write
  *

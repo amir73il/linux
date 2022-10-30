@@ -81,7 +81,7 @@ long vfs_truncate(const struct path *path, loff_t length)
 	if (!S_ISREG(inode->i_mode))
 		return -EINVAL;
 
-	error = mnt_want_write(path->mnt);
+	error = path_want_write(path, ATTR_SIZE);
 	if (error)
 		goto out;
 
@@ -593,7 +593,7 @@ int chmod_common(const struct path *path, umode_t mode)
 	struct iattr newattrs;
 	int error;
 
-	error = mnt_want_write(path->mnt);
+	error = path_want_write(path, ATTR_MODE);
 	if (error)
 		return error;
 retry_deleg:
@@ -761,7 +761,7 @@ retry:
 	error = user_path_at(dfd, filename, lookup_flags, &path);
 	if (error)
 		goto out;
-	error = mnt_want_write(path.mnt);
+	error = path_want_write(&path, ATTR_UID | ATTR_GID);
 	if (error)
 		goto out_release;
 	error = chown_common(&path, user, group);

@@ -3608,7 +3608,7 @@ static int do_open(struct nameidata *nd,
 		open_flag &= ~O_TRUNC;
 		acc_mode = 0;
 	} else if (d_is_reg(nd->path.dentry) && open_flag & O_TRUNC) {
-		error = mnt_want_write(nd->path.mnt);
+		error = path_want_write(&nd->path, ATTR_SIZE);
 		if (error)
 			return error;
 		do_truncate = true;
@@ -3724,7 +3724,7 @@ static int do_tmpfile(struct nameidata *nd, unsigned flags,
 
 	if (unlikely(error))
 		return error;
-	error = mnt_want_write(path.mnt);
+	error = path_want_write(&path, 0);
 	if (unlikely(error))
 		goto out;
 	mnt_userns = mnt_user_ns(path.mnt);
