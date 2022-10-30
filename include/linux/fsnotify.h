@@ -419,11 +419,20 @@ static inline int fsnotify_sb_error(struct super_block *sb, struct inode *inode,
  */
 
 /*
- * fsnotify_change_perm - object at path is about to be modified
+ * fsnotify_change_perm - object at path is about to be modified and/or metadata
+ * about to be changed.
  */
-static inline int fsnotify_change_perm(const struct path *path)
+static inline int fsnotify_change_perm(const struct path *path,
+				       unsigned int attr)
 {
-	__u32 mask = FS_MODIFY_PERM;
+	__u32 mask = attr ? FS_ATTRIB_PERM : FS_MODIFY_PERM;
+
+	/*
+	 * To avoid ambiguity, any change of attribute is reported as metadata
+	 * change and change of size and mtime is also reported as data change.
+	 */
+	if (attr & (ATTR_SIZE | ATTR_MTIME | ATTR_TOUCH))
+		mask |= FS_MODIFY_PERM;
 
 	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
 }
@@ -436,7 +445,7 @@ static inline int fsnotify_modify_perm(struct file *file)
 	if (file->f_mode & FMODE_NONOTIFY)
 		return 0;
 
-	return fsnotify_change_perm(&file->f_path);
+	return fsnotify_change_perm(&file->f_path, 0);
 }
 
 #endif	/* _LINUX_FS_NOTIFY_H */

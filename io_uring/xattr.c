@@ -211,7 +211,7 @@ static int __io_setxattr(struct io_kiocb *req, unsigned int issue_flags,
 	struct io_xattr *ix = io_kiocb_to_cmd(req, struct io_xattr);
 	int ret;
 
-	ret = mnt_want_write(path->mnt);
+	ret = path_want_write(path, ATTR_OTHER);
 	if (!ret) {
 		ret = do_setxattr(mnt_user_ns(path->mnt), path->dentry, &ix->ctx);
 		mnt_drop_write(path->mnt);

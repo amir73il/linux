@@ -32,10 +32,6 @@ int vfs_utimes(const struct path *path, struct timespec64 *times)
 			times = NULL;
 	}
 
-	error = mnt_want_write(path->mnt);
-	if (error)
-		goto out;
-
 	newattrs.ia_valid = ATTR_CTIME | ATTR_MTIME | ATTR_ATIME;
 	if (times) {
 		if (times[0].tv_nsec == UTIME_OMIT)
@@ -60,6 +56,11 @@ int vfs_utimes(const struct path *path, struct timespec64 *times)
 	} else {
 		newattrs.ia_valid |= ATTR_TOUCH;
 	}
+
+	error = path_want_write(path, newattrs.ia_valid);
+	if (error)
+		goto out;
+
 retry_deleg:
 	inode_lock(inode);
 	error = notify_change(mnt_user_ns(path->mnt), path->dentry, &newattrs,
