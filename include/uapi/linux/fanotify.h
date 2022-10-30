@@ -28,6 +28,9 @@
 #define FAN_LOOKUP_PERM		0x00080000	/* Path lookup in perm check */
 #define FAN_MODIFY_PERM		0x00100000	/* File modify in perm check */
 #define FAN_ATTRIB_PERM		0x00200000	/* Metadata change in perm check */
+#define FAN_CREATE_PERM		0x00400000	/* File create in perm check */
+#define FAN_DELETE_PERM		0x00800000	/* File delete in perm check */
+#define FAN_RENAME_PERM		0x01000000	/* File rename in perm check */
 
 #define FAN_EVENT_ON_CHILD	0x08000000	/* Interested in child events */
 

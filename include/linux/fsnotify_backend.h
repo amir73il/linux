@@ -67,6 +67,9 @@
 #define FS_LOOKUP_PERM		0x00080000	/* lookup event in a permission hook */
 #define FS_MODIFY_PERM		0x00100000	/* pre-modify permission hook */
 #define FS_ATTRIB_PERM		0x00200000	/* pre metadata change permission hook */
+#define FS_CREATE_PERM		0x00400000	/* pre-create permission hook */
+#define FS_DELETE_PERM		0x00800000	/* pre-delete permission hook */
+#define FS_RENAME_PERM		0x01000000	/* pre-rename permission hook */
 
 /*
  * Set on inode mark that cares about things that happen to its children.
@@ -89,7 +92,9 @@
  */
 #define ALL_FSNOTIFY_DIRENT_EVENTS (FS_CREATE | FS_DELETE | FS_MOVE | FS_RENAME)
 
-#define ALL_FSNOTIFY_PRE_MODIFY_EVENTS (FS_MODIFY_PERM | FS_ATTRIB_PERM)
+#define ALL_FSNOTIFY_PRE_MODIFY_EVENTS (FS_MODIFY_PERM | FS_ATTRIB_PERM | \
+					FS_CREATE_PERM | FS_DELETE_PERM | \
+					FS_RENAME_PERM)
 
 #define ALL_FSNOTIFY_PERM_EVENTS (ALL_FSNOTIFY_PRE_MODIFY_EVENTS | \
 				  FS_OPEN_PERM | FS_ACCESS_PERM | \
