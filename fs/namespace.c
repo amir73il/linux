@@ -377,6 +377,19 @@ int __mnt_want_write(struct vfsmount *m)
 	return ret;
 }
 
+static int mnt_want_write_locked(struct vfsmount *m, int sb_locked)
+{
+	int ret;
+
+	/* Has fsnotify acquired sb write access? */
+	if (!sb_locked)
+		sb_start_write(m->mnt_sb);
+	ret = __mnt_want_write(m);
+	if (ret)
+		sb_end_write(m->mnt_sb);
+	return ret;
+}
+
 /**
  * mnt_want_write - get write access to a mount
  * @m: the mount on which to take a write
@@ -388,13 +401,7 @@ int __mnt_want_write(struct vfsmount *m)
  */
 int mnt_want_write(struct vfsmount *m)
 {
-	int ret;
-
-	sb_start_write(m->mnt_sb);
-	ret = __mnt_want_write(m);
-	if (ret)
-		sb_end_write(m->mnt_sb);
-	return ret;
+	return mnt_want_write_locked(m, 0);
 }
 EXPORT_SYMBOL_GPL(mnt_want_write);
 
@@ -413,10 +420,10 @@ int path_want_write(const struct path *path, unsigned int attr)
 	int ret;
 
 	ret = fsnotify_change_perm(path, attr);
-	if (ret)
+	if (ret < 0)
 		return ret;
 
-	return mnt_want_write(path->mnt);
+	return mnt_want_write_locked(path->mnt, ret);
 }
 EXPORT_SYMBOL_GPL(path_want_write);
 
@@ -434,16 +441,16 @@ EXPORT_SYMBOL_GPL(path_want_write);
 int parent_want_write(const struct path *path, const struct lookup_result *res,
 		      int mask)
 {
-	int ret;
+	int ret = 0;
 
 	if (res->flags & LOOKUP_NONOTIFY)
 		goto out;
 
 	ret = fsnotify_name_perm(path, &res->last, mask);
-	if (ret)
+	if (ret < 0)
 		return ret;
 out:
-	return mnt_want_write(path->mnt);
+	return mnt_want_write_locked(path->mnt, ret);
 }
 EXPORT_SYMBOL_GPL(parent_want_write);
 
@@ -460,17 +467,17 @@ int parents_want_write(const struct path *oldpath,
 		       const struct path *newpath,
 		       const struct lookup_result *newres)
 {
-	int ret;
+	int ret = 0;
 
 	if (oldres->flags & LOOKUP_NONOTIFY)
 		goto out;
 
 	ret = fsnotify_rename_perm(oldpath, &oldres->last,
 				   newpath, &newres->last);
-	if (ret)
+	if (ret < 0)
 		return ret;
 out:
-	return mnt_want_write(oldpath->mnt);
+	return mnt_want_write_locked(oldpath->mnt, ret);
 }
 EXPORT_SYMBOL_GPL(parents_want_write);
 
@@ -506,7 +513,12 @@ int __mnt_want_write_file(struct file *file)
  */
 void __file_start_write(struct file *file)
 {
-	fsnotify_modify_perm(file);
+	int ret = fsnotify_modify_perm(file);
+
+	/* Has fsnotify acquired sb write access? */
+	if (ret > 0)
+		return;
+
 	sb_start_write(file_inode(file)->i_sb);
 }
 EXPORT_SYMBOL_GPL(__file_start_write);
@@ -527,10 +539,12 @@ int mnt_want_write_file(struct file *file)
 {
 	int ret = fsnotify_modify_perm(file);
 
-	if (unlikely(ret))
+	if (unlikely(ret < 0))
 		return ret;
 
-	sb_start_write(file_inode(file)->i_sb);
+	/* Has fsnotify acquired sb write access? */
+	if (!ret)
+		sb_start_write(file_inode(file)->i_sb);
 	ret = __mnt_want_write_file(file);
 	if (ret)
 		sb_end_write(file_inode(file)->i_sb);

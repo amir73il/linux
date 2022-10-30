@@ -583,6 +583,20 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		fsnotify_iter_next(&iter_info);
 	}
 	ret = 0;
+	/*
+	 * For pre modify permission events, acquire sb write access before
+	 * leaving SRCU and return >0 to signal that write access was acquired.
+	 * synchronize_srcu() followed by sb freeze/thaw will guarantee that
+	 * the modification that follow permission events that were already
+	 * authorized have also been completed.
+	 * For pre rename permission event, acquire write access after the
+	 * second of the event pair (i.e. rename to) was authorized.
+	 */
+	if (mask & ALL_FSNOTIFY_PRE_MODIFY_EVENTS &&
+	    (!(mask & FS_RENAME_PERM) || cookie & 1)) {
+		sb_start_write(sb);
+		ret = 1;
+	}
 out:
 	srcu_read_unlock(&fsnotify_mark_srcu, iter_info.srcu_idx);
 
