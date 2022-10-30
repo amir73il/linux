@@ -3521,7 +3521,12 @@ static const char *open_last_lookups(struct nameidata *nd,
 	}
 
 	if (open_flag & (O_CREAT | O_TRUNC | O_WRONLY | O_RDWR)) {
-		got_write = !mnt_want_write(nd->path.mnt);
+		struct lookup_result res = {
+			.last = nd->last,
+			.flags = nd->flags & LOOKUP_RES_FLAGS_MASK,
+		};
+
+		got_write = !parent_want_write(&nd->path, &res, MAY_CREATE);
 		/*
 		 * do _not_ fail yet - we might not need that or fail with
 		 * a different error; let lookup_open() decide; we'll be
@@ -3856,7 +3861,7 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 		goto out;
 
 	/* don't fail immediately if it's r/o, at least try to report other errors */
-	err2 = mnt_want_write(path->mnt);
+	err2 = parent_want_write(path, &res, MAY_CREATE);
 	/*
 	 * Do the final lookup.  Suppress 'create' if there is a trailing
 	 * '/', and a directory wasn't requested.
@@ -4221,7 +4226,7 @@ retry:
 		goto exit2;
 	}
 
-	error = mnt_want_write(path.mnt);
+	error = parent_want_write(&path, &res, MAY_DELETE);
 	if (error)
 		goto exit2;
 
@@ -4354,7 +4359,7 @@ retry:
 	if (res.type != LAST_NORM)
 		goto exit2;
 
-	error = mnt_want_write(path.mnt);
+	error = parent_want_write(&path, &res, MAY_DELETE);
 	if (error)
 		goto exit2;
 retry_deleg:
@@ -4920,7 +4925,7 @@ retry:
 	if (new_res.type != LAST_NORM)
 		goto exit2;
 
-	error = mnt_want_write(old_path.mnt);
+	error = parents_want_write(&old_path, &old_res, &new_path, &new_res);
 	if (error)
 		goto exit2;
 

@@ -83,6 +83,12 @@ static inline struct user_namespace *mnt_user_ns(const struct vfsmount *mnt)
 extern int mnt_want_write(struct vfsmount *mnt);
 extern int mnt_want_write_file(struct file *file);
 extern int path_want_write(const struct path *path, unsigned int attr);
+extern int parent_want_write(const struct path *path,
+			     const struct lookup_result *res, int mask);
+extern int parents_want_write(const struct path *oldpath,
+			      const struct lookup_result *oldres,
+			      const struct path *newpath,
+			      const struct lookup_result *newres);
 extern void mnt_drop_write(struct vfsmount *mnt);
 extern void mnt_drop_write_file(struct file *file);
 extern void mntput(struct vfsmount *mnt);

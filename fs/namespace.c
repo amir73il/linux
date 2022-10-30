@@ -421,6 +421,60 @@ int path_want_write(const struct path *path, unsigned int attr)
 EXPORT_SYMBOL_GPL(path_want_write);
 
 /**
+ * parent_want_write - get write access to a parent's mount before link/unlink
+ * @path: the path who's mount on which to take a write
+ * @name: name relative to path where entry is about to be linked
+ * @mask: either MAY_CREATE or MAY_DELETE
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ *
+ * After finished, mnt_drop_write must be called to drop the reference.
+ */
+int parent_want_write(const struct path *path, const struct lookup_result *res,
+		      int mask)
+{
+	int ret;
+
+	if (res->flags & LOOKUP_NONOTIFY)
+		goto out;
+
+	ret = fsnotify_name_perm(path, &res->last, mask);
+	if (ret)
+		return ret;
+out:
+	return mnt_want_write(path->mnt);
+}
+EXPORT_SYMBOL_GPL(parent_want_write);
+
+/**
+ * parents_want_write - get write access to a parents' mount before rename
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ *
+ * After finished, mnt_drop_write must be called to drop the reference.
+ */
+int parents_want_write(const struct path *oldpath,
+		       const struct lookup_result *oldres,
+		       const struct path *newpath,
+		       const struct lookup_result *newres)
+{
+	int ret;
+
+	if (oldres->flags & LOOKUP_NONOTIFY)
+		goto out;
+
+	ret = fsnotify_rename_perm(oldpath, &oldres->last,
+				   newpath, &newres->last);
+	if (ret)
+		return ret;
+out:
+	return mnt_want_write(oldpath->mnt);
+}
+EXPORT_SYMBOL_GPL(parents_want_write);
+
+/**
  * __mnt_want_write_file - get write access to a file's mount
  * @file: the file who's mount on which to take a write
  *
