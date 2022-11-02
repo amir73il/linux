@@ -289,13 +289,14 @@ static int create_fd(struct fsnotify_group *group, const struct path *path,
  */
 static void finish_permission_event(struct fsnotify_group *group,
 				    struct fanotify_perm_event *event,
-				    unsigned int response)
+				    unsigned int response, int errno)
 				    __releases(&group->notification_lock)
 {
 	bool destroy = false;
 
 	assert_spin_locked(&group->notification_lock);
 	event->response = response;
+	event->errno = errno;
 	if (event->state == FAN_EVENT_CANCELED)
 		destroy = true;
 	else
@@ -306,26 +307,39 @@ static void finish_permission_event(struct fsnotify_group *group,
 }
 
 static int process_access_response(struct fsnotify_group *group,
-				   struct fanotify_response *response_struct)
+				   struct fanotify_response_error *response_error)
 {
 	struct fanotify_perm_event *event;
-	int fd = response_struct->fd;
-	int response = response_struct->response;
+	int fd = response_error->fd;
+	int response = response_error->response;
+	unsigned int errno = response_error->error;
 
-	pr_debug("%s: group=%p fd=%d response=%d\n", __func__, group,
-		 fd, response);
+	pr_debug("%s: group=%p fd=%d response=%x errno=%u\n", __func__, group,
+		 fd, response, errno);
 	/*
 	 * make sure the response is valid, if invalid we do nothing and either
 	 * userspace can send a valid response or we will clean it up after the
 	 * timeout
 	 */
-	switch (response & ~FAN_AUDIT) {
+	switch (FAN_RESPONSE(response)) {
 	case FAN_ALLOW:
 	case FAN_DENY:
+		break;
+	case FAN_ERRNO:
+		if (FAN_GROUP_CLASS(group) != FAN_CLASS_VFS_FILTER)
+			return -EINVAL;
 		break;
 	default:
 		return -EINVAL;
 	}
+
+	/*
+	 * For backward compat with old ABI, upper bits of 32bit response should
+	 * be 0 and error may be set only when user opted-in with FAN_ERRNO.
+	 */
+	if (response_error->reserved != 0 ||
+	    (FAN_RESPONSE(response) == FAN_ERRNO) != (bool)errno)
+		return -EINVAL;
 
 	if (fd < 0)
 		return -EINVAL;
@@ -340,7 +354,7 @@ static int process_access_response(struct fsnotify_group *group,
 			continue;
 
 		list_del_init(&event->fae.fse.list);
-		finish_permission_event(group, event, response);
+		finish_permission_event(group, event, response, errno);
 		wake_up(&group->fanotify_data.access_waitq);
 		return 0;
 	}
@@ -804,7 +818,7 @@ static ssize_t fanotify_read(struct file *file, char __user *buf,
 			if (ret <= 0) {
 				spin_lock(&group->notification_lock);
 				finish_permission_event(group,
-					FANOTIFY_PERM(event), FAN_DENY);
+					FANOTIFY_PERM(event), FAN_DENY, 0);
 				wake_up(&group->fanotify_data.access_waitq);
 			} else {
 				spin_lock(&group->notification_lock);
@@ -827,7 +841,7 @@ static ssize_t fanotify_read(struct file *file, char __user *buf,
 
 static ssize_t fanotify_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
 {
-	struct fanotify_response response = { .fd = -1, .response = -1 };
+	struct fanotify_response_error response = { .fd = -1, .response = -1 };
 	struct fsnotify_group *group;
 	int ret;
 
@@ -876,7 +890,7 @@ static int fanotify_release(struct inode *ignored, struct file *file)
 		event = list_first_entry(&group->fanotify_data.access_list,
 				struct fanotify_perm_event, fae.fse.list);
 		list_del_init(&event->fae.fse.list);
-		finish_permission_event(group, event, FAN_ALLOW);
+		finish_permission_event(group, event, FAN_ALLOW, 0);
 		spin_lock(&group->notification_lock);
 	}
 
@@ -893,7 +907,7 @@ static int fanotify_release(struct inode *ignored, struct file *file)
 			fsnotify_destroy_event(group, fsn_event);
 		} else {
 			finish_permission_event(group, FANOTIFY_PERM(event),
-						FAN_ALLOW);
+						FAN_ALLOW, 0);
 		}
 		spin_lock(&group->notification_lock);
 	}
