@@ -1468,6 +1468,9 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	case FAN_CLASS_PRE_CONTENT:
 		group->priority = FS_PRIO_2;
 		break;
+	case FAN_CLASS_PRE_VFS:
+		group->priority = FS_PRIO_3;
+		break;
 	default:
 		fd = -EINVAL;
 		goto out_destroy_group;
@@ -1683,13 +1686,20 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		goto fput_and_out;
 
 	/*
-	 * group->priority == FS_PRIO_0 == FAN_CLASS_NOTIF.  These are not
-	 * allowed to set permissions events.
+	 * FAN_CLASS_NOTIF groups are not allowed to set permissions events.
+	 * FAN_CLASS_PRE_VFS groups are allowed to set only pre-vfs events.
 	 */
 	ret = -EINVAL;
-	if (mask & FANOTIFY_PERM_EVENTS &&
-	    group->priority == FS_PRIO_0)
-		goto fput_and_out;
+	switch (FAN_GROUP_CLASS(group)) {
+	case FAN_CLASS_NOTIF:
+		if (mask & FANOTIFY_PERM_EVENTS)
+			goto fput_and_out;
+		break;
+	case FAN_CLASS_PRE_VFS:
+		if (mask & FANOTIFY_EVENTS & ~FANOTIFY_PRE_VFS_EVENTS)
+			goto fput_and_out;
+		break;
+	}
 
 	if (mask & FAN_FS_ERROR &&
 	    mark_type != FAN_MARK_FILESYSTEM)
