@@ -19,9 +19,13 @@
 
 /* Group classes where permission events are allowed */
 #define FANOTIFY_PERM_CLASSES	(FAN_CLASS_CONTENT | \
-				 FAN_CLASS_PRE_CONTENT)
+				 FAN_CLASS_PRE_CONTENT | \
+				 FAN_CLASS_VFS_FILTER)
 
 #define FANOTIFY_CLASS_BITS	(FAN_CLASS_NOTIF | FANOTIFY_PERM_CLASSES)
+
+#define FAN_GROUP_CLASS(group) \
+	FAN_GROUP_FLAG(group, FANOTIFY_CLASS_BITS)
 
 #define FANOTIFY_FID_BITS	(FAN_REPORT_DFID_NAME_TARGET)
 
@@ -85,6 +89,10 @@
 /* Events that require a permission response from user */
 #define FANOTIFY_PERM_EVENTS	(FAN_ACCESS_PERM | FAN_LOOKUP_PERM | \
 				 FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM)
+
+/* Events that may be set by FAN_CLASS_VFS_FILTER group */
+#define FANOTIFY_VFS_FILTER_EVENTS (FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM | \
+				    FAN_LOOKUP_PERM)
 
 /*
  * Directory entry modification events - reported only to directory
