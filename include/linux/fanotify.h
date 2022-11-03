@@ -86,8 +86,11 @@
 #define FANOTIFY_PATH_EVENTS	(FAN_ACCESS | FAN_MODIFY | \
 				 FAN_CLOSE | FAN_OPEN | FAN_OPEN_EXEC)
 
+#define FANOTIFY_PRE_MODIFY_EVENTS (FAN_MODIFY_PERM)
+
 /* Events that are called without and vfs locks held */
-#define FANOTIFY_PRE_VFS_EVENTS	(FAN_LOOKUP_PERM | \
+#define FANOTIFY_PRE_VFS_EVENTS	(FANOTIFY_PRE_MODIFY_EVENTS | \
+				 FAN_LOOKUP_PERM | \
 				 FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM)
 
 /* Events that require a permission response from user */
