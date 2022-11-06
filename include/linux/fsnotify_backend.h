@@ -55,9 +55,12 @@
 #define FS_NONBLOCK		0x00004000	/* lookup event in RCU walk */
 
 /*
- * FS_IN_IGNORED overloads FS_ERROR.  It is only used internally by inotify
- * which does not support FS_ERROR.
+ * FS_DN_MULTISHOT, FS_IN_IGNORED and FS_ERROR are overloaded.
+ * FS_DN_MULTISHOT and FS_IN_IGNORED may be set only in dnotify/inotify inode
+ * mark mask, but not in the inode interest mask.
+ * FS_ERROR may be set only in fanotify sb mark mask and sb interest mask.
  */
+#define FS_DN_MULTISHOT		0x00008000	/* dnotify multishot */
 #define FS_IN_IGNORED		0x00008000	/* last inotify event here */
 #define FS_ERROR		0x00008000	/* Filesystem Error (fanotify) */
 
@@ -74,7 +77,7 @@
 #define FS_EVENT_ON_CHILD	0x08000000
 
 #define FS_RENAME		0x10000000	/* File was renamed */
-#define FS_DN_MULTISHOT		0x20000000	/* dnotify multishot */
+
 #define FS_ISDIR		0x40000000	/* event occurred against dir */
 
 #define FS_MOVE			(FS_MOVED_FROM | FS_MOVED_TO)
