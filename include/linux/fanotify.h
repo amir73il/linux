@@ -89,6 +89,12 @@
 /* Events that require a permission response from user */
 #define FANOTIFY_PERM_EVENTS	(FAN_ACCESS_PERM | FAN_LOOKUP_PERM | \
 				 FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM)
+/*
+ * FAN_PRE_VFS is not an independent event.
+ * It needs to be combined with an async event to define a pre-vfs event.
+ */
+#define IS_FANOTIFY_PERM_EVENT(mask) \
+	((mask) & (FANOTIFY_PERM_EVENTS | FAN_PRE_VFS))
 
 /* Events that may be set by FAN_CLASS_VFS_FILTER group */
 #define FANOTIFY_VFS_FILTER_EVENTS (FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM | \
@@ -117,7 +123,7 @@
 				 FANOTIFY_ERROR_EVENTS)
 
 /* Extra flags that may be reported with event or control handling of events */
-#define FANOTIFY_EVENT_FLAGS	(FAN_EVENT_ON_CHILD | FAN_ONDIR)
+#define FANOTIFY_EVENT_FLAGS	(FAN_EVENT_ON_CHILD | FAN_ONDIR | FAN_PRE_VFS)
 
 /* Events that may be reported to user */
 #define FANOTIFY_OUTGOING_EVENTS	(FANOTIFY_EVENTS | \

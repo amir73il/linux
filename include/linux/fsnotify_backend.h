@@ -79,6 +79,7 @@
 #define FS_RENAME		0x10000000	/* File was renamed */
 
 #define FS_ISDIR		0x40000000	/* event occurred against dir */
+#define FS_PRE_VFS		0x80000000	/* pre-vfs permission hook */
 
 #define FS_MOVE			(FS_MOVED_FROM | FS_MOVED_TO)
 
@@ -99,8 +100,12 @@
 #define ALL_FSNOTIFY_PERM_EVENTS (FS_OPEN_PERM | FS_ACCESS_PERM | \
 				  FS_OPEN_EXEC_PERM | FS_LOOKUP_PERM)
 
+/*
+ * FS_PRE_VFS is not an independent event.
+ * It needs to be combined with an async event to define a pre-vfs event.
+ */
 #define IS_FSNOTIFY_PERM_EVENT(mask) \
-	((mask) & ALL_FSNOTIFY_PERM_EVENTS)
+	((mask) & (ALL_FSNOTIFY_PERM_EVENTS | FS_PRE_VFS))
 
 /*
  * This is a list of all events that may get sent to a parent that is watching
@@ -129,7 +134,8 @@
 			     FS_ERROR)
 
 /* Extra flags that may be reported with event or control handling of events */
-#define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT)
+#define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT | \
+			     FS_PRE_VFS)
 
 #define ALL_FSNOTIFY_BITS   (ALL_FSNOTIFY_EVENTS | ALL_FSNOTIFY_FLAGS)
 

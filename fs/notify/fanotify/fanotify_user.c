@@ -902,7 +902,7 @@ static int fanotify_release(struct inode *ignored, struct file *file)
 	while ((fsn_event = fsnotify_remove_first_event(group))) {
 		struct fanotify_event *event = FANOTIFY_E(fsn_event);
 
-		if (!(event->mask & FANOTIFY_PERM_EVENTS)) {
+		if (!IS_FANOTIFY_PERM_EVENT(event->mask)) {
 			spin_unlock(&group->notification_lock);
 			fsnotify_destroy_event(group, fsn_event);
 		} else {
@@ -1587,7 +1587,7 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 	 * waits for fanotify permission event to be answered. Just disallow
 	 * permission events for such filesystems.
 	 */
-	if (mask & FANOTIFY_PERM_EVENTS &&
+	if (IS_FANOTIFY_PERM_EVENT(mask) &&
 	    path->mnt->mnt_sb->s_type->fs_flags & FS_DISALLOW_NOTIFY_PERM)
 		return -EINVAL;
 
@@ -1707,12 +1707,18 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	ret = -EINVAL;
 	switch (FAN_GROUP_CLASS(group)) {
 	case FAN_CLASS_NOTIF:
-		if (mask & FANOTIFY_PERM_EVENTS)
+		if (IS_FANOTIFY_PERM_EVENT(mask))
 			goto fput_and_out;
 		break;
 	case FAN_CLASS_VFS_FILTER:
 		if (mask & FANOTIFY_EVENTS & ~FANOTIFY_VFS_FILTER_EVENTS)
 			goto fput_and_out;
+		/*
+		 * FAN_CLASS_VFS_FILTER will get all the pre-vfs events
+		 * which correspond to async post-vfs events in the mask.
+		 */
+		mask |= FAN_PRE_VFS;
+		umask |= FAN_PRE_VFS;
 		break;
 	}
 
@@ -1759,8 +1765,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		goto fput_and_out;
 	}
 
-	ret = fanotify_find_path(dfd, pathname, &path, flags,
-			(mask & ALL_FSNOTIFY_EVENTS), obj_type);
+	ret = fanotify_find_path(dfd, pathname, &path, flags, mask, obj_type);
 	if (ret)
 		goto fput_and_out;
 
@@ -1798,7 +1803,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	/* Mask out FAN_EVENT_ON_CHILD flag for sb/mount/non-dir marks */
 	if (mnt || !S_ISDIR(inode->i_mode)) {
 		mask &= ~FAN_EVENT_ON_CHILD;
-		umask = FAN_EVENT_ON_CHILD;
+		umask |= FAN_EVENT_ON_CHILD;
 		/*
 		 * If group needs to report parent fid, register for getting
 		 * events with parent/name info for non-directory.

@@ -440,7 +440,7 @@ FANOTIFY_PERM(struct fanotify_event *event)
 static inline bool fanotify_is_perm_event(u32 mask)
 {
 	return IS_ENABLED(CONFIG_FANOTIFY_ACCESS_PERMISSIONS) &&
-		mask & FANOTIFY_PERM_EVENTS;
+		IS_FANOTIFY_PERM_EVENT(mask);
 }
 
 static inline struct fanotify_event *FANOTIFY_E(struct fsnotify_event *fse)

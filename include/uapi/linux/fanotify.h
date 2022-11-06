@@ -32,6 +32,7 @@
 #define FAN_RENAME		0x10000000	/* File was renamed */
 
 #define FAN_ONDIR		0x40000000	/* Event occurred against dir */
+#define FAN_PRE_VFS		0x80000000	/* Pre-vfs in perm check */
 
 /* helper events */
 #define FAN_CLOSE		(FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE) /* close */

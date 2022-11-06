@@ -577,7 +577,7 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		ret = send_to_group(mask, data, data_type, dir, file_name,
 				    cookie, &iter_info);
 
-		if (ret && (mask & ALL_FSNOTIFY_PERM_EVENTS))
+		if (ret && IS_FSNOTIFY_PERM_EVENT(mask))
 			goto out;
 
 		fsnotify_iter_next(&iter_info);
@@ -600,7 +600,7 @@ static __init int fsnotify_init(void)
 {
 	int ret;
 
-	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 23);
+	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 24);
 
 	ret = init_srcu_struct(&fsnotify_mark_srcu);
 	if (ret)
