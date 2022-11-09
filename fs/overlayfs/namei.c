@@ -388,7 +388,8 @@ int ovl_check_origin_fh(struct ovl_fs *ofs, struct ovl_fh *fh, bool connected,
 	}
 	**stackp = (struct ovl_path){
 		.dentry = origin,
-		.layer = &ofs->layers[i]
+		.layer = &ofs->layers[i],
+		.hash = origin->d_name.hash_len,
 	};
 
 	return 0;
@@ -981,6 +982,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		} else {
 			stack[ctr].dentry = this;
 			stack[ctr].layer = lower.layer;
+			stack[ctr].hash = this->d_name.hash_len;
 			ctr++;
 		}
 

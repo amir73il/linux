@@ -45,6 +45,8 @@ struct ovl_layer {
 struct ovl_path {
 	const struct ovl_layer *layer;
 	struct dentry *dentry;
+	/* Hash of the lower parent/name when we found it */
+	u64 hash;
 };
 
 /* private information held for overlayfs's superblock */

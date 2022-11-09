@@ -128,8 +128,8 @@ static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak)
 {
 	int ret = 1;
 
-	/* Invalidate dentry if real was deleted since we found it */
-	if (ovl_dentry_is_deleted(d)) {
+	/* Invalidate dentry if real was deleted/renamed since we found it */
+	if (ovl_dentry_is_deleted(d) || (hash && hash != d->d_name.hash_len)) {
 		ret = 0;
 	} else if (weak) {
 		if (d->d_flags & DCACHE_OP_WEAK_REVALIDATE)
@@ -148,17 +148,18 @@ static int ovl_dentry_revalidate_common(struct dentry *dentry,
 					unsigned int flags, bool weak)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
+	struct ovl_path *lower = oe->lowerstack;
 	struct dentry *upper;
 	unsigned int i;
 	int ret = 1;
 
 	upper = ovl_dentry_upper(dentry);
 	if (upper)
-		ret = ovl_revalidate_real(upper, flags, weak);
+		ret = ovl_revalidate_real(upper, flags, weak, 0);
 
-	for (i = 0; ret > 0 && i < oe->numlower; i++) {
-		ret = ovl_revalidate_real(oe->lowerstack[i].dentry, flags,
-					  weak);
+	for (i = 0; ret > 0 && i < oe->numlower; i++, lower++) {
+		ret = ovl_revalidate_real(lower->dentry, flags, weak,
+					  lower->hash);
 	}
 	return ret;
 }
@@ -1864,6 +1865,8 @@ static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
 	for (i = 0; i < numlower; i++) {
 		oe->lowerstack[i].dentry = dget(stack[i].dentry);
 		oe->lowerstack[i].layer = &ofs->layers[i+1];
+		/* layer root should not be invalidated by rename */
+		oe->lowerstack->hash = 0;
 	}
 
 out:

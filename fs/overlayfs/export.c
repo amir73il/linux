@@ -321,6 +321,7 @@ static struct dentry *ovl_obtain_alias(struct super_block *sb,
 	if (lower) {
 		oe->lowerstack->dentry = dget(lower);
 		oe->lowerstack->layer = lowerpath->layer;
+		oe->lowerstack->hash = lower->d_name.hash_len;
 	}
 	dentry->d_fsdata = oe;
 	if (upper_alias)
