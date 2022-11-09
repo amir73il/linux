@@ -121,10 +121,22 @@ static bool ovl_dentry_is_deleted(struct dentry *d)
 {
 	struct inode *inode = READ_ONCE(d->d_inode);
 
-	return unlikely(!inode || IS_DEADDIR(inode));
+	if (unlikely(!inode || IS_DEADDIR(inode)))
+		return true;
+
+	/*
+	 * A real dentry may be still unhashed if it was obtained by
+	 * ovl_obtain_alias() and not connected since, but then it will
+	 * also be "disconnected".
+	 * "unhashed" but not "disconnected" means that the real dentry was
+	 * unlinked from underneath the overlay, so ovl lookup should regard
+	 * this as a stale dentry.
+	 */
+	return unlikely(d_unhashed(d) && !(d->d_flags & DCACHE_DISCONNECTED));
 }
 
-static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak)
+static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak,
+			       u64 hash)
 {
 	int ret = 1;
 
