@@ -233,4 +233,10 @@ int setxattr_copy(const char __user *name, struct xattr_ctx *ctx);
 int do_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 		struct xattr_ctx *ctx);
 
-ssize_t __kernel_write_iter(struct file *file, struct iov_iter *from, loff_t *pos);
+/*
+ * fs/read_write.c:
+ */
+int __rw_verify_area(struct file *file, const loff_t *ppos, size_t count,
+		     int mask);
+ssize_t __kernel_write_iter(struct file *file, struct iov_iter *from,
+			    loff_t *pos);
