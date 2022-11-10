@@ -100,7 +100,7 @@ static int generic_remap_checks(struct file *file_in, loff_t pos_in,
 }
 
 static int remap_verify_area(struct file *file, loff_t pos, loff_t len,
-			     bool write)
+			     int mask)
 {
 	loff_t tmp;
 
@@ -110,7 +110,15 @@ static int remap_verify_area(struct file *file, loff_t pos, loff_t len,
 	if (unlikely(check_add_overflow(pos, len, &tmp)))
 		return -EINVAL;
 
-	return security_file_permission(file, write ? MAY_WRITE : MAY_READ);
+	if (mask & MAY_NOT_START_WRITE) {
+		/* MAY_NOT_START_WRITE means that file_start_write() is held */
+		lockdep_assert_once(file_write_started(file));
+	} else if (mask & MAY_WRITE) {
+		/* Avoid the false negatives of !file_write_started() */
+		lockdep_assert_once(file_may_start_write(file));
+	}
+
+	return security_file_permission(file, mask);
 }
 
 /*
@@ -385,11 +393,14 @@ loff_t do_clone_file_range(struct file *file_in, loff_t pos_in,
 	if (!file_in->f_op->remap_file_range)
 		return -EOPNOTSUPP;
 
-	ret = remap_verify_area(file_in, pos_in, len, false);
+	/* vfs_clone_file_range() hold sb_start_write() */
+	ret = remap_verify_area(file_in, pos_in, len,
+				MAY_READ | MAY_NOT_START_WRITE);
 	if (ret)
 		return ret;
 
-	ret = remap_verify_area(file_out, pos_out, len, true);
+	ret = remap_verify_area(file_out, pos_out, len,
+				MAY_WRITE | MAY_NOT_START_WRITE);
 	if (ret)
 		return ret;
 
@@ -409,6 +420,14 @@ loff_t vfs_clone_file_range(struct file *file_in, loff_t pos_in,
 			    loff_t len, unsigned int remap_flags)
 {
 	loff_t ret;
+
+	ret = remap_verify_area(file_in, pos_in, len, MAY_READ);
+	if (ret)
+		return ret;
+
+	ret = remap_verify_area(file_out, pos_out, len, MAY_WRITE);
+	if (ret)
+		return ret;
 
 	file_start_write(file_out);
 	ret = do_clone_file_range(file_in, pos_in, file_out, pos_out, len,
@@ -445,46 +464,40 @@ loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 	WARN_ON_ONCE(remap_flags & ~(REMAP_FILE_DEDUP |
 				     REMAP_FILE_CAN_SHORTEN));
 
-	ret = mnt_want_write_file(dst_file);
-	if (ret)
-		return ret;
-
 	/*
 	 * This is redundant if called from vfs_dedupe_file_range(), but other
 	 * callers need it and it's not performance sesitive...
 	 */
-	ret = remap_verify_area(src_file, src_pos, len, false);
+	ret = remap_verify_area(src_file, src_pos, len, MAY_READ);
 	if (ret)
-		goto out_drop_write;
+		return ret;
 
-	ret = remap_verify_area(dst_file, dst_pos, len, true);
+	ret = remap_verify_area(dst_file, dst_pos, len, MAY_WRITE);
 	if (ret)
-		goto out_drop_write;
+		return ret;
 
-	ret = -EPERM;
 	if (!allow_file_dedupe(dst_file))
-		goto out_drop_write;
+		return -EPERM;
 
-	ret = -EXDEV;
 	if (file_inode(src_file)->i_sb != file_inode(dst_file)->i_sb)
-		goto out_drop_write;
+		return -EXDEV;
 
-	ret = -EISDIR;
 	if (S_ISDIR(file_inode(dst_file)->i_mode))
-		goto out_drop_write;
+		return -EISDIR;
 
-	ret = -EINVAL;
 	if (!dst_file->f_op->remap_file_range)
-		goto out_drop_write;
+		return -EINVAL;
 
-	if (len == 0) {
-		ret = 0;
-		goto out_drop_write;
-	}
+	if (len == 0)
+		return 0;
+
+	ret = mnt_want_write_file(dst_file);
+	if (ret)
+		return ret;
 
 	ret = dst_file->f_op->remap_file_range(src_file, src_pos, dst_file,
 			dst_pos, len, remap_flags | REMAP_FILE_DEDUP);
-out_drop_write:
+
 	mnt_drop_write_file(dst_file);
 
 	return ret;
@@ -520,7 +533,7 @@ int vfs_dedupe_file_range(struct file *file, struct file_dedupe_range *same)
 	if (!file->f_op->remap_file_range)
 		return -EOPNOTSUPP;
 
-	ret = remap_verify_area(file, off, len, false);
+	ret = remap_verify_area(file, off, len, MAY_READ);
 	if (ret < 0)
 		return ret;
 	ret = 0;
