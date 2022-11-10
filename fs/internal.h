@@ -304,3 +304,11 @@ ssize_t __kernel_write_iter(struct file *file, struct iov_iter *from, loff_t *po
 struct mnt_idmap *alloc_mnt_idmap(struct user_namespace *mnt_userns);
 struct mnt_idmap *mnt_idmap_get(struct mnt_idmap *idmap);
 void mnt_idmap_put(struct mnt_idmap *idmap);
+
+/*
+ * fs/read_write.c:
+ */
+int __rw_verify_area(struct file *file, const loff_t *ppos, size_t count,
+		     int mask);
+ssize_t __kernel_write_iter(struct file *file, struct iov_iter *from,
+			    loff_t *pos);

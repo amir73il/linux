@@ -1437,6 +1437,19 @@ static void aio_remove_iocb(struct aio_kiocb *iocb)
 	spin_unlock_irqrestore(&ctx->ctx_lock, flags);
 }
 
+static void aio_end_write(struct file *file)
+{
+	struct inode *inode = file_inode(file);
+
+	/*
+	 * Tell lockdep we inherited freeze protection from submission
+	 * thread.
+	 */
+	if (S_ISREG(inode->i_mode))
+		__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
+	file_end_write(file);
+}
+
 static void aio_complete_rw(struct kiocb *kiocb, long res)
 {
 	struct aio_kiocb *iocb = container_of(kiocb, struct aio_kiocb, rw);
@@ -1444,17 +1457,8 @@ static void aio_complete_rw(struct kiocb *kiocb, long res)
 	if (!list_empty_careful(&iocb->ki_list))
 		aio_remove_iocb(iocb);
 
-	if (kiocb->ki_flags & IOCB_WRITE) {
-		struct inode *inode = file_inode(kiocb->ki_filp);
-
-		/*
-		 * Tell lockdep we inherited freeze protection from submission
-		 * thread.
-		 */
-		if (S_ISREG(inode->i_mode))
-			__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
-		file_end_write(kiocb->ki_filp);
-	}
+	if (kiocb->ki_flags & IOCB_WRITE)
+		aio_end_write(kiocb->ki_filp);
 
 	iocb->ki_res.res = res;
 	iocb->ki_res.res2 = 0;
