@@ -101,6 +101,8 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 #define MAY_CHDIR		0x00000040
 /* called from RCU mode, don't block */
 #define MAY_NOT_BLOCK		0x00000080
+/* called with vfs locks held, do not call sb_start_write() */
+#define MAY_NOT_START_WRITE	0x00000100
 
 /*
  * flags in file.f_mode.  Note that FMODE_READ and FMODE_WRITE must correspond
@@ -1504,9 +1506,63 @@ static inline bool __sb_start_write_trylock(struct super_block *sb, int level)
 #define __sb_writers_release(sb, lev)	\
 	percpu_rwsem_release(&(sb)->s_writers.rw_sem[(lev)-1], 1, _THIS_IP_)
 
-static inline bool sb_write_started(const struct super_block *sb)
+static inline int __sb_write_started(const struct super_block *sb)
 {
 	return lockdep_is_held_type(sb->s_writers.rw_sem + SB_FREEZE_WRITE - 1, 1);
+}
+
+/**
+ * sb_write_started - check if sb_start_write() was called
+ * @sb: the super we write to
+ *
+ * This is not the opposite of sb_may_start_write() -
+ * it allows false positives with !CONFIG_LOCKDEP and LOCK_STATE_UNKNOWN.
+ */
+static inline bool sb_write_started(const struct super_block *sb)
+{
+	return __sb_write_started(sb);
+}
+
+/**
+ * sb_may_start_write - check if sb_start_write() may be called
+ * @sb: the super we write to
+ *
+ * This is not the opposite of sb_write_started() -
+ * it allows false positives with !CONFIG_LOCKDEP and LOCK_STATE_UNKNOWN.
+ */
+static inline bool sb_may_start_write(const struct super_block *sb)
+{
+	return __sb_write_started(sb) <= 0;
+}
+
+/**
+ * file_write_started - check if file_start_write() was called
+ * @file: the file we write to
+ *
+ * This is not the opposite of file_may_start_write() -
+ * it allows false positives with !CONFIG_LOCKDEP, LOCK_STATE_UNKNOWN
+ * and !S_ISREG, because file_start_write() has no effect on !S_ISREG.
+ */
+static inline bool file_write_started(const struct file *file)
+{
+	if (!S_ISREG(file_inode(file)->i_mode))
+		return true;
+	return sb_write_started(file_inode(file)->i_sb);
+}
+
+/**
+ * file_may_start_write - check if file_start_write() may be called
+ * @file: the file we write to
+ *
+ * This is not the opposite of file_write_started() -
+ * it allows false positives with !CONFIG_LOCKDEP, LOCK_STATE_UNKNOWN
+ * and !S_ISREG, because file_start_write() has no effect on !S_ISREG.
+ */
+static inline bool file_may_start_write(const struct file *file)
+{
+	if (!S_ISREG(file_inode(file)->i_mode))
+		return true;
+	return sb_may_start_write(file_inode(file)->i_sb);
 }
 
 /**

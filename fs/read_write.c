@@ -352,7 +352,8 @@ out_putf:
 }
 #endif
 
-int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t count)
+int __rw_verify_area(struct file *file, const loff_t *ppos, size_t count,
+		     int mask)
 {
 	if (unlikely((ssize_t) count < 0))
 		return -EINVAL;
@@ -371,10 +372,37 @@ int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t
 		}
 	}
 
-	return security_file_permission(file,
+	if (mask & MAY_NOT_START_WRITE) {
+		/*
+		 * MAY_NOT_START_WRITE means that file_start_write() is held,
+		 * but when iter write helpers are called from aio_write(),
+		 * lockdep is fooled to think that sb_start_write() is released,
+		 * so we cannot lockdep_assert(file_write_started()) here.
+		 */
+	} else if (mask & MAY_WRITE) {
+		/* Avoid the false negatives of !file_write_started() */
+		lockdep_assert_once(file_may_start_write(file));
+	}
+
+	return security_file_permission(file, mask);
+}
+EXPORT_SYMBOL(__rw_verify_area);
+
+int rw_verify_area(int read_write, struct file *file, const loff_t *ppos,
+		   size_t count)
+{
+	return __rw_verify_area(file, ppos, count,
 				read_write == READ ? MAY_READ : MAY_WRITE);
 }
 EXPORT_SYMBOL(rw_verify_area);
+
+static int rw_iter_verify_area(int read_write, struct file *file,
+			       const loff_t *ppos, size_t count)
+{
+	return __rw_verify_area(file, ppos, count,
+				read_write == READ ? MAY_READ :
+				MAY_WRITE | MAY_NOT_START_WRITE);
+}
 
 static ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
@@ -787,7 +815,7 @@ static ssize_t do_iter_read(struct file *file, struct iov_iter *iter,
 	tot_len = iov_iter_count(iter);
 	if (!tot_len)
 		goto out;
-	ret = rw_verify_area(READ, file, pos, tot_len);
+	ret = rw_iter_verify_area(READ, file, pos, tot_len);
 	if (ret < 0)
 		return ret;
 
@@ -817,7 +845,7 @@ ssize_t vfs_iocb_iter_read(struct file *file, struct kiocb *iocb,
 	tot_len = iov_iter_count(iter);
 	if (!tot_len)
 		goto out;
-	ret = rw_verify_area(READ, file, &iocb->ki_pos, tot_len);
+	ret = rw_iter_verify_area(READ, file, &iocb->ki_pos, tot_len);
 	if (ret < 0)
 		return ret;
 
@@ -852,7 +880,7 @@ static ssize_t do_iter_write(struct file *file, struct iov_iter *iter,
 	tot_len = iov_iter_count(iter);
 	if (!tot_len)
 		return 0;
-	ret = rw_verify_area(WRITE, file, pos, tot_len);
+	ret = rw_iter_verify_area(WRITE, file, pos, tot_len);
 	if (ret < 0)
 		return ret;
 
@@ -881,7 +909,7 @@ ssize_t vfs_iocb_iter_write(struct file *file, struct kiocb *iocb,
 	tot_len = iov_iter_count(iter);
 	if (!tot_len)
 		return 0;
-	ret = rw_verify_area(WRITE, file, &iocb->ki_pos, tot_len);
+	ret = rw_iter_verify_area(WRITE, file, &iocb->ki_pos, tot_len);
 	if (ret < 0)
 		return ret;
 
@@ -1387,7 +1415,7 @@ ssize_t generic_copy_file_range(struct file *file_in, loff_t pos_in,
 				struct file *file_out, loff_t pos_out,
 				size_t len, unsigned int flags)
 {
-	lockdep_assert(sb_write_started(file_inode(file_out)->i_sb));
+	lockdep_assert_once(file_write_started(file_out));
 
 	return do_splice_direct(file_in, &pos_in, file_out, &pos_out,
 				len > MAX_RW_COUNT ? MAX_RW_COUNT : len, 0);
