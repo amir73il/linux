@@ -871,7 +871,9 @@ long vfs_splice_read(struct file *in, loff_t *ppos,
 	p_space = pipe->max_usage - pipe_occupancy(pipe->head, pipe->tail);
 	len = min_t(size_t, len, p_space << PAGE_SHIFT);
 
-	ret = rw_verify_area(READ, in, ppos, len);
+	/* do_sendfile() holds sb_start_write() */
+	ret = __rw_verify_area(in, ppos, len,
+			       MAY_READ | MAY_NOT_START_WRITE);
 	if (unlikely(ret < 0))
 		return ret;
 
@@ -1063,7 +1065,9 @@ long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
 	if (unlikely(out->f_flags & O_APPEND))
 		return -EINVAL;
 
-	ret = rw_verify_area(WRITE, out, opos, len);
+	/* do_sendfile() holds sb_start_write() */
+	ret = __rw_verify_area(out, opos, len,
+			       MAY_WRITE | MAY_NOT_START_WRITE);
 	if (unlikely(ret < 0))
 		return ret;
 
