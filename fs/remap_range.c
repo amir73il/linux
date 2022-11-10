@@ -445,46 +445,40 @@ loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 	WARN_ON_ONCE(remap_flags & ~(REMAP_FILE_DEDUP |
 				     REMAP_FILE_CAN_SHORTEN));
 
-	ret = mnt_want_write_file(dst_file);
-	if (ret)
-		return ret;
-
 	/*
 	 * This is redundant if called from vfs_dedupe_file_range(), but other
 	 * callers need it and it's not performance sesitive...
 	 */
 	ret = remap_verify_area(src_file, src_pos, len, false);
 	if (ret)
-		goto out_drop_write;
+		return ret;
 
 	ret = remap_verify_area(dst_file, dst_pos, len, true);
 	if (ret)
-		goto out_drop_write;
+		return ret;
 
-	ret = -EPERM;
 	if (!allow_file_dedupe(dst_file))
-		goto out_drop_write;
+		return -EPERM;
 
-	ret = -EXDEV;
 	if (file_inode(src_file)->i_sb != file_inode(dst_file)->i_sb)
-		goto out_drop_write;
+		return -EXDEV;
 
-	ret = -EISDIR;
 	if (S_ISDIR(file_inode(dst_file)->i_mode))
-		goto out_drop_write;
+		return -EISDIR;
 
-	ret = -EINVAL;
 	if (!dst_file->f_op->remap_file_range)
-		goto out_drop_write;
+		return -EINVAL;
 
-	if (len == 0) {
-		ret = 0;
-		goto out_drop_write;
-	}
+	if (len == 0)
+		return 0;
+
+	ret = mnt_want_write_file(dst_file);
+	if (ret)
+		return ret;
 
 	ret = dst_file->f_op->remap_file_range(src_file, src_pos, dst_file,
 			dst_pos, len, remap_flags | REMAP_FILE_DEDUP);
-out_drop_write:
+
 	mnt_drop_write_file(dst_file);
 
 	return ret;
