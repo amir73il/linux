@@ -101,6 +101,22 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
 }
 
+static inline int fsnotify_file_range(struct file *file, __u32 mask,
+				      const loff_t *ppos, size_t count)
+{
+	struct file_range range;
+
+	if (file->f_mode & FMODE_NONOTIFY)
+		return 0;
+
+	/* Overlayfs internal files have fake f_path */
+	range.path = file_real_path(file);
+	range.ppos = ppos;
+	range.count = count;
+	return fsnotify_parent(range.path->dentry, mask, &range,
+			       FSNOTIFY_EVENT_FILE_RANGE);
+}
+
 /*
  * fsnotify_file_perm - permission hook before file access
  */
@@ -116,7 +132,7 @@ static inline int fsnotify_file_perm(struct file *file, int mask,
 	if (!(mask & MAY_NOT_START_WRITE))
 		fsnotify_mask |= FS_PRE_ACCESS;
 
-	return fsnotify_file(file, fsnotify_mask);
+	return fsnotify_file_range(file, fsnotify_mask, ppos, count);
 }
 
 /*
