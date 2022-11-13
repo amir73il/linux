@@ -425,6 +425,7 @@ FANOTIFY_PE(struct fanotify_event *event)
 struct fanotify_perm_event {
 	struct fanotify_event fae;
 	struct path path;
+	const struct file_range *range;	/* optional file range info */
 	unsigned short response;	/* userspace answer to the event */
 	unsigned char errno;		/* errno in case of deny */
 	unsigned char state;		/* state of the event */

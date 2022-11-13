@@ -127,14 +127,23 @@ static inline int fsnotify_file_perm(struct file *file, int mask,
 				     const loff_t *ppos, size_t count)
 {
 	__u32 fsnotify_mask = FS_ACCESS_PERM;
+	struct file_range file_range = {
+		.file = file,
+		.ppos = ppos,
+		.count = count,
+	};
 
 	if (!(mask & MAY_READ))
+		return 0;
+
+	if (file->f_mode & FMODE_NONOTIFY)
 		return 0;
 
 	if (!(mask & MAY_NOT_START_WRITE))
 		fsnotify_mask |= FS_PRE_VFS;
 
-	return fsnotify_file(file, fsnotify_mask);
+	return fsnotify_parent(file->f_path.dentry, fsnotify_mask, &file_range,
+			       FSNOTIFY_EVENT_FILE_RANGE);
 }
 
 static inline int fsnotify_open_perm(struct file *file)
