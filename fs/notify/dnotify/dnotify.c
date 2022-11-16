@@ -198,6 +198,9 @@ void dnotify_flush(struct file *filp, fl_owner_t id)
 	fsnotify_put_mark(fsn_mark);
 }
 
+#define ALL_DNOTIFY_EVENTS (FS_ACCESS | FS_MODIFY | FS_ATTRIB | \
+			    FS_CREATE | FS_DELETE | FS_RENAME | FS_MOVE)
+
 /* this conversion is done only at watch creation */
 static __u32 convert_arg(unsigned long arg)
 {
@@ -298,8 +301,9 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned long arg)
 	 */
 	mask = convert_arg(arg);
 
-	error = security_path_notify(&filp->f_path, mask,
-			FSNOTIFY_OBJ_TYPE_INODE);
+	BUILD_BUG_ON(ALL_DNOTIFY_EVENTS & ~FSNOTIFY_SECURITY_MASK);
+	error = security_path_notify(&filp->f_path, mask & ALL_DNOTIFY_EVENTS,
+				     FSNOTIFY_OBJ_TYPE_INODE);
 	if (error)
 		goto out_err;
 

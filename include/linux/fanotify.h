@@ -88,6 +88,10 @@
 #define FANOTIFY_DIRENT_EVENTS	(FAN_MOVE | FAN_CREATE | FAN_DELETE | \
 				 FAN_RENAME)
 
+/* Events that require a permission response from user */
+#define FANOTIFY_PERM_EVENTS	(FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM | \
+				 FAN_ACCESS_PERM)
+
 /* Events that can be reported with event->fd */
 #define FANOTIFY_FD_EVENTS (FANOTIFY_PATH_EVENTS | FANOTIFY_PERM_EVENTS)
 
@@ -99,20 +103,17 @@
 #define FANOTIFY_ERROR_EVENTS	(FAN_FS_ERROR)
 
 /* Events that user can request to be notified on */
-#define FANOTIFY_EVENTS		(FANOTIFY_PATH_EVENTS | \
+#define FANOTIFY_ASYNC_EVENTS	(FANOTIFY_PATH_EVENTS | \
 				 FANOTIFY_INODE_EVENTS | \
 				 FANOTIFY_ERROR_EVENTS)
 
-/* Events that require a permission response from user */
-#define FANOTIFY_PERM_EVENTS	(FAN_OPEN_PERM | FAN_ACCESS_PERM | \
-				 FAN_OPEN_EXEC_PERM)
+#define ALL_FANOTIFY_EVENTS	(FANOTIFY_ASYNC_EVENTS | FANOTIFY_PERM_EVENTS)
 
 /* Extra flags that may be reported with event or control handling of events */
 #define FANOTIFY_EVENT_FLAGS	(FAN_EVENT_ON_CHILD | FAN_ONDIR)
 
 /* Events that may be reported to user */
-#define FANOTIFY_OUTGOING_EVENTS	(FANOTIFY_EVENTS | \
-					 FANOTIFY_PERM_EVENTS | \
+#define FANOTIFY_OUTGOING_EVENTS	(ALL_FANOTIFY_EVENTS | \
 					 FAN_Q_OVERFLOW | FAN_ONDIR)
 
 /* Events and flags relevant only for directories */

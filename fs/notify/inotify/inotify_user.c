@@ -384,8 +384,10 @@ static int inotify_find_inode(const char __user *dirname, struct path *path,
 		path_put(path);
 		return error;
 	}
-	error = security_path_notify(path, mask,
-				FSNOTIFY_OBJ_TYPE_INODE);
+
+	BUILD_BUG_ON(ALL_INOTIFY_EVENTS & ~FSNOTIFY_SECURITY_MASK);
+	error = security_path_notify(path, mask & ALL_INOTIFY_EVENTS,
+				     FSNOTIFY_OBJ_TYPE_INODE);
 	if (error)
 		path_put(path);
 
@@ -774,8 +776,7 @@ SYSCALL_DEFINE3(inotify_add_watch, int, fd, const char __user *, pathname,
 	if (mask & IN_ONLYDIR)
 		flags |= LOOKUP_DIRECTORY;
 
-	ret = inotify_find_inode(pathname, &path, flags,
-			(mask & ALL_INOTIFY_EVENTS));
+	ret = inotify_find_inode(pathname, &path, flags, mask);
 	if (ret)
 		goto fput_and_out;
 

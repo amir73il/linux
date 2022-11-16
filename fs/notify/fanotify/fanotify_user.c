@@ -1040,7 +1040,8 @@ static int fanotify_find_path(int dfd, const char __user *filename,
 		goto out;
 	}
 
-	ret = security_path_notify(path, mask, obj_type);
+	BUILD_BUG_ON(ALL_FANOTIFY_EVENTS & ~FSNOTIFY_SECURITY_MASK);
+	ret = security_path_notify(path, mask & ALL_FANOTIFY_EVENTS, obj_type);
 	if (ret)
 		path_put(path);
 
@@ -1643,7 +1644,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	struct fd f;
 	struct path path;
 	__kernel_fsid_t __fsid, *fsid = NULL;
-	u32 valid_mask = FANOTIFY_EVENTS | FANOTIFY_EVENT_FLAGS;
+	u32 valid_mask = FANOTIFY_ASYNC_EVENTS | FANOTIFY_EVENT_FLAGS;
 	unsigned int mark_type = flags & FANOTIFY_MARK_TYPE_BITS;
 	unsigned int mark_cmd = flags & FANOTIFY_MARK_CMD_BITS;
 	unsigned int ignore = flags & FANOTIFY_MARK_IGNORE_BITS;
@@ -1782,8 +1783,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		goto fput_and_out;
 	}
 
-	ret = fanotify_find_path(dfd, pathname, &path, flags,
-			(mask & ALL_FSNOTIFY_EVENTS), obj_type);
+	ret = fanotify_find_path(dfd, pathname, &path, flags, mask, obj_type);
 	if (ret)
 		goto fput_and_out;
 
