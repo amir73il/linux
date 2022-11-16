@@ -104,6 +104,9 @@
 			     FS_UNMOUNT | FS_Q_OVERFLOW | FS_IN_IGNORED | \
 			     FS_ERROR)
 
+/* Events and flags that can be passed to security_path_notify() hook */
+#define FSNOTIFY_SECURITY_MASK (ALL_FSNOTIFY_EVENTS)
+
 /* Extra flags that may be reported with event or control handling of events */
 #define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT)
 
