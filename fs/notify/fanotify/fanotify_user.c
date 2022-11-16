@@ -1809,11 +1809,14 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 
 	/*
 	 * FAN_CLASS_VFS_FILTER groups are allowed to request only vfs filter
-	 * events.
+	 * events and only FAN_CLASS_VFS_FILTER groups are allowed to request
+	 * pre-modify permission events.
 	 */
 	if (FAN_GROUP_CLASS(group) == FAN_CLASS_VFS_FILTER) {
 		if (mask & ALL_FANOTIFY_EVENTS & ~FANOTIFY_VFS_FILTER_EVENTS)
 			goto fput_and_out;
+	} else if (mask & FANOTIFY_PRE_MODIFY_EVENTS) {
+		goto fput_and_out;
 	}
 
 	/*
