@@ -23,11 +23,11 @@ static inline struct inotify_event_info *INOTIFY_E(struct fsnotify_event *fse)
 }
 
 /*
- * INOTIFY_USER_FLAGS represents all of the mask bits that we expose to
+ * INOTIFY_USER_MASK represents all of the mask bits that we expose to
  * userspace.  There is at least one bit (FS_EVENT_ON_CHILD) which is
  * used only internally to the kernel.
  */
-#define INOTIFY_USER_MASK (IN_ALL_EVENTS)
+#define INOTIFY_USER_MASK (ALL_INOTIFY_EVENTS)
 
 static inline __u32 inotify_mark_user_mask(struct fsnotify_mark *fsn_mark)
 {
