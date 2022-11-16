@@ -97,7 +97,7 @@
 				 FAN_ACCESS_PERM | FAN_LOOKUP_PERM)
 
 /* FAN_CLASS_VFS_FILTER group is limited to "vfs filter" events */
-#define FANOTIFY_VFS_FILTER_EVENTS (0)
+#define FANOTIFY_VFS_FILTER_EVENTS (FANOTIFY_PERM_EVENTS)
 
 /* Events that can be reported with event->fd */
 #define FANOTIFY_FD_EVENTS (FANOTIFY_PATH_EVENTS | FANOTIFY_PERM_EVENTS)
@@ -117,10 +117,10 @@
 #define ALL_FANOTIFY_EVENTS	(FANOTIFY_ASYNC_EVENTS | FANOTIFY_PERM_EVENTS)
 
 /* Extra flags that may be reported with event or control handling of events */
-#define FANOTIFY_EVENT_FLAGS	(FAN_EVENT_ON_CHILD | FAN_ONDIR)
+#define FANOTIFY_EVENT_FLAGS	(FAN_EVENT_ON_CHILD | FAN_ONDIR | FAN_PRE_VFS)
 
 /* Events that may be reported to user */
-#define FANOTIFY_OUTGOING_EVENTS	(ALL_FANOTIFY_EVENTS | \
+#define FANOTIFY_OUTGOING_EVENTS	(ALL_FANOTIFY_EVENTS | FAN_PRE_VFS | \
 					 FAN_Q_OVERFLOW | FAN_ONDIR)
 
 /* Events and flags relevant only for directories */

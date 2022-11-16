@@ -114,6 +114,8 @@ static inline int fsnotify_lookup_perm(struct inode *dir, struct path *path,
 	fsnotify_mask = FS_LOOKUP_PERM;
 	if (mask & MAY_NOT_BLOCK)
 		fsnotify_mask |= FS_NONBLOCK;
+	else if (!(mask & MAY_NOT_START_WRITE))
+		fsnotify_mask |= FS_PRE_VFS;
 
 	return fsnotify(fsnotify_mask, path, FSNOTIFY_EVENT_PATH,
 			NULL, NULL, dir, 0);
@@ -129,7 +131,6 @@ static inline int fsnotify_perm(struct file *file, int mask)
 
 	if (mask & MAY_OPEN) {
 		fsnotify_mask = FS_OPEN_PERM;
-
 		if (file->f_flags & __FMODE_EXEC) {
 			ret = fsnotify_file(file, FS_OPEN_EXEC_PERM);
 
@@ -138,6 +139,8 @@ static inline int fsnotify_perm(struct file *file, int mask)
 		}
 	} else if (mask & MAY_READ) {
 		fsnotify_mask = FS_ACCESS_PERM;
+		if (!(mask & MAY_NOT_START_WRITE))
+			fsnotify_mask |= FS_PRE_VFS;
 	}
 
 	return fsnotify_file(file, fsnotify_mask);

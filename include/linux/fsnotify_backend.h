@@ -76,6 +76,7 @@
 #define FS_RENAME		0x10000000	/* File was renamed */
 #define FS_DN_MULTISHOT		0x20000000	/* dnotify multishot */
 #define FS_ISDIR		0x40000000	/* event occurred against dir */
+#define FS_PRE_VFS		0x80000000	/* pre-vfs permission hook */
 
 #define FS_MOVE			(FS_MOVED_FROM | FS_MOVED_TO)
 
@@ -123,7 +124,8 @@
 #define FSNOTIFY_SECURITY_MASK (ALL_FSNOTIFY_EVENTS)
 
 /* Extra flags that may be reported with event or control handling of events */
-#define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT)
+#define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT | \
+			     FS_PRE_VFS)
 
 #define ALL_FSNOTIFY_BITS   (ALL_FSNOTIFY_EVENTS | ALL_FSNOTIFY_FLAGS)
 
@@ -742,7 +744,7 @@ static inline __u32 fsnotify_effective_ignore_mask(struct fsnotify_mark *mark,
 
 	/* For non-dir and non-child, no need to consult the event flags */
 	if (!is_dir && iter_type != FSNOTIFY_ITER_TYPE_PARENT)
-		return ignore_mask;
+		return ignore_mask & ALL_FSNOTIFY_EVENTS;
 
 	ignore_mask = fsnotify_ignore_mask(mark);
 	if (!fsnotify_mask_applicable(ignore_mask, is_dir, iter_type))
