@@ -346,6 +346,9 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	}
 
 	test_mask = event_mask & marks_mask & ~marks_ignore_mask;
+	/* Do not report event flags without any event */
+	if (!(test_mask & ~FANOTIFY_EVENT_FLAGS))
+		return 0;
 
 	/*
 	 * For dirent modification events (create/delete/move) that do not carry
@@ -359,14 +362,12 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	 * We never report FAN_EVENT_ON_CHILD to user, but we do pass it in to
 	 * fanotify_alloc_event() when group is reporting fid as indication
 	 * that event happened on child.
+	 *
+	 * FAN_PRE_VFS flag is reported to the FAN_CLASS_VFS_FILTER groups that
+	 * set this flag in the mark mask.
 	 */
-	if (fid_mode) {
-		/* Do not report event flags without any event */
-		if (!(test_mask & ~FANOTIFY_EVENT_FLAGS))
-			return 0;
-	} else {
-		user_mask &= ~FANOTIFY_EVENT_FLAGS;
-	}
+	if (!fid_mode)
+		user_mask &= ~(FAN_EVENT_ON_CHILD | FAN_ONDIR);
 
 	return test_mask & user_mask;
 }
@@ -925,12 +926,13 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	BUILD_BUG_ON(FAN_ACCESS_PERM != FS_ACCESS_PERM);
 	BUILD_BUG_ON(FAN_LOOKUP_PERM != FS_LOOKUP_PERM);
 	BUILD_BUG_ON(FAN_ONDIR != FS_ISDIR);
+	BUILD_BUG_ON(FAN_PRE_VFS != FS_PRE_VFS);
 	BUILD_BUG_ON(FAN_OPEN_EXEC != FS_OPEN_EXEC);
 	BUILD_BUG_ON(FAN_OPEN_EXEC_PERM != FS_OPEN_EXEC_PERM);
 	BUILD_BUG_ON(FAN_FS_ERROR != FS_ERROR);
 	BUILD_BUG_ON(FAN_RENAME != FS_RENAME);
 
-	BUILD_BUG_ON(HWEIGHT32(ALL_FANOTIFY_EVENT_BITS) != 22);
+	BUILD_BUG_ON(HWEIGHT32(ALL_FANOTIFY_EVENT_BITS) != 23);
 
 	mask = fanotify_group_event_mask(group, iter_info, &match_mask,
 					 mask, data, data_type, dir);
