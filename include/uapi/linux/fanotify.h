@@ -45,6 +45,7 @@
 #define FAN_CLASS_NOTIF		0x00000000
 #define FAN_CLASS_CONTENT	0x00000004
 #define FAN_CLASS_PRE_CONTENT	0x00000008
+#define FAN_CLASS_VFS_FILTER	0x0000000c
 
 /* Deprecated - do not use this in programs and do not add new flags here! */
 #define FAN_ALL_CLASS_BITS	(FAN_CLASS_NOTIF | FAN_CLASS_CONTENT | \
