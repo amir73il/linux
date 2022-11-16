@@ -94,8 +94,11 @@
 #define FANOTIFY_DIRENT_EVENTS	(FAN_MOVE | FAN_CREATE | FAN_DELETE | \
 				 FAN_RENAME)
 
+#define FANOTIFY_PRE_MODIFY_EVENTS (0)
+
 /* Events that require a permission response from user */
-#define FANOTIFY_PERM_EVENTS	(FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM | \
+#define FANOTIFY_PERM_EVENTS	(FANOTIFY_PRE_MODIFY_EVENTS | \
+				 FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM | \
 				 FAN_ACCESS_PERM | FAN_LOOKUP_PERM)
 
 /* FAN_CLASS_VFS_FILTER group is limited to "vfs filter" events */
