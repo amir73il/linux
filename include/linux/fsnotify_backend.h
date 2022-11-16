@@ -44,13 +44,13 @@
 
 #define FS_UNMOUNT		0x00002000	/* inode on umount fs */
 #define FS_Q_OVERFLOW		0x00004000	/* Event queued overflowed */
-#define FS_ERROR		0x00008000	/* Filesystem Error (fanotify) */
 
 /*
  * FS_IN_IGNORED overloads FS_ERROR.  It is only used internally by inotify
  * which does not support FS_ERROR.
  */
 #define FS_IN_IGNORED		0x00008000	/* last inotify event here */
+#define FS_ERROR		0x00008000	/* Filesystem Error (fanotify) */
 
 #define FS_OPEN_PERM		0x00010000	/* open event in an permission hook */
 #define FS_ACCESS_PERM		0x00020000	/* access event in a permissions hook */
@@ -75,16 +75,20 @@
  * The watching parent may get an FS_ATTRIB|FS_EVENT_ON_CHILD event
  * when a directory entry inside a child subdir changes.
  */
-#define ALL_FSNOTIFY_DIRENT_EVENTS (FS_CREATE | FS_DELETE | FS_MOVE | FS_RENAME)
+#define FSNOTIFY_DIRENT_EVENTS	(FS_CREATE | FS_DELETE | FS_MOVE | FS_RENAME)
 
-#define ALL_FSNOTIFY_PERM_EVENTS (FS_OPEN_PERM | FS_ACCESS_PERM | \
-				  FS_OPEN_EXEC_PERM)
+#define FSNOTIFY_READ_EVENTS	(FS_ACCESS | FS_CLOSE_NOWRITE | \
+				 FS_ACCESS_PERM)
+
+#define FSNOTIFY_PERM_EVENTS	(FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
+				 FS_ACCESS_PERM)
 
 /*
  * This is a list of all events that may get sent to a parent that is watching
  * with flag FS_EVENT_ON_CHILD based on fs event on a child of that directory.
  */
-#define FS_EVENTS_POSS_ON_CHILD   (ALL_FSNOTIFY_PERM_EVENTS | \
+#define FS_EVENTS_POSS_ON_CHILD   (FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
+				   FS_ACCESS_PERM | \
 				   FS_ACCESS | FS_MODIFY | FS_ATTRIB | \
 				   FS_CLOSE_WRITE | FS_CLOSE_NOWRITE | \
 				   FS_OPEN | FS_OPEN_EXEC)
@@ -98,7 +102,8 @@
 #define FS_EVENTS_POSS_TO_PARENT (FS_EVENTS_POSS_ON_CHILD)
 
 /* Events that can be reported to backends */
-#define ALL_FSNOTIFY_EVENTS (ALL_FSNOTIFY_DIRENT_EVENTS | \
+#define ALL_FSNOTIFY_EVENTS (FSNOTIFY_DIRENT_EVENTS | \
+			     FSNOTIFY_PERM_EVENTS | \
 			     FS_EVENTS_POSS_ON_CHILD | \
 			     FS_DELETE_SELF | FS_MOVE_SELF | \
 			     FS_UNMOUNT | FS_Q_OVERFLOW | FS_IN_IGNORED | \

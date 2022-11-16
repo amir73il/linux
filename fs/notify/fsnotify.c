@@ -570,7 +570,7 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		ret = send_to_group(mask, data, data_type, dir, file_name,
 				    cookie, &iter_info);
 
-		if (ret && (mask & ALL_FSNOTIFY_PERM_EVENTS))
+		if (ret && (mask & FSNOTIFY_PERM_EVENTS))
 			goto out;
 
 		fsnotify_iter_next(&iter_info);
