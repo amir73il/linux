@@ -66,6 +66,13 @@
 #define FS_OPEN_EXEC_PERM	0x00040000	/* open/exec event in a permission hook */
 #define FS_LOOKUP_PERM		0x00080000	/* lookup event in a permission hook */
 
+#define FS_PRE_MODIFY		0x00100000	/* File modify perm check */
+#define FS_PRE_ATTRIB		0x00200000	/* Metadata change perm check */
+#define FS_PRE_MOVE_FROM	0x00400000	/* Child move from perm check */
+#define FS_PRE_MOVE_TO		0x00800000	/* Child move to perm check */
+#define FS_PRE_CREATE		0x01000000	/* Child create perm check */
+#define FS_PRE_DELETE		0x02000000	/* Child delete perm check */
+
 /*
  * Set on inode mark that cares about things that happen to its children.
  * Always set for dnotify and inotify.
@@ -91,8 +98,14 @@
 #define FSNOTIFY_READ_EVENTS	(FS_ACCESS | FS_CLOSE_NOWRITE | \
 				 FS_ACCESS_PERM | FS_LOOKUP_PERM)
 
-#define FSNOTIFY_PERM_EVENTS	(FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
+#define FSNOTIFY_PRE_MODIFY_EVENTS  (FS_PRE_MODIFY | FS_PRE_ATTRIB | \
+				     FS_PRE_CREATE | FS_PRE_DELETE | \
+				     FS_PRE_MOVE_FROM | FS_PRE_MOVE_TO)
+
+#define FSNOTIFY_PERM_EVENTS	(FSNOTIFY_PRE_MODIFY_EVENTS | \
+				 FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
 				 FS_ACCESS_PERM | FS_LOOKUP_PERM)
+
 
 /*
  * This is a list of all events that may get sent to a parent that is watching
