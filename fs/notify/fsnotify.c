@@ -568,6 +568,11 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 			fsnotify_first_mark(&inode2->i_fsnotify_marks);
 	}
 
+	if (mask & FS_PRE_VFS) {
+		/* Avoid the false negatives of !sb_write_started() */
+		lockdep_assert_once(sb_may_start_write(sb));
+	}
+
 	/*
 	 * We need to merge inode/vfsmount/sb mark lists so that e.g. inode mark
 	 * ignore masks are properly reflected for mount/sb mark notifications.
@@ -600,7 +605,7 @@ static __init int fsnotify_init(void)
 {
 	int ret;
 
-	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 24);
+	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 25);
 
 	ret = init_srcu_struct(&fsnotify_mark_srcu);
 	if (ret)

@@ -1769,6 +1769,14 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 			goto fput_and_out;
 	}
 
+	/*
+	 * Only FAN_CLASS_VFS_FILTER group may request to get the FAN_PRE_VFS
+	 * flag with events that are delievered without sb_start_write() held.
+	 */
+	if (mask & FAN_PRE_VFS &&
+	    (ignore || FAN_GROUP_CLASS(group) != FAN_CLASS_VFS_FILTER))
+		goto fput_and_out;
+
 	if (mask & FAN_FS_ERROR &&
 	    mark_type != FAN_MARK_FILESYSTEM)
 		goto fput_and_out;
