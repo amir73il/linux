@@ -58,11 +58,7 @@ struct inotify_event {
 #define IN_ISDIR		0x40000000	/* event occurred against dir */
 #define IN_ONESHOT		0x80000000	/* only send event once */
 
-/*
- * All of the events - we build the list by hand so that we can add flags in
- * the future and not break backward compatibility.  Apps will get only the
- * events that they originally wanted.  Be sure to add new events here!
- */
+/* Deprecated - do not use this in programs and do not add new flags here! */
 #define IN_ALL_EVENTS	(IN_ACCESS | IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE | \
 			 IN_CLOSE_NOWRITE | IN_OPEN | IN_MOVED_FROM | \
 			 IN_MOVED_TO | IN_DELETE | IN_CREATE | IN_DELETE_SELF | \
