@@ -27,6 +27,13 @@
 #define FAN_OPEN_EXEC_PERM	0x00040000	/* File open/exec in perm check */
 #define FAN_LOOKUP_PERM		0x00080000	/* Path lookup in perm check */
 
+#define FAN_PRE_MODIFY		0x00100000	/* File modify perm check */
+#define FAN_PRE_ATTRIB		0x00200000	/* Metadata change perm check */
+#define FAN_PRE_MOVE_FROM	0x00400000	/* Child move from perm check */
+#define FAN_PRE_MOVE_TO		0x00800000	/* Child move to perm check */
+#define FAN_PRE_CREATE		0x01000000	/* Child create perm check */
+#define FAN_PRE_DELETE		0x02000000	/* Child delete perm check */
+
 #define FAN_EVENT_ON_CHILD	0x08000000	/* Interested in child events */
 
 #define FAN_RENAME		0x10000000	/* File was renamed */
