@@ -132,7 +132,7 @@ static inline unsigned int inotify_arg_to_flags(u32 arg)
 
 static inline u32 inotify_mask_to_arg(__u32 mask)
 {
-	return mask & (IN_ALL_EVENTS | IN_ISDIR | IN_UNMOUNT | IN_IGNORED |
+	return mask & (ALL_INOTIFY_EVENTS | IN_ISDIR | IN_UNMOUNT | IN_IGNORED |
 		       IN_Q_OVERFLOW);
 }
 
@@ -775,7 +775,7 @@ SYSCALL_DEFINE3(inotify_add_watch, int, fd, const char __user *, pathname,
 		flags |= LOOKUP_DIRECTORY;
 
 	ret = inotify_find_inode(pathname, &path, flags,
-			(mask & IN_ALL_EVENTS));
+			(mask & ALL_INOTIFY_EVENTS));
 	if (ret)
 		goto fput_and_out;
 
