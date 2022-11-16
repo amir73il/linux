@@ -482,7 +482,7 @@ out_err:
  */
 static inline bool fanotify_report_child_fid(unsigned int fid_mode, u32 mask)
 {
-	if (mask & ALL_FSNOTIFY_DIRENT_EVENTS)
+	if (mask & FSNOTIFY_DIRENT_EVENTS)
 		return (fid_mode & FAN_REPORT_TARGET_FID);
 
 	return (fid_mode & FAN_REPORT_FID) && !(mask & FAN_ONDIR);
@@ -506,7 +506,7 @@ static struct inode *fanotify_fid_inode(u32 event_mask, const void *data,
 					int data_type, struct inode *dir,
 					unsigned int fid_mode)
 {
-	if ((event_mask & ALL_FSNOTIFY_DIRENT_EVENTS) &&
+	if ((event_mask & FSNOTIFY_DIRENT_EVENTS) &&
 	    !(fid_mode & FAN_REPORT_TARGET_FID))
 		return dir;
 
@@ -526,7 +526,7 @@ static struct inode *fanotify_dfid_inode(u32 event_mask, const void *data,
 {
 	struct inode *inode = fsnotify_data_inode(data, data_type);
 
-	if (event_mask & ALL_FSNOTIFY_DIRENT_EVENTS)
+	if (event_mask & FSNOTIFY_DIRENT_EVENTS)
 		return dir;
 
 	if (inode && S_ISDIR(inode->i_mode))
@@ -754,7 +754,7 @@ static struct fanotify_event *fanotify_alloc_event(
 		if (!(fid_mode & FAN_REPORT_NAME)) {
 			name_event = !!child;
 			file_name = NULL;
-		} else if ((mask & ALL_FSNOTIFY_DIRENT_EVENTS) || !ondir) {
+		} else if ((mask & FSNOTIFY_DIRENT_EVENTS) || !ondir) {
 			name_event = true;
 		}
 

@@ -3316,11 +3316,11 @@ static int selinux_path_notify(const struct path *path, u64 mask,
 	}
 
 	/* blocking watches require the file:watch_with_perm permission */
-	if (mask & (ALL_FSNOTIFY_PERM_EVENTS))
+	if (mask & FSNOTIFY_PERM_EVENTS)
 		perm |= FILE__WATCH_WITH_PERM;
 
 	/* watches on read-like events need the file:watch_reads permission */
-	if (mask & (FS_ACCESS | FS_ACCESS_PERM | FS_CLOSE_NOWRITE))
+	if (mask & FSNOTIFY_READ_EVENTS)
 		perm |= FILE__WATCH_READS;
 
 	return path_has_perm(current_cred(), path, perm);

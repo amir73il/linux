@@ -602,7 +602,7 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 			info_type = FAN_EVENT_INFO_TYPE_DFID_NAME;
 			dot = ".";
 			dot_len = 1;
-		} else if ((event->mask & ALL_FSNOTIFY_DIRENT_EVENTS) ||
+		} else if ((event->mask & FSNOTIFY_DIRENT_EVENTS) ||
 			   (event->mask & FAN_ONDIR)) {
 			/*
 			 * With group flag FAN_REPORT_DIR_FID, a single info
