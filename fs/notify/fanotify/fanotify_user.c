@@ -1509,8 +1509,8 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 		return -EINVAL;
 
 	/*
-	 * Access range info is only applicable to pre-access permission
-	 * events.
+	 * Access range info is only applicable to pre-access and pre-modify
+	 * permission events.
 	 */
 	if (flags & FAN_REPORT_ACCESS_RANGE && class == FAN_CLASS_NOTIF)
 		return -EINVAL;

@@ -134,18 +134,23 @@ static inline int fsnotify_lookup_perm(struct inode *dir, struct path *path,
 static inline int fsnotify_file_perm(struct file *file, int mask,
 				     const loff_t *ppos, size_t count)
 {
-	__u32 fsnotify_mask = FS_ACCESS_PERM;
+	__u32 fsnotify_mask;
 	struct file_range file_range = {
 		.file = file,
 		.ppos = ppos,
 		.count = count,
 	};
 
-	if (!(mask & MAY_READ))
+	if (!(mask & (MAY_READ | MAY_WRITE)))
 		return 0;
 
 	if (file->f_mode & FMODE_NONOTIFY)
 		return 0;
+
+	if (mask & MAY_WRITE)
+		fsnotify_mask = FS_PRE_MODIFY;
+	else
+		fsnotify_mask = FS_ACCESS_PERM;
 
 	if (!(mask & MAY_NOT_START_WRITE))
 		fsnotify_mask |= FS_PRE_VFS;

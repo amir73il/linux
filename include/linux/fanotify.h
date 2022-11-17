@@ -94,7 +94,7 @@
 #define FANOTIFY_DIRENT_EVENTS	(FAN_MOVE | FAN_CREATE | FAN_DELETE | \
 				 FAN_RENAME)
 
-#define FANOTIFY_PRE_MODIFY_EVENTS (0)
+#define FANOTIFY_PRE_MODIFY_EVENTS (FAN_PRE_MODIFY)
 
 /* Events that require a permission response from user */
 #define FANOTIFY_PERM_EVENTS	(FANOTIFY_PRE_MODIFY_EVENTS | \
