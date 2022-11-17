@@ -497,6 +497,8 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	int inode2_type;
 	int ret = 0;
 	__u32 test_mask, marks_mask;
+	const struct file_range *range;
+	int *pidx;
 
 	if (path)
 		mnt = real_mount(path->mnt);
@@ -568,11 +570,24 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 			fsnotify_first_mark(&inode2->i_fsnotify_marks);
 	}
 
+	pidx = NULL;
 	if (mask & FS_PRE_VFS) {
 		/* Avoid the false negatives of !sb_write_started() */
 		lockdep_assert_once(sb_may_start_write(sb));
-		if (mask & FSNOTIFY_PRE_MODIFY_EVENTS)
-			lockdep_assert_once(sb_write_srcu_started(sb));
+		/*
+		 * To avoid the performance penalty of the memory barrier in
+		 * srcu_down_read(), fsnotify_file_perm() takes s_write_srcu
+		 * conditionally if there are any marks with FS_PRE_MODIFY.
+		 */
+		if (mask & FSNOTIFY_PRE_MODIFY_EVENTS) {
+			range = fsnotify_data_file_range(data, data_type);
+			if (range)
+				pidx = range->pidx;
+			if (pidx && S_ISREG(inode->i_mode))
+				*pidx = __file_start_write_srcu(range->file);
+			else
+				lockdep_assert_once(sb_write_srcu_started(sb));
+		}
 	}
 
 	/*
@@ -592,6 +607,8 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	ret = 0;
 out:
 	srcu_read_unlock(&fsnotify_mark_srcu, iter_info.srcu_idx);
+	if (ret && pidx)
+		__file_end_write_srcu(range->file, *pidx);
 
 	/*
 	 * Fall back from RCU walk if any backend needs to get the event.
