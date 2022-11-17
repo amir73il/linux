@@ -112,7 +112,7 @@
  * with flag FS_EVENT_ON_CHILD based on fs event on a child of that directory.
  */
 #define FS_EVENTS_POSS_ON_CHILD   (FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
-				   FS_ACCESS_PERM | \
+				   FS_ACCESS_PERM | FS_PRE_MODIFY | \
 				   FS_ACCESS | FS_MODIFY | FS_ATTRIB | \
 				   FS_CLOSE_WRITE | FS_CLOSE_NOWRITE | \
 				   FS_OPEN | FS_OPEN_EXEC)
