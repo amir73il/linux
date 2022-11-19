@@ -90,7 +90,7 @@
 
 /* Events that require a permission response from user */
 #define FANOTIFY_PERM_EVENTS	(FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM | \
-				 FAN_ACCESS_PERM)
+				 FAN_ACCESS_PERM | FAN_LOOKUP_PERM)
 
 /* Events that can be reported with event->fd */
 #define FANOTIFY_FD_EVENTS (FANOTIFY_PATH_EVENTS | FANOTIFY_PERM_EVENTS)
