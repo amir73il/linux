@@ -657,6 +657,7 @@ struct nameidata {
 #define ND_ROOT_PRESET 1
 #define ND_ROOT_GRABBED 2
 #define ND_JUMPED 4
+#define ND_FSNOTIFY 8
 
 static void __set_nameidata(struct nameidata *p, int dfd, struct filename *name)
 {
@@ -1814,9 +1815,9 @@ again:
 	return dentry;
 }
 
-static struct dentry *lookup_slow(const struct qstr *name,
-				  struct dentry *dir,
-				  unsigned int flags)
+static struct dentry *lookup_one_slow(const struct qstr *name,
+				      struct dentry *dir,
+				      unsigned int flags)
 {
 	struct inode *inode = dir->d_inode;
 	struct dentry *res;
@@ -1824,6 +1825,42 @@ static struct dentry *lookup_slow(const struct qstr *name,
 	res = __lookup_slow(name, dir, flags);
 	inode_unlock_shared(inode);
 	return res;
+}
+
+static bool lookup_should_notify(struct nameidata *nd)
+{
+	if (unlikely(nd->flags & LOOKUP_NONOTIFY))
+		return false;
+
+#ifdef CONFIG_FANOTIFY_ACCESS_PERMISSIONS
+	/*
+	 * An open coded version of the fsnotify mask checks in fsnotify().
+	 * TODO: clear ND_FSNOTIFY and set it back after each jump.
+	 */
+	if (nd->state & ND_FSNOTIFY) {
+		__u32 fsnotify_mask = nd->inode->i_sb->s_fsnotify_mask |
+			   real_mount(nd->path.mnt)->mnt_fsnotify_mask;
+
+		if (unlikely(fsnotify_mask & FS_PATH_ACCESS))
+			return true;
+	}
+	if (unlikely(nd->inode->i_fsnotify_mask & FS_PATH_ACCESS))
+		return true;
+#endif
+	return false;
+}
+
+
+static struct dentry *lookup_slow(struct nameidata *nd)
+{
+	if (lookup_should_notify(nd)) {
+		int err = fsnotify_lookup_perm(&nd->path, nd->inode, &nd->last);
+
+		if (unlikely(err))
+			return ERR_PTR(err);
+	}
+
+	return __lookup_slow(&nd->last, nd->path.dentry, nd->flags);
 }
 
 static inline int may_lookup(struct mnt_idmap *idmap,
@@ -2125,7 +2162,7 @@ static const char *walk_component(struct nameidata *nd, int flags)
 	if (IS_ERR(dentry))
 		return ERR_CAST(dentry);
 	if (unlikely(!dentry)) {
-		dentry = lookup_slow(&nd->last, nd->path.dentry, nd->flags);
+		dentry = lookup_slow(nd);
 		if (IS_ERR(dentry))
 			return ERR_CAST(dentry);
 	}
@@ -2528,7 +2565,7 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 		nd->seq = nd->next_seq = 0;
 
 	nd->flags = flags;
-	nd->state |= ND_JUMPED;
+	nd->state |= ND_JUMPED | ND_FSNOTIFY;
 
 	nd->m_seq = __read_seqcount_begin(&mount_lock.seqcount);
 	nd->r_seq = __read_seqcount_begin(&rename_lock.seqcount);
@@ -2594,6 +2631,13 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 
 		if (*s && unlikely(!d_can_lookup(dentry)))
 			return ERR_PTR(-ENOTDIR);
+
+		/*
+		 * dfd was opened by fanotify and lookup_permission()
+		 * shouldn't generate fanotify events
+		 */
+		if (FMODE_FSNOTIFY_NONE(fd_file(f)->f_mode))
+			nd->flags |= LOOKUP_NONOTIFY;
 
 		nd->path = fd_file(f)->f_path;
 		if (flags & LOOKUP_RCU) {
@@ -2978,7 +3022,7 @@ struct dentry *lookup_one_unlocked(struct mnt_idmap *idmap,
 
 	ret = lookup_dcache(&this, base, 0);
 	if (!ret)
-		ret = lookup_slow(&this, base, 0);
+		ret = lookup_one_slow(&this, base, 0);
 	return ret;
 }
 EXPORT_SYMBOL(lookup_one_unlocked);
@@ -3827,6 +3871,13 @@ static int do_open(struct nameidata *nd,
 	}
 	if ((nd->flags & LOOKUP_DIRECTORY) && !d_can_lookup(nd->path.dentry))
 		return -ENOTDIR;
+
+	/*
+	 * dfd was opened by fanotify and vfs_open() shouldn't generate
+	 * fanotify events.
+	 */
+	if (nd->flags & LOOKUP_NONOTIFY)
+		file_set_fsnotify_mode(file, FMODE_NONOTIFY);
 
 	do_truncate = false;
 	acc_mode = op->acc_mode;
