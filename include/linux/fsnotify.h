@@ -101,7 +101,26 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
 }
 
-/* Simple call site for access decisions */
+/* Call sites for access decisions */
+static inline int fsnotify_lookup_perm(struct inode *dir, struct path *path,
+				       int mask)
+{
+	__u32 fsnotify_mask;
+
+	if (atomic_long_read(&dir->i_sb->s_fsnotify_connectors) == 0)
+		return 0;
+
+	if (WARN_ON_ONCE(!S_ISDIR(dir->i_mode) || !(mask & MAY_EXEC)))
+		return 0;
+
+	fsnotify_mask = FS_LOOKUP_PERM;
+	if (mask & MAY_NOT_BLOCK)
+		fsnotify_mask |= FS_NONBLOCK;
+
+	return fsnotify(fsnotify_mask, path, FSNOTIFY_EVENT_PATH,
+			NULL, NULL, dir, 0);
+}
+
 static inline int fsnotify_perm(struct file *file, int mask)
 {
 	int ret;

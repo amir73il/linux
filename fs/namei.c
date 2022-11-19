@@ -591,6 +591,7 @@ struct nameidata {
 #define ND_ROOT_PRESET 1
 #define ND_ROOT_GRABBED 2
 #define ND_JUMPED 4
+#define ND_FSNOTIFY 8
 
 static void __set_nameidata(struct nameidata *p, int dfd, struct filename *name)
 {
@@ -1709,15 +1710,45 @@ static struct dentry *lookup_slow(const struct qstr *name,
 	return res;
 }
 
+static inline int lookup_permission(struct mnt_idmap *idmap,
+				    struct nameidata *nd, int mask)
+{
+	int err = inode_permission(idmap, nd->inode, mask);
+	if (err || nd->flags & LOOKUP_NONOTIFY)
+		return err;
+
+#ifdef CONFIG_FSNOTIFY
+	/*
+	 * An optimized open coded version of the fsnotify mask checks
+	 * in fsnotify(), which checks mnt/sb fsnotify mask only once
+	 * after each jump.
+	 */
+	if (nd->state & ND_JUMPED) {
+		__u32 fsnotify_mask = nd->inode->i_sb->s_fsnotify_mask |
+			   real_mount(nd->path.mnt)->mnt_fsnotify_mask;
+
+		if (fsnotify_mask & FS_LOOKUP_PERM)
+			nd->state |= ND_FSNOTIFY;
+		else
+			nd->state &= ~ND_FSNOTIFY;
+	}
+	if (nd->state & ND_FSNOTIFY ||
+	    nd->inode->i_fsnotify_mask & FS_LOOKUP_PERM) {
+		return fsnotify_lookup_perm(nd->inode, &nd->path, mask);
+	}
+#endif
+	return 0;
+}
+
 static inline int may_lookup(struct mnt_idmap *idmap,
 			     struct nameidata *nd)
 {
 	if (nd->flags & LOOKUP_RCU) {
-		int err = inode_permission(idmap, nd->inode, MAY_EXEC|MAY_NOT_BLOCK);
+		int err = lookup_permission(idmap, nd, MAY_EXEC|MAY_NOT_BLOCK);
 		if (err != -ECHILD || !try_to_unlazy(nd))
 			return err;
 	}
-	return inode_permission(idmap, nd->inode, MAY_EXEC);
+	return lookup_permission(idmap, nd, MAY_EXEC);
 }
 
 static int reserve_stack(struct nameidata *nd, struct path *link)
@@ -2417,6 +2448,12 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 			return ERR_PTR(-EBADF);
 
 		dentry = f.file->f_path.dentry;
+		/*
+		 * dfd was opened by fanotify and lookup_permission()
+		 * shouldn't generate fanotify events
+		 */
+		if (f.file->f_mode & FMODE_NONOTIFY)
+			nd->flags |= LOOKUP_NONOTIFY;
 
 		if (*s && unlikely(!d_can_lookup(dentry))) {
 			fdput(f);
@@ -3618,6 +3655,13 @@ static int do_open(struct nameidata *nd,
 	}
 	if ((nd->flags & LOOKUP_DIRECTORY) && !d_can_lookup(nd->path.dentry))
 		return -ENOTDIR;
+
+	/*
+	 * dfd was opened by fanotify and vfs_open() shouldn't generate
+	 * fanotify events.
+	 */
+	if (nd->flags & LOOKUP_NONOTIFY)
+		file->f_mode |= FMODE_NONOTIFY;
 
 	do_truncate = false;
 	acc_mode = op->acc_mode;
