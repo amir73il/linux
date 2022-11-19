@@ -43,7 +43,16 @@
 #define FS_OPEN_EXEC		0x00001000	/* File was opened for exec */
 
 #define FS_UNMOUNT		0x00002000	/* inode on umount fs */
+
+/*
+ * FS_Q_OVERFLOW and FS_NONBLOCK are overloaded.
+ * Only FS_Q_OVERFLOW is reported to user.
+ * FS_NONBLOCK is used internally by fnotify hooks to indicate that the hook is
+ * called in a context that cannot sleep.
+ * None of them are set in mark masks.
+ */
 #define FS_Q_OVERFLOW		0x00004000	/* Event queued overflowed */
+#define FS_NONBLOCK		0x00004000	/* lookup event in RCU walk */
 
 /*
  * FS_IN_IGNORED overloads FS_ERROR.  It is only used internally by inotify
@@ -55,6 +64,7 @@
 #define FS_OPEN_PERM		0x00010000	/* open event in an permission hook */
 #define FS_ACCESS_PERM		0x00020000	/* access event in a permissions hook */
 #define FS_OPEN_EXEC_PERM	0x00040000	/* open/exec event in a permission hook */
+#define FS_LOOKUP_PERM		0x00080000	/* lookup event in a permission hook */
 
 /*
  * Set on inode mark that cares about things that happen to its children.
@@ -78,10 +88,10 @@
 #define FSNOTIFY_DIRENT_EVENTS	(FS_CREATE | FS_DELETE | FS_MOVE | FS_RENAME)
 
 #define FSNOTIFY_READ_EVENTS	(FS_ACCESS | FS_CLOSE_NOWRITE | \
-				 FS_ACCESS_PERM)
+				 FS_ACCESS_PERM | FS_LOOKUP_PERM)
 
 #define FSNOTIFY_PERM_EVENTS	(FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
-				 FS_ACCESS_PERM)
+				 FS_ACCESS_PERM | FS_LOOKUP_PERM)
 
 /*
  * This is a list of all events that may get sent to a parent that is watching
