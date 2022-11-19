@@ -227,6 +227,25 @@ static inline int fsnotify_open_perm(struct file *file)
 	return fsnotify_path(&file->f_path, FS_OPEN_PERM);
 }
 
+/*
+ * fsnotify_lookup_perm - permission hook before path access
+ */
+static inline int fsnotify_lookup_perm(struct path *path,
+				       struct inode *dir,
+				       const struct qstr *name)
+{
+	if (!(dir->i_sb->s_iflags & SB_I_ALLOW_HSM) ||
+	    !fsnotify_sb_has_priority_watchers(dir->i_sb,
+					       FSNOTIFY_PRIO_PRE_CONTENT))
+		return 0;
+
+	if (WARN_ON_ONCE(!S_ISDIR(dir->i_mode)))
+		return 0;
+
+	return fsnotify(FS_PATH_ACCESS, path, FSNOTIFY_EVENT_PATH,
+			dir, name, NULL, 0);
+}
+
 #else
 static inline void file_set_fsnotify_mode_from_watchers(struct file *file)
 {
@@ -255,6 +274,13 @@ static inline int fsnotify_file_perm(struct file *file, int perm_mask)
 }
 
 static inline int fsnotify_open_perm(struct file *file)
+{
+	return 0;
+}
+
+static inline int fsnotify_lookup_perm(struct path *path,
+				       struct inode *dir,
+				       const struct qstr *name)
 {
 	return 0;
 }
