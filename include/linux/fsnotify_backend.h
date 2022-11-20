@@ -106,7 +106,6 @@
 				 FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
 				 FS_ACCESS_PERM | FS_LOOKUP_PERM)
 
-
 /*
  * This is a list of all events that may get sent to a parent that is watching
  * with flag FS_EVENT_ON_CHILD based on fs event on a child of that directory.
