@@ -230,6 +230,9 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags,
 	if (security_sb_alloc(s))
 		goto fail;
 
+	if (init_srcu_struct(&s->s_write_srcu))
+		goto fail;
+
 	for (i = 0; i < SB_FREEZE_LEVELS; i++) {
 		if (__percpu_init_rwsem(&s->s_writers.rw_sem[i],
 					sb_writers_name[i],
