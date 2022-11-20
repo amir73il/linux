@@ -159,6 +159,8 @@ static void destroy_super_work(struct work_struct *work)
 							destroy_work);
 	int i;
 
+	cleanup_srcu_struct(&s->s_write_srcu);
+
 	for (i = 0; i < SB_FREEZE_LEVELS; i++)
 		percpu_free_rwsem(&s->s_writers.rw_sem[i]);
 	kfree(s);
@@ -228,6 +230,9 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags,
 	down_write_nested(&s->s_umount, SINGLE_DEPTH_NESTING);
 
 	if (security_sb_alloc(s))
+		goto fail;
+
+	if (init_srcu_struct(&s->s_write_srcu))
 		goto fail;
 
 	for (i = 0; i < SB_FREEZE_LEVELS; i++) {
