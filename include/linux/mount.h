@@ -20,6 +20,7 @@ struct file_system_type;
 struct fs_context;
 struct file;
 struct path;
+struct lookup_result;
 
 #define MNT_NOSUID	0x01
 #define MNT_NODEV	0x02
@@ -87,6 +88,13 @@ extern int mnt_want_write_file_attr(struct file *file, unsigned int attr,
 				    int *pidx);
 extern int mnt_want_write_path_attr(const struct path *path, unsigned int attr,
 				    int *pidx);
+extern int mnt_want_write_parent(const struct path *path, int mask,
+				 const struct lookup_result *res, int *pidx);
+extern int mnt_want_write_parents(const struct path *oldpath,
+				  const struct lookup_result *oldres,
+				  const struct path *newpath,
+				  const struct lookup_result *newres,
+				  int *pidx);
 extern void mnt_drop_write(struct vfsmount *mnt);
 extern void mnt_drop_write_srcu(struct vfsmount *m, int idx);
 extern void mnt_drop_write_file(struct file *file);
