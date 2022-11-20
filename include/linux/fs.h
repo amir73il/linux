@@ -43,6 +43,7 @@
 #include <linux/cred.h>
 #include <linux/mnt_idmapping.h>
 #include <linux/slab.h>
+#include <linux/srcu.h>
 
 #include <asm/byteorder.h>
 #include <uapi/linux/fs.h>
@@ -1542,6 +1543,9 @@ struct super_block {
 	 */
 	atomic_long_t s_fsnotify_connectors;
 
+	/* synchronize_srcu() can be used as a 'vfs write barrier' */
+	struct srcu_struct s_write_srcu;
+
 	/* Being remounted read-only */
 	int s_readonly_remount;
 
@@ -1897,6 +1901,46 @@ static inline bool file_may_start_write(const struct file *file)
 	return sb_may_start_write(file_inode(file)->i_sb);
 }
 
+static inline int __sb_start_write_srcu(struct super_block *sb)
+{
+	return srcu_read_lock(&sb->s_write_srcu);
+}
+
+static inline void __sb_end_write_srcu(struct super_block *sb, int idx)
+{
+	srcu_read_unlock(&sb->s_write_srcu, idx);
+}
+
+static inline int sb_write_srcu_started(const struct super_block *sb)
+{
+	return srcu_read_lock_held(&sb->s_write_srcu);
+}
+
+static inline int __file_start_write_srcu(struct file *file)
+{
+	return __sb_start_write_srcu(file_inode(file)->i_sb);
+}
+
+static inline void __file_end_write_srcu(struct file *file, int idx)
+{
+	__sb_end_write_srcu(file_inode(file)->i_sb, idx);
+}
+
+static inline int file_write_srcu_started(const struct file *file)
+{
+	return sb_write_srcu_started(file_inode(file)->i_sb);
+}
+
+/*
+ * Wait for in-progress writers without blocking new writers.
+ * This barrier is only applicable to writers that opted-in to write barriers
+ * with the *_start_write_srcu() helpers.
+ */
+static inline void sb_write_barrier(struct super_block *sb)
+{
+	synchronize_srcu(&sb->s_write_srcu);
+}
+
 /**
  * sb_end_write - drop write access to a superblock
  * @sb: the super we wrote to
@@ -1906,6 +1950,20 @@ static inline bool file_may_start_write(const struct file *file)
  */
 static inline void sb_end_write(struct super_block *sb)
 {
+	__sb_end_write(sb, SB_FREEZE_WRITE);
+}
+
+/**
+ * sb_end_write_srcu - drop write access to a superblock
+ * @sb: the super we wrote to
+ * @idx: return value from corresponding sb_start_write_srcu()
+ *
+ * Decrement number of writers to the filesystem. Wake up possible waiters
+ * wanting to freeze the filesystem.
+ */
+static inline void sb_end_write_srcu(struct super_block *sb, int idx)
+{
+	__sb_end_write_srcu(sb, idx);
 	__sb_end_write(sb, SB_FREEZE_WRITE);
 }
 
@@ -1960,6 +2018,21 @@ static inline void sb_start_write(struct super_block *sb)
 static inline bool sb_start_write_trylock(struct super_block *sb)
 {
 	return __sb_start_write_trylock(sb, SB_FREEZE_WRITE);
+}
+
+/**
+ * sb_start_write_srcu - get write access to a superblock
+ * @sb: the super we write to
+ *
+ * This could be used instead of sb_start_write() to opt-in to write barriers.
+ * The return value must be provided as @idx arg to sb_end_write_srcu().
+ */
+static inline int sb_start_write_srcu(struct super_block *sb)
+{
+	int idx = __sb_start_write_srcu(sb);
+
+	__sb_start_write(sb, SB_FREEZE_WRITE);
+	return idx;
 }
 
 /**
@@ -3012,6 +3085,20 @@ static inline void file_end_write(struct file *file)
 	if (!S_ISREG(file_inode(file)->i_mode))
 		return;
 	__sb_end_write(file_inode(file)->i_sb, SB_FREEZE_WRITE);
+}
+
+static inline int file_start_write_srcu(struct file *file)
+{
+	int idx = __file_start_write_srcu(file);
+
+	file_start_write(file);
+	return idx;
+}
+
+static inline void file_end_write_srcu(struct file *file, int idx)
+{
+	__file_end_write_srcu(file, idx);
+	file_end_write(file);
 }
 
 /*
