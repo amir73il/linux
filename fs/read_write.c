@@ -355,6 +355,8 @@ out_putf:
 int __rw_verify_area(struct file *file, const loff_t *ppos, size_t count,
 		     int mask)
 {
+	int ret;
+
 	if (unlikely((ssize_t) count < 0))
 		return -EINVAL;
 
@@ -372,6 +374,10 @@ int __rw_verify_area(struct file *file, const loff_t *ppos, size_t count,
 		}
 	}
 
+	ret = security_file_permission(file, mask);
+	if (ret)
+		return ret;
+
 	if (mask & MAY_NOT_START_WRITE) {
 		/*
 		 * MAY_NOT_START_WRITE means that file_start_write() is held,
@@ -384,7 +390,7 @@ int __rw_verify_area(struct file *file, const loff_t *ppos, size_t count,
 		lockdep_assert_once(file_may_start_write(file));
 	}
 
-	return security_file_permission(file, mask);
+	return fsnotify_file_perm(file, mask, ppos, count);
 }
 EXPORT_SYMBOL(__rw_verify_area);
 
