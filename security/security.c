@@ -2541,13 +2541,7 @@ int security_kernfs_init_security(struct kernfs_node *kn_dir,
  */
 int security_file_permission(struct file *file, int mask)
 {
-	int ret;
-
-	ret = call_int_hook(file_permission, 0, file, mask);
-	if (ret)
-		return ret;
-
-	return fsnotify_perm(file, mask);
+	return call_int_hook(file_permission, 0, file, mask);
 }
 
 /**
@@ -2798,7 +2792,7 @@ int security_file_open(struct file *file)
 	if (ret)
 		return ret;
 
-	return fsnotify_perm(file, MAY_OPEN);
+	return fsnotify_open_perm(file);
 }
 
 /**
