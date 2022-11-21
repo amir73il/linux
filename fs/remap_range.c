@@ -101,11 +101,17 @@ static int generic_remap_checks(struct file *file_in, loff_t pos_in,
 static int remap_verify_area(struct file *file, loff_t pos, loff_t len,
 			     int mask)
 {
+	int ret;
+
 	if (unlikely(pos < 0 || len < 0))
 		return -EINVAL;
 
 	if (unlikely((loff_t) (pos + len) < 0))
 		return -EINVAL;
+
+	ret = security_file_permission(file, mask);
+	if (ret)
+		return ret;
 
 	if (mask & MAY_NOT_START_WRITE) {
 		/* MAY_NOT_START_WRITE means that file_start_write() is held */
@@ -115,7 +121,7 @@ static int remap_verify_area(struct file *file, loff_t pos, loff_t len,
 		lockdep_assert_once(file_may_start_write(file));
 	}
 
-	return security_file_permission(file, mask);
+	return fsnotify_file_perm(file, mask, &pos, len);
 }
 
 /*
