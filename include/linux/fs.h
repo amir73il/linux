@@ -347,6 +347,7 @@ struct kiocb {
 	void (*ki_complete)(struct kiocb *iocb, long ret);
 	void			*private;
 	int			ki_flags;
+	short			ki_idx;
 	u16			ki_ioprio; /* See linux/ioprio.h */
 	struct wait_page_queue	*ki_waitq; /* for async buffered IO */
 };
@@ -1837,7 +1838,7 @@ static inline bool __sb_start_write_trylock(struct super_block *sb, int level)
 	return percpu_down_read_trylock(sb->s_writers.rw_sem + level - 1);
 }
 
-#define __sb_writers_acquired(sb, lev)	\
+#define __sb_writers_acquire(sb, lev)	\
 	percpu_rwsem_acquire(&(sb)->s_writers.rw_sem[(lev)-1], 1, _THIS_IP_)
 #define __sb_writers_release(sb, lev)	\
 	percpu_rwsem_release(&(sb)->s_writers.rw_sem[(lev)-1], 1, _THIS_IP_)
@@ -1899,6 +1900,16 @@ static inline bool file_may_start_write(const struct file *file)
 	if (!S_ISREG(file_inode(file)->i_mode))
 		return true;
 	return sb_may_start_write(file_inode(file)->i_sb);
+}
+
+static inline void __sb_write_srcu_acquire(struct super_block *sb)
+{
+	rcu_lock_acquire(&(&sb->s_write_srcu)->dep_map);
+}
+
+static inline void __sb_write_srcu_release(struct super_block *sb)
+{
+	rcu_lock_release(&(&sb->s_write_srcu)->dep_map);
 }
 
 static inline int __sb_start_write_srcu(struct super_block *sb)
@@ -3103,6 +3114,28 @@ static inline void file_end_write_srcu(struct file *file, int idx)
 	if (idx >= 0)
 		__file_end_write_srcu(file, idx);
 	file_end_write(file);
+}
+
+static inline void __file_write_srcu_acquire(struct file *file, int idx)
+{
+	struct inode *inode = file_inode(file);
+
+	if (!S_ISREG(inode->i_mode))
+		return;
+	__sb_writers_acquire(inode->i_sb, SB_FREEZE_WRITE);
+	if (idx >= 0)
+		__sb_write_srcu_acquire(inode->i_sb);
+}
+
+static inline void __file_write_srcu_release(struct file *file, int idx)
+{
+	struct inode *inode = file_inode(file);
+
+	if (!S_ISREG(inode->i_mode))
+		return;
+	__sb_writers_release(inode->i_sb, SB_FREEZE_WRITE);
+	if (idx >= 0)
+		__sb_write_srcu_release(inode->i_sb);
 }
 
 extern int file_start_write_area(struct file *file, const loff_t *ppos,
