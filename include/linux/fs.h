@@ -347,6 +347,7 @@ struct kiocb {
 	void (*ki_complete)(struct kiocb *iocb, long ret);
 	void			*private;
 	int			ki_flags;
+	short			ki_idx;
 	u16			ki_ioprio; /* See linux/ioprio.h */
 	struct wait_page_queue	*ki_waitq; /* for async buffered IO */
 };
@@ -1918,12 +1919,12 @@ static inline int sb_write_srcu_started(const struct super_block *sb)
 
 static inline int __file_start_write_srcu(struct file *file)
 {
-	return __sb_start_write_srcu(file_inode(file)->i_sb);
+	return srcu_down_read(&file_inode(file)->i_sb->s_write_srcu);
 }
 
 static inline void __file_end_write_srcu(struct file *file, int idx)
 {
-	__sb_end_write_srcu(file_inode(file)->i_sb, idx);
+	srcu_up_read(&file_inode(file)->i_sb->s_write_srcu, idx);
 }
 
 static inline int file_write_srcu_started(const struct file *file)
