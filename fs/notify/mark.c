@@ -935,3 +935,15 @@ void fsnotify_wait_marks_destroyed(void)
 	flush_delayed_work(&reaper_work);
 }
 EXPORT_SYMBOL_GPL(fsnotify_wait_marks_destroyed);
+
+/*
+ * Wait for all in-progress event handling to be completed on specific sb.
+ * For pre-modify events, this also waits for completion of the modification
+ * that followed the pre-modify event.
+ */
+void fsnotify_wait_handle_events(struct super_block *sb)
+{
+	synchronize_srcu(&fsnotify_mark_srcu);
+	synchronize_srcu(&sb->s_write_srcu);
+}
+EXPORT_SYMBOL_GPL(fsnotify_wait_handle_events);

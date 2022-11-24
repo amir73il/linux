@@ -77,7 +77,8 @@
 				 FAN_MARK_DONT_FOLLOW | \
 				 FAN_MARK_ONLYDIR | \
 				 FAN_MARK_IGNORED_SURV_MODIFY | \
-				 FAN_MARK_EVICTABLE)
+				 FAN_MARK_EVICTABLE | \
+				 FAN_MARK_SYNC)
 
 /*
  * Events that can be reported with data type FSNOTIFY_EVENT_PATH.

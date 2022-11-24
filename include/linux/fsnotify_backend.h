@@ -859,6 +859,8 @@ extern void fsnotify_detach_mark(struct fsnotify_mark *mark);
 extern void fsnotify_free_mark(struct fsnotify_mark *mark);
 /* Wait until all marks queued for destruction are destroyed */
 extern void fsnotify_wait_marks_destroyed(void);
+/* Wait for all in-progress event handling to be completed */
+extern void fsnotify_wait_handle_events(struct super_block *sb);
 /* Clear all of the marks of a group attached to a given object type */
 extern void fsnotify_clear_marks_by_group(struct fsnotify_group *group,
 					  unsigned int obj_type);
