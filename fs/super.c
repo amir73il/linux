@@ -1696,6 +1696,9 @@ int freeze_super(struct super_block *sb)
 {
 	int ret;
 
+	/* XXX: for testing */
+	sb_write_barrier(sb);
+
 	atomic_inc(&sb->s_active);
 	down_write(&sb->s_umount);
 	if (sb->s_writers.frozen != SB_UNFROZEN) {

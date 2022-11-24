@@ -156,6 +156,9 @@ SYSCALL_DEFINE1(syncfs, int, fd)
 		return -EBADF;
 	sb = f.file->f_path.dentry->d_sb;
 
+	/* XXX: for testing */
+	sb_write_barrier(sb);
+
 	down_read(&sb->s_umount);
 	ret = sync_filesystem(sb);
 	up_read(&sb->s_umount);
