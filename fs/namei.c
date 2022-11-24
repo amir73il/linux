@@ -3557,6 +3557,7 @@ static int do_open(struct nameidata *nd,
 	bool do_truncate;
 	int acc_mode;
 	int error;
+	int idx;
 
 	if (!(file->f_mode & (FMODE_OPENED | FMODE_CREATED))) {
 		error = complete_walk(nd);
@@ -3593,7 +3594,7 @@ static int do_open(struct nameidata *nd,
 		open_flag &= ~O_TRUNC;
 		acc_mode = 0;
 	} else if (d_is_reg(nd->path.dentry) && open_flag & O_TRUNC) {
-		error = mnt_want_write(nd->path.mnt);
+		error = mnt_want_write_path_attr(&nd->path, ATTR_SIZE, &idx);
 		if (error)
 			return error;
 		do_truncate = true;
@@ -3610,7 +3611,7 @@ static int do_open(struct nameidata *nd,
 		error = -EINVAL;
 	}
 	if (do_truncate)
-		mnt_drop_write(nd->path.mnt);
+		mnt_drop_write_srcu(nd->path.mnt, idx);
 	return error;
 }
 
