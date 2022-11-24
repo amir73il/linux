@@ -626,16 +626,17 @@ static int path_setxattr(const char __user *pathname,
 {
 	struct path path;
 	int error;
+	int idx;
 
 retry:
 	error = user_path_at(AT_FDCWD, pathname, lookup_flags, &path);
 	if (error)
 		return error;
-	error = mnt_want_write(path.mnt);
+	error = mnt_want_write_path_attr(&path, ATTR_OTHER, &idx);
 	if (!error) {
 		error = setxattr(mnt_user_ns(path.mnt), path.dentry, name,
 				 value, size, flags);
-		mnt_drop_write(path.mnt);
+		mnt_drop_write_srcu(path.mnt, idx);
 	}
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
@@ -664,16 +665,17 @@ SYSCALL_DEFINE5(fsetxattr, int, fd, const char __user *, name,
 {
 	struct fd f = fdget(fd);
 	int error = -EBADF;
+	int idx;
 
 	if (!f.file)
 		return error;
 	audit_file(f.file);
-	error = mnt_want_write_file(f.file);
+	error = mnt_want_write_file_attr(f.file, ATTR_OTHER, &idx);
 	if (!error) {
 		error = setxattr(file_mnt_user_ns(f.file),
 				 f.file->f_path.dentry, name,
 				 value, size, flags);
-		mnt_drop_write_file(f.file);
+		mnt_drop_write_file_srcu(f.file, idx);
 	}
 	fdput(f);
 	return error;
@@ -883,14 +885,15 @@ static int path_removexattr(const char __user *pathname,
 {
 	struct path path;
 	int error;
+	int idx;
 retry:
 	error = user_path_at(AT_FDCWD, pathname, lookup_flags, &path);
 	if (error)
 		return error;
-	error = mnt_want_write(path.mnt);
+	error = mnt_want_write_path_attr(&path, ATTR_OTHER, &idx);
 	if (!error) {
 		error = removexattr(mnt_user_ns(path.mnt), path.dentry, name);
-		mnt_drop_write(path.mnt);
+		mnt_drop_write_srcu(path.mnt, idx);
 	}
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
@@ -916,15 +919,16 @@ SYSCALL_DEFINE2(fremovexattr, int, fd, const char __user *, name)
 {
 	struct fd f = fdget(fd);
 	int error = -EBADF;
+	int idx;
 
 	if (!f.file)
 		return error;
 	audit_file(f.file);
-	error = mnt_want_write_file(f.file);
+	error = mnt_want_write_file_attr(f.file, ATTR_OTHER, &idx);
 	if (!error) {
 		error = removexattr(file_mnt_user_ns(f.file),
 				    f.file->f_path.dentry, name);
-		mnt_drop_write_file(f.file);
+		mnt_drop_write_file_srcu(f.file, idx);
 	}
 	fdput(f);
 	return error;

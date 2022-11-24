@@ -72,6 +72,7 @@ long vfs_truncate(const struct path *path, loff_t length)
 	struct user_namespace *mnt_userns;
 	struct inode *inode;
 	long error;
+	int idx;
 
 	inode = path->dentry->d_inode;
 
@@ -81,7 +82,7 @@ long vfs_truncate(const struct path *path, loff_t length)
 	if (!S_ISREG(inode->i_mode))
 		return -EINVAL;
 
-	error = mnt_want_write(path->mnt);
+	error = mnt_want_write_path_attr(path, ATTR_SIZE, &idx);
 	if (error)
 		goto out;
 
@@ -113,7 +114,7 @@ long vfs_truncate(const struct path *path, loff_t length)
 put_write_and_out:
 	put_write_access(inode);
 mnt_drop_write_and_out:
-	mnt_drop_write(path->mnt);
+	mnt_drop_write_srcu(path->mnt, idx);
 out:
 	return error;
 }
@@ -159,6 +160,7 @@ long do_sys_ftruncate(unsigned int fd, loff_t length, int small)
 	struct dentry *dentry;
 	struct fd f;
 	int error;
+	int idx;
 
 	error = -EINVAL;
 	if (length < 0)
@@ -187,12 +189,16 @@ long do_sys_ftruncate(unsigned int fd, loff_t length, int small)
 	/* Check IS_APPEND on real upper inode */
 	if (IS_APPEND(file_inode(f.file)))
 		goto out_putf;
-	sb_start_write(inode->i_sb);
+
+	error = mnt_want_write_file_attr(f.file, ATTR_SIZE, &idx);
+	if (error)
+		goto out_putf;
+
 	error = security_path_truncate(&f.file->f_path);
 	if (!error)
-		error = do_truncate(file_mnt_user_ns(f.file), dentry, length,
-				    ATTR_MTIME | ATTR_CTIME, f.file);
-	sb_end_write(inode->i_sb);
+		error = do_truncate(file_mnt_user_ns(f.file), dentry,
+				    length, ATTR_MTIME | ATTR_CTIME, f.file);
+	mnt_drop_write_file_srcu(f.file, idx);
 out_putf:
 	fdput(f);
 out:
@@ -597,8 +603,9 @@ int chmod_common(const struct path *path, umode_t mode)
 	struct inode *delegated_inode = NULL;
 	struct iattr newattrs;
 	int error;
+	int idx;
 
-	error = mnt_want_write(path->mnt);
+	error = mnt_want_write_path_attr(path, ATTR_MODE, &idx);
 	if (error)
 		return error;
 retry_deleg:
@@ -617,7 +624,7 @@ out_unlock:
 		if (!error)
 			goto retry_deleg;
 	}
-	mnt_drop_write(path->mnt);
+	mnt_drop_write_srcu(path->mnt, idx);
 	return error;
 }
 
@@ -755,6 +762,7 @@ int do_fchownat(int dfd, const char __user *filename, uid_t user, gid_t group,
 	struct path path;
 	int error = -EINVAL;
 	int lookup_flags;
+	int idx;
 
 	if ((flag & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0)
 		goto out;
@@ -766,11 +774,11 @@ retry:
 	error = user_path_at(dfd, filename, lookup_flags, &path);
 	if (error)
 		goto out;
-	error = mnt_want_write(path.mnt);
+	error = mnt_want_write_path_attr(&path, ATTR_UID | ATTR_GID, &idx);
 	if (error)
 		goto out_release;
 	error = chown_common(&path, user, group);
-	mnt_drop_write(path.mnt);
+	mnt_drop_write_srcu(path.mnt, idx);
 out_release:
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
