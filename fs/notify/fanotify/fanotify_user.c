@@ -1747,7 +1747,8 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	switch (mark_cmd) {
 	case FAN_MARK_ADD:
 	case FAN_MARK_REMOVE:
-		if (!mask)
+		/* No change in mask is allowed with mark sync request */
+		if (!mask && !(flags & FAN_MARK_SYNC))
 			return -EINVAL;
 		break;
 	case FAN_MARK_FLUSH:
@@ -1946,6 +1947,25 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		ret = -EINVAL;
 	}
 
+	/*
+	 * Synchronous add/remove of mark mask provides a method for safe
+	 * handover of event handling on an object between two groups:
+	 *
+	 * - First, group A subscribes to some events with FAN_MARK_SYNC
+	 * - Then, group B unsubscribes from those events and processes
+	 *   all the delivered events before shutting down
+	 *
+	 * This method guarantees that any event that both groups subscribed
+	 * to will be delivered to either or both of the groups.
+	 *
+	 * Note that FAN_MARK_SYNC provides no synchronization to the object
+	 * interest masks, which are checked outside srcu read side.
+	 * Therefore, this method does not provide any guarantee regarding
+	 * delivery of events which only one of the group is subscribed to.
+	 */
+	if (!ret && flags & FAN_MARK_SYNC)
+		fsnotify_wait_handle_events(path.mnt->mnt_sb);
+
 path_put_and_out:
 	path_put(&path);
 fput_and_out:
@@ -1997,7 +2017,7 @@ static int __init fanotify_user_setup(void)
 
 	BUILD_BUG_ON(FANOTIFY_INIT_FLAGS & FANOTIFY_INTERNAL_GROUP_FLAGS);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 13);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 11);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 12);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);
