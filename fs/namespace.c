@@ -421,6 +421,42 @@ int mnt_want_write_srcu(struct vfsmount *m, int *pidx)
 }
 
 /**
+ * mnt_want_write_path_attr - get write access to a path's mount
+ * @path: the path who's mount on which to take a write
+ * @attr: indicate when changing attribute (0 for data)
+ * @pidx: output value to pass to mnt_drop_write_srcu()
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ * A successful call must be paired with mnt_drop_write_srcu().
+ */
+int mnt_want_write_path_attr(const struct path *path, unsigned int attr,
+			     int *pidx)
+{
+	struct super_block *sb = path->mnt->mnt_sb;
+	int idx, ret;
+
+	/* vfs write barrier covers also the pre-modify event */
+	idx = __sb_start_write_srcu(sb);
+
+	ret = fsnotify_change_perm(path, attr);
+	if (ret)
+		goto out_write_srcu;
+
+	ret = mnt_want_write(path->mnt);
+	if (ret)
+		goto out_write_srcu;
+
+	*pidx = idx;
+	return 0;
+
+out_write_srcu:
+	__sb_end_write_srcu(sb, idx);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mnt_want_write_path_attr);
+
+/**
  * __mnt_want_write_file - get write access to a file's mount
  * @file: the file who's mount on which to take a write
  *
@@ -512,6 +548,42 @@ int file_start_write_area(struct file *file, const loff_t *ppos,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(file_start_write_area);
+
+/**
+ * mnt_want_write_file_attr - get write access to a file's mount for attr change
+ * @file: the file who's mount on which to take a write
+ * @attr: indicate the changing attributes
+ * @pidx: output value to pass to mnt_drop_write_file_srcu()
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ * A successful call must be paired with mnt_drop_write_file_srcu().
+ */
+int mnt_want_write_file_attr(struct file *file, unsigned int attr, int *pidx)
+{
+	struct super_block *sb = file_inode(file)->i_sb;
+	int idx, ret;
+
+	/* vfs write barrier covers also the pre-modify event */
+	idx = __sb_start_write_srcu(sb);
+
+	if (!(file->f_mode & FMODE_NONOTIFY)) {
+		ret = fsnotify_change_perm(&file->f_path, attr);
+		if (ret)
+			goto out_write_srcu;
+	}
+	ret = mnt_want_write_file(file);
+	if (ret)
+		goto out_write_srcu;
+
+	*pidx = idx;
+	return 0;
+
+out_write_srcu:
+	__sb_end_write_srcu(sb, idx);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mnt_want_write_file_attr);
 
 /**
  * __mnt_drop_write - give up write access to a mount
