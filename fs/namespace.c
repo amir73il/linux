@@ -497,6 +497,40 @@ int mnt_want_write_file_srcu(struct file *file, int *pidx)
 }
 
 /**
+ * file_start_write_area - get write access to a file
+ * @file: the file we are about to write to
+ * @ppos: optional offset of the intended write (may be NULL)
+ * @count: optional size of the intended write (may be 0)
+ * @pidx: output value to pass to file_end_write_srcu()
+ *
+ * In addition to getting freeze protection, it is also used to notify
+ * listeners on an intent to make a modification in the filesystem.
+ * This must be paired with file_end_write_srcu().
+ */
+int file_start_write_area(struct file *file, const loff_t *ppos,
+			  size_t count, int *pidx)
+{
+	int ret, idx = -1;
+
+	if (!S_ISREG(file_inode(file)->i_mode))
+		goto out;
+
+	idx = __file_start_write_srcu(file);
+	ret = fsnotify_file_perm(file, MAY_WRITE, ppos, count);
+	if (ret) {
+		__file_end_write_srcu(file, idx);
+		return ret;
+	}
+
+	file_start_write(file);
+out:
+	*pidx = idx;
+	return 0;
+
+}
+EXPORT_SYMBOL_GPL(file_start_write_area);
+
+/**
  * __mnt_drop_write - give up write access to a mount
  * @mnt: the mount on which to give up write access
  *
