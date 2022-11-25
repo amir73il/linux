@@ -487,6 +487,33 @@ int mnt_want_write_file_srcu(struct file *file, int *pidx)
 }
 
 /**
+ * file_start_write_area - get freeze protection to a file's superblock
+ * @file: the file that is open for write
+ * @ppos: optional offset of the intended write (may be NULL)
+ * @count: optional size of the intended write (may be 0)
+ * @pidx: output value to pass to file_end_write_srcu()
+ *
+ * In addition to getting freeze protection, it is also used to notify
+ * listeners on an intent to make a modification in the filesystem.
+ * This must be paired with file_end_write_srcu().
+ */
+int file_start_write_area(struct file *file, const loff_t *ppos,
+			  size_t count, int *pidx)
+{
+	int ret;
+
+	/* May take s_write_srcu and set *pidx */
+	*pidx = -1;
+	ret = fsnotify_file_perm(file, MAY_WRITE, ppos, count, pidx);
+	if (ret)
+		return ret;
+
+	file_start_write(file);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(file_start_write_area);
+
+/**
  * __mnt_drop_write - give up write access to a mount
  * @mnt: the mount on which to give up write access
  *

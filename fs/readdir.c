@@ -51,7 +51,7 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 	if (res)
 		goto out;
 
-	res = fsnotify_file_perm(file, MAY_READ, NULL, 0);
+	res = fsnotify_file_perm(file, MAY_READ, NULL, 0, NULL);
 	if (res)
 		goto out;
 

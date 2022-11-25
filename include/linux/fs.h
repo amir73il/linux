@@ -3105,6 +3105,9 @@ static inline void file_end_write_srcu(struct file *file, int idx)
 	file_end_write(file);
 }
 
+extern int file_start_write_area(struct file *file, const loff_t *ppos,
+				 size_t count, int *pidx);
+
 /*
  * This is used for regular files where some users -- especially the
  * currently executed binary in a process, previously handled via

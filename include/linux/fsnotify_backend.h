@@ -323,6 +323,7 @@ struct file_range {
 	struct file *file;
 	const loff_t *ppos;
 	size_t count;
+	int *pidx;
 };
 
 static inline struct inode *fsnotify_data_inode(const void *data, int data_type)

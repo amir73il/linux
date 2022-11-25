@@ -244,6 +244,7 @@ int vfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 {
 	struct inode *inode = file_inode(file);
 	long ret;
+	int idx;
 
 	if (offset < 0 || len <= 0)
 		return -EINVAL;
@@ -303,10 +304,6 @@ int vfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	if (ret)
 		return ret;
 
-	ret = fsnotify_file_perm(file, MAY_WRITE, &offset, len);
-	if (ret)
-		return ret;
-
 	if (S_ISFIFO(inode->i_mode))
 		return -ESPIPE;
 
@@ -323,7 +320,10 @@ int vfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	if (!file->f_op->fallocate)
 		return -EOPNOTSUPP;
 
-	file_start_write(file);
+	ret = file_start_write_area(file, &offset, len, &idx);
+	if (ret)
+		return ret;
+
 	ret = file->f_op->fallocate(file, mode, offset, len);
 
 	/*
@@ -336,7 +336,8 @@ int vfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	if (ret == 0)
 		fsnotify_modify(file);
 
-	file_end_write(file);
+	file_end_write_srcu(file, idx);
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(vfs_fallocate);

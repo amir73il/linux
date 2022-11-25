@@ -122,13 +122,15 @@ static inline int fsnotify_lookup_perm(struct inode *dir, struct path *path,
 }
 
 static inline int fsnotify_file_perm(struct file *file, int mask,
-				     const loff_t *ppos, size_t count)
+				     const loff_t *ppos, size_t count,
+				     int *pidx)
 {
 	__u32 fsnotify_mask = FS_ACCESS_PERM;
 	struct file_range file_range = {
 		.file = file,
 		.ppos = ppos,
 		.count = count,
+		.pidx = pidx,
 	};
 
 	if (!(mask & MAY_READ))
