@@ -121,6 +121,8 @@ static int remap_verify_area(struct file *file, loff_t pos, loff_t len,
 	} else if (mask & MAY_WRITE) {
 		/* Avoid the false negatives of !file_write_started() */
 		lockdep_assert_once(file_may_start_write(file));
+		/* fsnotify_file_perm() is called in file_start_write_area() */
+		return 0;
 	}
 
 	return fsnotify_file_perm(file, mask, &pos, len);
@@ -425,6 +427,7 @@ loff_t vfs_clone_file_range(struct file *file_in, loff_t pos_in,
 			    loff_t len, unsigned int remap_flags)
 {
 	loff_t ret;
+	int idx;
 
 	ret = remap_verify_area(file_in, pos_in, len, MAY_READ);
 	if (ret)
@@ -434,10 +437,13 @@ loff_t vfs_clone_file_range(struct file *file_in, loff_t pos_in,
 	if (ret)
 		return ret;
 
-	file_start_write(file_out);
+	ret = file_start_write_area(file_out, &pos_out, len, &idx);
+	if (ret)
+		return ret;
+
 	ret = do_clone_file_range(file_in, pos_in, file_out, pos_out, len,
 				  remap_flags);
-	file_end_write(file_out);
+	file_end_write_srcu(file_out, idx);
 
 	return ret;
 }
@@ -465,6 +471,7 @@ loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 				 loff_t len, unsigned int remap_flags)
 {
 	loff_t ret;
+	int idx = -1;
 
 	WARN_ON_ONCE(remap_flags & ~(REMAP_FILE_DEDUP |
 				     REMAP_FILE_CAN_SHORTEN));
@@ -496,14 +503,21 @@ loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 	if (len == 0)
 		return 0;
 
-	ret = mnt_want_write_file(dst_file);
+	ret = file_start_write_area(dst_file, &dst_pos, len, &idx);
 	if (ret)
 		return ret;
+
+	/* Protect from remount ro, because dst_file may be O_RDONLY */
+	ret = __mnt_want_write_file(dst_file);
+	if (ret)
+		goto out_write_srcu;
 
 	ret = dst_file->f_op->remap_file_range(src_file, src_pos, dst_file,
 			dst_pos, len, remap_flags | REMAP_FILE_DEDUP);
 
-	mnt_drop_write_file(dst_file);
+	__mnt_drop_write_file(dst_file);
+out_write_srcu:
+	file_end_write_srcu(dst_file, idx);
 
 	return ret;
 }

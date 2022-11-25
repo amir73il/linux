@@ -1252,6 +1252,7 @@ long do_splice(struct file *in, loff_t *off_in, struct file *out,
 	struct pipe_inode_info *opipe;
 	loff_t offset;
 	long ret;
+	int idx;
 
 	if (unlikely(!(in->f_mode & FMODE_READ) ||
 		     !(out->f_mode & FMODE_WRITE)))
@@ -1295,9 +1296,12 @@ long do_splice(struct file *in, loff_t *off_in, struct file *out,
 		if (in->f_flags & O_NONBLOCK)
 			flags |= SPLICE_F_NONBLOCK;
 
-		file_start_write(out);
+		ret = file_start_write_area(out, &offset, len, &idx);
+		if (ret)
+			return ret;
+
 		ret = do_splice_from(ipipe, out, &offset, len, flags);
-		file_end_write(out);
+		file_end_write_srcu(out, idx);
 
 		if (ret > 0)
 			fsnotify_modify(out);
