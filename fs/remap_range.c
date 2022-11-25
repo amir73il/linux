@@ -116,9 +116,12 @@ static int remap_verify_area(struct file *file, loff_t pos, loff_t len,
 	if (mask & MAY_NOT_START_WRITE) {
 		/* MAY_NOT_START_WRITE means that file_start_write() is held */
 		lockdep_assert_once(file_write_started(file));
+		lockdep_assert_once(file_write_srcu_started(file));
 	} else if (mask & MAY_WRITE) {
 		/* Avoid the false negatives of !file_write_started() */
 		lockdep_assert_once(file_may_start_write(file));
+		/* fsnotify_file_perm() is called in file_start_write_area() */
+		return 0;
 	}
 
 	return fsnotify_file_perm(file, mask, &pos, len);
@@ -426,6 +429,7 @@ loff_t vfs_clone_file_range(struct file *file_in, loff_t pos_in,
 			    loff_t len, unsigned int remap_flags)
 {
 	loff_t ret;
+	int idx;
 
 	ret = remap_verify_area(file_in, pos_in, len, MAY_READ);
 	if (ret)
@@ -435,10 +439,13 @@ loff_t vfs_clone_file_range(struct file *file_in, loff_t pos_in,
 	if (ret)
 		return ret;
 
-	file_start_write(file_out);
+	ret = file_start_write_area(file_out, &pos_out, len, &idx);
+	if (ret)
+		return ret;
+
 	ret = do_clone_file_range(file_in, pos_in, file_out, pos_out, len,
 				  remap_flags);
-	file_end_write(file_out);
+	file_end_write_srcu(file_out, idx);
 
 	return ret;
 }
@@ -466,6 +473,7 @@ loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 				 loff_t len, unsigned int remap_flags)
 {
 	loff_t ret;
+	int idx;
 
 	WARN_ON_ONCE(remap_flags & ~(REMAP_FILE_DEDUP |
 				     REMAP_FILE_CAN_SHORTEN));
@@ -497,15 +505,23 @@ loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 	if (len == 0)
 		return 0;
 
+	/* Open-code file_start_write_area() because dst_file may be rdonly */
+	idx = __file_start_write_srcu(dst_file);
+	ret = fsnotify_file_perm(dst_file, MAY_WRITE, &dst_pos, len);
+	if (ret)
+		goto out_write_srcu;
+
 	ret = mnt_want_write_file(dst_file);
 	if (ret)
-		return ret;
+		goto out_write_srcu;
 
 	ret = dst_file->f_op->remap_file_range(src_file, src_pos, dst_file,
 			dst_pos, len, remap_flags | REMAP_FILE_DEDUP);
 
 	mnt_drop_write_file(dst_file);
 
+out_write_srcu:
+	__file_end_write_srcu(dst_file, idx);
 	return ret;
 }
 EXPORT_SYMBOL(vfs_dedupe_file_range_one);
