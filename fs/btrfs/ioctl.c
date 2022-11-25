@@ -4452,6 +4452,7 @@ static int btrfs_ioctl_encoded_write(struct file *file, void __user *argp, bool 
 	loff_t pos;
 	struct kiocb kiocb;
 	ssize_t ret;
+	int idx;
 
 	if (!capable(CAP_SYS_ADMIN)) {
 		ret = -EPERM;
@@ -4516,6 +4517,7 @@ static int btrfs_ioctl_encoded_write(struct file *file, void __user *argp, bool 
 		ret = 0;
 		goto out_iov;
 	}
+
 	pos = args.offset;
 	ret = rw_verify_area(WRITE, file, &pos, args.len);
 	if (ret < 0)
@@ -4527,13 +4529,15 @@ static int btrfs_ioctl_encoded_write(struct file *file, void __user *argp, bool 
 		goto out_iov;
 	kiocb.ki_pos = pos;
 
-	file_start_write(file);
+	ret = file_start_write_area(file, &pos, args.len, &idx);
+	if (ret)
+		goto out_iov;
 
 	ret = btrfs_do_write_iter(&kiocb, &iter, &args);
 	if (ret > 0)
 		fsnotify_modify(file);
 
-	file_end_write(file);
+	file_end_write_srcu(file, idx);
 out_iov:
 	kfree(iov);
 out_acct:
