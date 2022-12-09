@@ -17,6 +17,14 @@
 #include <linux/slab.h>
 #include <linux/bug.h>
 
+/* Are there any inode/mount/sb objects that are being watched? */
+static inline int fsnotify_sb_has_watchers(struct super_block *sb, __u32 mask)
+{
+	if (mask & FSNOTIFY_PERM_EVENTS)
+		return atomic_long_read(&sb->s_fsnotify_perm_watchers);
+	return atomic_long_read(&sb->s_fsnotify_connectors);
+}
+
 /*
  * Notify this @dir inode about a change in a child directory entry.
  * The directory entry may have turned positive or negative or its inode may
@@ -30,7 +38,7 @@ static inline int fsnotify_name(__u32 mask, const void *data, int data_type,
 				struct inode *dir, const struct qstr *name,
 				u32 cookie)
 {
-	if (atomic_long_read(&dir->i_sb->s_fsnotify_connectors) == 0)
+	if (!fsnotify_sb_has_watchers(dir->i_sb, mask))
 		return 0;
 
 	return fsnotify(mask, data, data_type, dir, name, NULL, cookie);
@@ -44,7 +52,7 @@ static inline void fsnotify_dirent(struct inode *dir, struct dentry *dentry,
 
 static inline void fsnotify_inode(struct inode *inode, __u32 mask)
 {
-	if (atomic_long_read(&inode->i_sb->s_fsnotify_connectors) == 0)
+	if (!fsnotify_sb_has_watchers(inode->i_sb, mask))
 		return;
 
 	if (S_ISDIR(inode->i_mode))
@@ -59,7 +67,7 @@ static inline int fsnotify_parent(struct dentry *dentry, __u32 mask,
 {
 	struct inode *inode = d_inode(dentry);
 
-	if (atomic_long_read(&inode->i_sb->s_fsnotify_connectors) == 0)
+	if (!fsnotify_sb_has_watchers(inode->i_sb, mask))
 		return 0;
 
 	if (S_ISDIR(inode->i_mode)) {
@@ -107,7 +115,7 @@ static inline int fsnotify_lookup_perm(struct inode *dir, struct path *path,
 {
 	__u32 fsnotify_mask;
 
-	if (atomic_long_read(&dir->i_sb->s_fsnotify_connectors) == 0)
+	if (!fsnotify_sb_has_watchers(dir->i_sb, FS_LOOKUP_PERM))
 		return 0;
 
 	if (WARN_ON_ONCE(!S_ISDIR(dir->i_mode) || !(mask & MAY_EXEC)))
