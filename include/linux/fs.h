@@ -1245,6 +1245,7 @@ struct super_block {
 	 * inodes objects are currently double-accounted.
 	 */
 	atomic_long_t s_fsnotify_connectors;
+	atomic_long_t s_fsnotify_perm_watchers;
 
 	/* synchronize_srcu() can be used as a 'vfs write barrier' */
 	atomic_t s_write_barrier_active;
