@@ -88,11 +88,7 @@ int __init init_chown(const char *filename, uid_t user, gid_t group, int flags)
 	error = kern_path(filename, lookup_flags, &path);
 	if (error)
 		return error;
-	error = mnt_want_write(path.mnt);
-	if (!error) {
-		error = chown_common(&path, user, group);
-		mnt_drop_write(path.mnt);
-	}
+	error = chown_common(&path, user, group);
 	path_put(&path);
 	return error;
 }

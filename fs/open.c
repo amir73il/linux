@@ -752,14 +752,19 @@ int chown_common(const struct path *path, uid_t user, gid_t group)
 	idmap = mnt_idmap(path->mnt);
 	fs_userns = i_user_ns(inode);
 
+	error = mnt_want_write(path->mnt);
+	if (error)
+		return error;
+
 retry_deleg:
 	newattrs.ia_vfsuid = INVALID_VFSUID;
 	newattrs.ia_vfsgid = INVALID_VFSGID;
 	newattrs.ia_valid =  ATTR_CTIME;
+	error = -EINVAL;
 	if ((user != (uid_t)-1) && !setattr_vfsuid(&newattrs, uid))
-		return -EINVAL;
+		goto out_drop_write;
 	if ((group != (gid_t)-1) && !setattr_vfsgid(&newattrs, gid))
-		return -EINVAL;
+		goto out_drop_write;
 	inode_lock(inode);
 	if (!S_ISDIR(inode->i_mode))
 		newattrs.ia_valid |= ATTR_KILL_SUID | ATTR_KILL_PRIV |
@@ -778,6 +783,8 @@ retry_deleg:
 		if (!error)
 			goto retry_deleg;
 	}
+out_drop_write:
+	mnt_drop_write(path->mnt);
 	return error;
 }
 
@@ -798,12 +805,7 @@ retry:
 	error = user_path_at(dfd, filename, lookup_flags, &path);
 	if (error)
 		goto out;
-	error = mnt_want_write(path.mnt);
-	if (error)
-		goto out_release;
 	error = chown_common(&path, user, group);
-	mnt_drop_write(path.mnt);
-out_release:
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
@@ -832,15 +834,8 @@ SYSCALL_DEFINE3(lchown, const char __user *, filename, uid_t, user, gid_t, group
 
 int vfs_fchown(struct file *file, uid_t user, gid_t group)
 {
-	int error;
-
-	error = mnt_want_write_file(file);
-	if (error)
-		return error;
 	audit_file(file);
-	error = chown_common(&file->f_path, user, group);
-	mnt_drop_write_file(file);
-	return error;
+	return chown_common(&file->f_path, user, group);
 }
 
 int ksys_fchown(unsigned int fd, uid_t user, gid_t group)
