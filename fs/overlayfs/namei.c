@@ -999,10 +999,23 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		if (d.stop)
 			break;
 
-		if (d.redirect && d.redirect[0] == '/' && poe != roe) {
-			poe = roe;
-			/* Find the current layer on the root dentry */
-			i = lower.layer->idx - 1;
+		if (d.redirect && d.redirect[0] == '/') {
+			if (poe != roe) {
+				poe = roe;
+				/* Find the current layer on the root dentry */
+				i = lower.layer->idx - 1;
+			}
+			if (d.metacopy && ofs->config.redirect_follow_lazy &&
+			    !ovl_upper_mnt(ofs) && i == roe->numlower - 2) {
+				/* lazy lookup of lowerdata in last layer */
+				upperredirect = d.redirect;
+				d.redirect = NULL;
+				d.metacopy = false;
+				stack[ctr].dentry = NULL;
+				stack[ctr].layer = &ofs->layers[ofs->numlayer - 1];
+				ctr++;
+				break;
+			}
 		}
 	}
 

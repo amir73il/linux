@@ -512,6 +512,9 @@ static int ovl_parse_redirect_mode(struct ovl_config *config, const char *mode)
 		 * redirect following.
 		 */
 		config->redirect_follow = true;
+	} else if (strcmp(mode, "lazyfollow") == 0) {
+		config->redirect_follow_lazy = true;
+		config->redirect_follow = true;
 	} else if (strcmp(mode, "follow") == 0) {
 		config->redirect_follow = true;
 	} else if (strcmp(mode, "off") == 0) {
@@ -672,8 +675,12 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 	 * This is to make the logic below simpler.  It doesn't make any other
 	 * difference, since config->redirect_dir is only used for upper.
 	 */
-	if (!config->upperdir && config->redirect_follow)
+	if (!config->upperdir && config->redirect_follow) {
 		config->redirect_dir = true;
+	} else if (config->redirect_follow_lazy) {
+		pr_info("\"redirect_dir=lazyfollow\" requires a non-upper mount, falling back to \"redirect_dir=follow\".\n");
+		config->redirect_follow_lazy = false;
+	}
 
 	/* Resolve metacopy -> redirect_dir dependency */
 	if (config->metacopy && !config->redirect_dir) {
