@@ -94,7 +94,7 @@ struct ovl_entry *ovl_alloc_entry(unsigned int numlower)
 	return oe;
 }
 
-bool ovl_dentry_remote(struct dentry *dentry)
+unsigned long ovl_dentry_remote(struct dentry *dentry)
 {
 	return dentry->d_flags &
 		(DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
@@ -185,7 +185,8 @@ void ovl_path_lowerdata(struct dentry *dentry, struct path *path)
 
 	if (oe->numlower) {
 		path->mnt = oe->lowerstack[oe->numlower - 1].layer->mnt;
-		path->dentry = oe->lowerstack[oe->numlower - 1].dentry;
+		path->dentry =
+			READ_ONCE(oe->lowerstack[oe->numlower - 1].dentry);
 	} else {
 		*path = (struct path) { };
 	}
@@ -246,7 +247,34 @@ struct dentry *ovl_dentry_lowerdata(struct dentry *dentry)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
 
-	return oe->numlower ? oe->lowerstack[oe->numlower - 1].dentry : NULL;
+	return oe->numlower ?
+		READ_ONCE(oe->lowerstack[oe->numlower - 1].dentry) : NULL;
+}
+
+int ovl_dentry_set_lowerdata(struct dentry *dentry, struct dentry *lowerdata)
+{
+	struct ovl_entry *oe = dentry->d_fsdata;
+	struct dentry *old;
+	int err;
+
+	err = -EIO;
+	if (WARN_ON_ONCE(!oe->numlower) || !d_is_reg(lowerdata))
+		goto out_dput;
+
+	err = -EREMOTE;
+	if (ovl_dentry_weird(lowerdata) ||
+	    ovl_dentry_remote(lowerdata) & ~dentry->d_flags)
+		goto out_dput;
+
+	err = 0;
+	old = cmpxchg_release(&oe->lowerstack[oe->numlower - 1].dentry, NULL,
+			      lowerdata);
+	if (!old)
+		return 0;
+
+out_dput:
+	dput(lowerdata);
+	return err;
 }
 
 struct dentry *ovl_dentry_real(struct dentry *dentry)

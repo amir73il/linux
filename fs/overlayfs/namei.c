@@ -14,6 +14,8 @@
 #include <linux/exportfs.h>
 #include "overlayfs.h"
 
+#include "../internal.h"	/* for vfs_path_lookup */
+
 struct ovl_lookup_data {
 	struct super_block *sb;
 	struct vfsmount *mnt;
@@ -343,7 +345,6 @@ static int ovl_lookup_layer(struct dentry *base, struct ovl_lookup_data *d,
 	*ret = dentry;
 	return 0;
 }
-
 
 int ovl_check_origin_fh(struct ovl_fs *ofs, struct ovl_fh *fh, bool connected,
 			struct dentry *upperdentry, struct ovl_path **stackp)
@@ -820,6 +821,32 @@ static int ovl_fix_origin(struct ovl_fs *ofs, struct dentry *dentry,
 
 	ovl_drop_write(dentry);
 	return err;
+}
+
+/* Lazy lookup of lower data */
+int ovl_maybe_lookup_lowerdata(struct dentry *dentry)
+{
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+	const char *redirect = ovl_dentry_get_redirect(dentry);
+	struct path datapath;
+	int err;
+
+	ovl_path_lowerdata(dentry, &datapath);
+	if (!datapath.mnt || datapath.dentry)
+		return 0;
+
+	if (!ofs->config.redirect_follow_lazy || !redirect || redirect[0] != '/')
+		return -EIO;
+
+	err = vfs_path_lookup(datapath.mnt->mnt_root, datapath.mnt, redirect,
+			LOOKUP_BENEATH | LOOKUP_NO_SYMLINKS | LOOKUP_NO_XDEV,
+			&datapath);
+	if (err)
+		return err;
+
+	mntput(datapath.mnt);
+
+	return ovl_dentry_set_lowerdata(dentry, datapath.dentry);
 }
 
 struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
