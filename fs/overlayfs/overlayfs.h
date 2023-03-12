@@ -478,6 +478,11 @@ static inline bool ovl_is_impuredir(struct super_block *sb,
 	return ovl_path_check_dir_xattr(ofs, &upperpath, OVL_XATTR_IMPURE);
 }
 
+static inline bool ovl_is_opaquedir(struct ovl_fs *ofs, const struct path *path)
+{
+	return ovl_path_check_dir_xattr(ofs, path, OVL_XATTR_OPAQUE);
+}
+
 /*
  * With xino=auto, we do best effort to keep all inodes on same st_dev and
  * d_ino consistent with st_ino.

@@ -194,11 +194,6 @@ struct dentry *ovl_decode_real_fh(struct ovl_fs *ofs, struct ovl_fh *fh,
 	return real;
 }
 
-static bool ovl_is_opaquedir(struct ovl_fs *ofs, const struct path *path)
-{
-	return ovl_path_check_dir_xattr(ofs, path, OVL_XATTR_OPAQUE);
-}
-
 static struct dentry *ovl_lookup_positive_unlocked(struct ovl_lookup_data *d,
 						   const char *name,
 						   struct dentry *base, int len,
