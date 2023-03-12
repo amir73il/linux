@@ -62,6 +62,14 @@ static void ovl_entry_stack_free(struct ovl_entry *oe)
 		dput(oe->lowerstack[i].dentry);
 }
 
+static void ovl_free_oe(struct ovl_entry *oe)
+{
+	if (oe) {
+		ovl_entry_stack_free(oe);
+		kfree(oe);
+	}
+}
+
 static bool ovl_metacopy_def = IS_ENABLED(CONFIG_OVERLAY_FS_METACOPY);
 module_param_named(metacopy, ovl_metacopy_def, bool, 0644);
 MODULE_PARM_DESC(metacopy,
@@ -246,6 +254,7 @@ static void ovl_free_fs(struct ovl_fs *ofs)
 	kfree(ofs->layers);
 	for (i = 0; i < ofs->numfs; i++)
 		free_anon_bdev(ofs->fs[i].pseudo_dev);
+	ovl_free_oe(ofs->root);
 	kfree(ofs->fs);
 
 	kfree(ofs->config.lowerdir);
@@ -1726,7 +1735,7 @@ static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
 	int err;
 	struct path *stack = NULL;
 	unsigned int i;
-	struct ovl_entry *oe;
+	struct ovl_entry *oe, *roe;
 
 	if (!ofs->config.upperdir && numlower == 1) {
 		pr_err("at least 2 lowerdir are needed while upperdir nonexistent\n");
@@ -1758,6 +1767,16 @@ static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
 		goto out_err;
 
 	err = -ENOMEM;
+	roe = ovl_alloc_entry(numlower);
+	if (!roe)
+		goto out_err;
+
+	for (i = 0; i < numlower; i++) {
+		roe->lowerstack[i].dentry = dget(stack[i].dentry);
+		roe->lowerstack[i].layer = &ofs->layers[i+1];
+	}
+	ofs->root = roe;
+
 	oe = ovl_alloc_entry(numlower);
 	if (!oe)
 		goto out_err;
@@ -2075,8 +2094,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 
 out_free_oe:
-	ovl_entry_stack_free(oe);
-	kfree(oe);
+	ovl_free_oe(oe);
 out_err:
 	kfree(splitlower);
 	path_put(&upperpath);

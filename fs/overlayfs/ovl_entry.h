@@ -53,6 +53,8 @@ struct ovl_fs {
 	/* Number of unique fs among layers including upper fs */
 	unsigned int numfs;
 	const struct ovl_layer *layers;
+	/* Copy of OVL_E(sb->s_root) used for absolute redirect */
+	struct ovl_entry *root;
 	struct ovl_sb *fs;
 	/* workbasedir is the path at workdir= mount option */
 	struct dentry *workbasedir;
