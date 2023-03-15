@@ -152,7 +152,7 @@ static int ovl_dentry_revalidate_common(struct dentry *dentry,
 	if (upper)
 		ret = ovl_revalidate_real(upper, flags, weak);
 
-	for (i = 0; ret > 0 && i < oe->numlower; i++) {
+	for (i = 0; ret > 0 && i < ovl_numlower(oe); i++) {
 		ret = ovl_revalidate_real(oe->lowerstack[i].dentry, flags,
 					  weak);
 	}

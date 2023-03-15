@@ -80,7 +80,7 @@ static int ovl_connectable_layer(struct dentry *dentry)
 
 	/* We can get overlay root from root of any layer */
 	if (dentry == dentry->d_sb->s_root)
-		return oe->numlower;
+		return ovl_numlower(oe);
 
 	/*
 	 * If it's an unindexed merge dir, then it's not connectable with any
@@ -348,7 +348,7 @@ static struct dentry *ovl_dentry_real_at(struct dentry *dentry, int idx)
 	if (!idx)
 		return ovl_dentry_upper(dentry);
 
-	for (i = 0; i < oe->numlower; i++) {
+	for (i = 0; i < ovl_numlower(oe); i++) {
 		if (oe->lowerstack[i].layer->idx == idx)
 			return oe->lowerstack[i].dentry;
 	}

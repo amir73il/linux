@@ -124,6 +124,11 @@ static inline struct ovl_entry *OVL_E(struct dentry *dentry)
 	return (struct ovl_entry *) dentry->d_fsdata;
 }
 
+static inline unsigned int ovl_numlower(struct ovl_entry *oe)
+{
+	return oe ? oe->numlower : 0;
+}
+
 static inline unsigned long *OVL_E_FLAGS(struct dentry *dentry)
 {
 	return &OVL_E(dentry)->flags;

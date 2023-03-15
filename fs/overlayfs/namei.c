@@ -796,14 +796,14 @@ int ovl_path_next(int idx, struct dentry *dentry, struct path *path)
 	if (idx == 0) {
 		ovl_path_upper(dentry, path);
 		if (path->dentry)
-			return oe->numlower ? 1 : -1;
+			return ovl_numlower(oe) ? 1 : -1;
 		idx++;
 	}
-	BUG_ON(idx > oe->numlower);
+	BUG_ON(idx > ovl_numlower(oe));
 	path->dentry = oe->lowerstack[idx - 1].dentry;
 	path->mnt = oe->lowerstack[idx - 1].layer->mnt;
 
-	return (idx < oe->numlower) ? idx + 1 : -1;
+	return (idx < ovl_numlower(oe)) ? idx + 1 : -1;
 }
 
 /* Fix missing 'origin' xattr */
