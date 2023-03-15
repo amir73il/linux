@@ -91,7 +91,7 @@ static int ovl_connectable_layer(struct dentry *dentry)
 		return 0;
 
 	/* We can get upper/overlay path from indexed/lower dentry */
-	return oe->lowerstack[0].layer->idx;
+	return ovl_lowerstack(oe)[0].layer->idx;
 }
 
 /*
@@ -112,7 +112,7 @@ static int ovl_connect_layer(struct dentry *dentry)
 	    WARN_ON(!ovl_dentry_lower(dentry)))
 		return -EIO;
 
-	origin_layer = OVL_E(dentry)->lowerstack[0].layer->idx;
+	origin_layer = ovl_lowerstack(OVL_E(dentry))[0].layer->idx;
 	if (ovl_dentry_test_flag(OVL_E_CONNECTED, dentry))
 		return origin_layer;
 
@@ -286,30 +286,22 @@ static struct dentry *ovl_obtain_alias(struct super_block *sb,
 	struct dentry *upper = upper_alias ?: index;
 	struct dentry *dentry;
 	struct inode *inode = NULL;
-	struct ovl_entry *oe;
+	struct ovl_entry oe;
 	struct ovl_inode_params oip = {
-		.lowerpath = lowerpath,
+		.oe = &oe,
 		.index = index,
-		.numlower = !!lower
 	};
 
 	/* We get overlay directory dentries with ovl_lookup_real() */
 	if (d_is_dir(upper ?: lower))
 		return ERR_PTR(-EIO);
 
-	oe = ovl_alloc_entry(!!lower);
-	if (!oe)
-		goto nomem;
-
 	oip.upperdentry = dget(upper);
-	if (lower) {
-		oe->lowerstack->dentry = dget(lower);
-		oe->lowerstack->layer = lowerpath->layer;
-	}
-	oip.oe = oe;
+	/* Should not fail because does not allocate lowerstack */
+	ovl_init_entry(&oe, lowerpath, !!lower);
 	inode = ovl_get_inode(sb, &oip);
 	if (IS_ERR(inode)) {
-		ovl_free_entry(oe);
+		ovl_free_entry(&oe);
 		dput(upper);
 		return ERR_CAST(inode);
 	}
@@ -328,7 +320,7 @@ static struct dentry *ovl_obtain_alias(struct super_block *sb,
 	if (upper_alias)
 		ovl_dentry_set_upper_alias(dentry);
 
-	ovl_dentry_update_reval(dentry, upper, oe,
+	ovl_dentry_update_reval(dentry, upper, &oe,
 			DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
 
 	return d_instantiate_anon(dentry, inode);
@@ -351,8 +343,8 @@ static struct dentry *ovl_dentry_real_at(struct dentry *dentry, int idx)
 		return ovl_dentry_upper(dentry);
 
 	for (i = 0; i < ovl_numlower(oe); i++) {
-		if (oe->lowerstack[i].layer->idx == idx)
-			return oe->lowerstack[i].dentry;
+		if (ovl_lowerstack(oe)[i].layer->idx == idx)
+			return ovl_lowerstack(oe)[i].dentry;
 	}
 
 	return NULL;

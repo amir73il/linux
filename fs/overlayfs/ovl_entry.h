@@ -49,12 +49,22 @@ struct ovl_path {
 
 struct ovl_entry {
 	unsigned numlower;
-	struct ovl_path lowerstack[];
+	union {
+		/* Embedded path for numlower == 1 */
+		struct ovl_path __lowerpath;
+		/* External stack for numlower > 1 */
+		struct ovl_path *__lowerstack;
+	};
 };
 
 static inline unsigned int ovl_numlower(struct ovl_entry *oe)
 {
 	return oe ? oe->numlower : 0;
+}
+
+static inline struct ovl_path *ovl_lowerstack(struct ovl_entry *oe)
+{
+	return oe->numlower > 1 ? oe->__lowerstack : &oe->__lowerpath;
 }
 
 /* private information held for overlayfs's superblock */
@@ -131,8 +141,7 @@ struct ovl_inode {
 	unsigned long flags;
 	struct inode vfs_inode;
 	struct dentry *__upperdentry;
-	struct ovl_path lowerpath;
-	struct ovl_entry *oe;
+	struct ovl_entry oe;
 
 	/* synchronize copy up and more */
 	struct mutex lock;
@@ -147,7 +156,7 @@ static inline struct ovl_entry *OVL_E(struct dentry *dentry)
 {
 	struct inode *inode = d_inode(dentry);
 
-	return inode ? OVL_I(inode)->oe : NULL;
+	return inode ? &OVL_I(inode)->oe : NULL;
 }
 
 static inline struct dentry *ovl_upperdentry_dereference(struct ovl_inode *oi)

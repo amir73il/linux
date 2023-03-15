@@ -83,15 +83,17 @@ bool ovl_verify_lower(struct super_block *sb)
 	return ofs->config.nfs_export && ofs->config.index;
 }
 
-struct ovl_entry *ovl_alloc_entry(unsigned int numlower)
+struct ovl_path *ovl_alloc_stack(unsigned int numlower)
 {
-	size_t size = offsetof(struct ovl_entry, lowerstack[numlower]);
-	struct ovl_entry *oe = kzalloc(size, GFP_KERNEL);
+	return kcalloc(numlower, sizeof(struct ovl_path), GFP_KERNEL);
+}
 
-	if (oe)
-		oe->numlower = numlower;
+void ovl_stack_get(struct ovl_path *stack, unsigned int numlower)
+{
+	unsigned int i;
 
-	return oe;
+	for (i = 0; i < numlower; i++)
+		dget(stack[i].dentry);
 }
 
 void ovl_stack_put(struct ovl_path *stack, unsigned int numlower)
@@ -102,11 +104,41 @@ void ovl_stack_put(struct ovl_path *stack, unsigned int numlower)
 		dput(stack[i].dentry);
 }
 
+/* On success, takes references on @stack dentries */
+int ovl_init_entry(struct ovl_entry *oe, struct ovl_path *stack,
+		   unsigned int numlower)
+{
+	oe->numlower = numlower;
+	oe->__lowerpath = (struct ovl_path) {};
+
+	/* No allocated stack for numlower <= 1 */
+	if (numlower <= 1) {
+		if (numlower && stack)
+			oe->__lowerpath = *stack;
+		dget(oe->__lowerpath.dentry);
+		return 0;
+	}
+
+	oe->__lowerstack = ovl_alloc_stack(numlower);
+	if (!oe->__lowerstack)
+		return -ENOMEM;
+
+	if (!stack)
+		return 0;
+
+	memcpy(oe->__lowerstack, stack, sizeof(struct ovl_path) * numlower);
+	ovl_stack_get(stack, numlower);
+
+	return 0;
+}
+
 void ovl_free_entry(struct ovl_entry *oe)
 {
-	if (oe) {
-		ovl_stack_put(oe->lowerstack, oe->numlower);
-		kfree(oe);
+	if (oe->numlower <= 1) {
+		dput(oe->__lowerpath.dentry);
+	} else if (oe->__lowerstack) {
+		ovl_stack_put(oe->__lowerstack, oe->numlower);
+		kfree(oe->__lowerstack);
 	}
 }
 
@@ -124,7 +156,7 @@ void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 	if (upperdentry)
 		flags |= upperdentry->d_flags;
 	for (i = 0; i < ovl_numlower(oe); i++)
-		flags |= oe->lowerstack[i].dentry->d_flags;
+		flags |= ovl_lowerstack(oe)[i].dentry->d_flags;
 
 	spin_lock(&dentry->d_lock);
 	dentry->d_flags &= ~mask;
@@ -178,8 +210,8 @@ void ovl_path_lower(struct dentry *dentry, struct path *path)
 	struct ovl_entry *oe = OVL_E(dentry);
 
 	if (ovl_numlower(oe)) {
-		path->mnt = oe->lowerstack[0].layer->mnt;
-		path->dentry = oe->lowerstack[0].dentry;
+		path->mnt = ovl_lowerstack(oe)[0].layer->mnt;
+		path->dentry = ovl_lowerstack(oe)[0].dentry;
 	} else {
 		*path = (struct path) { };
 	}
@@ -190,8 +222,8 @@ void ovl_path_lowerdata(struct dentry *dentry, struct path *path)
 	struct ovl_entry *oe = OVL_E(dentry);
 
 	if (ovl_numlower(oe)) {
-		path->mnt = oe->lowerstack[ovl_numlower(oe) - 1].layer->mnt;
-		path->dentry = oe->lowerstack[ovl_numlower(oe) - 1].dentry;
+		path->mnt = ovl_lowerstack(oe)[ovl_numlower(oe) - 1].layer->mnt;
+		path->dentry = ovl_lowerstack(oe)[ovl_numlower(oe) - 1].dentry;
 	} else {
 		*path = (struct path) { };
 	}
@@ -232,14 +264,14 @@ struct dentry *ovl_dentry_lower(struct dentry *dentry)
 {
 	struct ovl_entry *oe = OVL_E(dentry);
 
-	return ovl_numlower(oe) ? oe->lowerstack[0].dentry : NULL;
+	return ovl_numlower(oe) ? ovl_lowerstack(oe)[0].dentry : NULL;
 }
 
 const struct ovl_layer *ovl_layer_lower(struct dentry *dentry)
 {
 	struct ovl_entry *oe = OVL_E(dentry);
 
-	return ovl_numlower(oe) ? oe->lowerstack[0].layer : NULL;
+	return ovl_numlower(oe) ? ovl_lowerstack(oe)[0].layer : NULL;
 }
 
 /*
@@ -253,7 +285,7 @@ struct dentry *ovl_dentry_lowerdata(struct dentry *dentry)
 	struct ovl_entry *oe = OVL_E(dentry);
 
 	return ovl_numlower(oe) ?
-		oe->lowerstack[ovl_numlower(oe) - 1].dentry : NULL;
+		ovl_lowerstack(oe)[ovl_numlower(oe) - 1].dentry : NULL;
 }
 
 struct dentry *ovl_dentry_real(struct dentry *dentry)
@@ -270,8 +302,8 @@ void ovl_i_path_real(struct inode *inode, struct path *path)
 {
 	path->dentry = ovl_i_dentry_upper(inode);
 	if (!path->dentry) {
-		path->dentry = OVL_I(inode)->lowerpath.dentry;
-		path->mnt = OVL_I(inode)->lowerpath.layer->mnt;
+		path->dentry = ovl_lowerstack(&OVL_I(inode)->oe)->dentry;
+		path->mnt = ovl_lowerstack(&OVL_I(inode)->oe)->layer->mnt;
 	} else {
 		path->mnt = ovl_upper_mnt(OVL_FS(inode->i_sb));
 	}
@@ -286,7 +318,7 @@ struct inode *ovl_inode_upper(struct inode *inode)
 
 struct inode *ovl_inode_lower(struct inode *inode)
 {
-	struct dentry *lowerdentry = OVL_I(inode)->lowerpath.dentry;
+	struct dentry *lowerdentry = ovl_lowerstack(&OVL_I(inode)->oe)->dentry;
 
 	return lowerdentry ? d_inode(lowerdentry) : NULL;
 }

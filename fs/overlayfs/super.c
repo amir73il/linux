@@ -135,7 +135,7 @@ static int ovl_dentry_revalidate_common(struct dentry *dentry,
 		ret = ovl_revalidate_real(upper, flags, weak);
 
 	for (i = 0; ret > 0 && i < ovl_numlower(oe); i++) {
-		ret = ovl_revalidate_real(oe->lowerstack[i].dentry, flags,
+		ret = ovl_revalidate_real(ovl_lowerstack(oe)[i].dentry, flags,
 					  weak);
 	}
 	return ret;
@@ -171,9 +171,7 @@ static struct inode *ovl_alloc_inode(struct super_block *sb)
 	oi->version = 0;
 	oi->flags = 0;
 	oi->__upperdentry = NULL;
-	oi->oe = NULL;
-	oi->lowerpath.dentry = NULL;
-	oi->lowerpath.layer = NULL;
+	ovl_init_entry(&oi->oe, NULL, 0);
 	oi->lowerdata = NULL;
 	mutex_init(&oi->lock);
 
@@ -194,8 +192,7 @@ static void ovl_destroy_inode(struct inode *inode)
 	struct ovl_inode *oi = OVL_I(inode);
 
 	dput(oi->__upperdentry);
-	dput(oi->lowerpath.dentry);
-	ovl_free_entry(oi->oe);
+	ovl_free_entry(&oi->oe);
 	if (S_ISDIR(inode->i_mode))
 		ovl_dir_cache_free(inode);
 	else
@@ -1445,7 +1442,7 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 
 	/* Verify lower root is upper root origin */
 	err = ovl_verify_origin(ofs, upperpath->dentry,
-				oe->lowerstack[0].dentry, true);
+				ovl_lowerstack(oe)[0].dentry, true);
 	if (err) {
 		pr_err("failed to verify upper root origin\n");
 		goto out;
@@ -1702,23 +1699,22 @@ out:
 	return err;
 }
 
-static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
+static int ovl_get_lowerstack(struct super_block *sb, struct ovl_entry *oe,
 				const char *lower, unsigned int numlower,
 				struct ovl_fs *ofs, struct ovl_layer *layers)
 {
 	int err;
 	struct path *stack = NULL;
 	unsigned int i;
-	struct ovl_entry *oe;
 
 	if (!ofs->config.upperdir && numlower == 1) {
 		pr_err("at least 2 lowerdir are needed while upperdir nonexistent\n");
-		return ERR_PTR(-EINVAL);
+		return -EINVAL;
 	}
 
 	stack = kcalloc(numlower, sizeof(struct path), GFP_KERNEL);
 	if (!stack)
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 
 	err = -EINVAL;
 	for (i = 0; i < numlower; i++) {
@@ -1740,26 +1736,21 @@ static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
 	if (err)
 		goto out_err;
 
-	err = -ENOMEM;
-	oe = ovl_alloc_entry(numlower);
-	if (!oe)
+	err = ovl_init_entry(oe, NULL, numlower);
+	if (err)
 		goto out_err;
 
 	for (i = 0; i < numlower; i++) {
-		oe->lowerstack[i].dentry = dget(stack[i].dentry);
-		oe->lowerstack[i].layer = &ofs->layers[i+1];
+		ovl_lowerstack(oe)[i].dentry = dget(stack[i].dentry);
+		ovl_lowerstack(oe)[i].layer = &ofs->layers[i+1];
 	}
 
-out:
+out_err:
 	for (i = 0; i < numlower; i++)
 		path_put(&stack[i]);
 	kfree(stack);
 
-	return oe;
-
-out_err:
-	oe = ERR_PTR(err);
-	goto out;
+	return err;
 }
 
 /*
@@ -1840,12 +1831,11 @@ static struct dentry *ovl_get_root(struct super_block *sb,
 				   struct ovl_entry *oe)
 {
 	struct dentry *root;
-	struct ovl_path *lowerpath = &oe->lowerstack[0];
+	struct ovl_path *lowerpath = ovl_lowerstack(oe);
 	unsigned long ino = d_inode(lowerpath->dentry)->i_ino;
 	int fsid = lowerpath->layer->fsid;
 	struct ovl_inode_params oip = {
 		.upperdentry = upperdentry,
-		.lowerpath = lowerpath,
 		.oe = oe,
 	};
 
@@ -1877,7 +1867,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct path upperpath = { };
 	struct dentry *root_dentry;
-	struct ovl_entry *oe;
+	struct ovl_entry oe;
 	struct ovl_fs *ofs;
 	struct ovl_layer *layers;
 	struct cred *cred;
@@ -1990,9 +1980,8 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 		sb->s_stack_depth = upper_sb->s_stack_depth;
 		sb->s_time_gran = upper_sb->s_time_gran;
 	}
-	oe = ovl_get_lowerstack(sb, splitlower, numlower, ofs, layers);
-	err = PTR_ERR(oe);
-	if (IS_ERR(oe))
+	err = ovl_get_lowerstack(sb, &oe, splitlower, numlower, ofs, layers);
+	if (err)
 		goto out_err;
 
 	/* If the upper fs is nonexistent, we mark overlayfs r/o too */
@@ -2005,7 +1994,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	}
 
 	if (!ovl_force_readonly(ofs) && ofs->config.index) {
-		err = ovl_get_indexdir(sb, ofs, oe, &upperpath);
+		err = ovl_get_indexdir(sb, ofs, &oe, &upperpath);
 		if (err)
 			goto out_free_oe;
 
@@ -2046,7 +2035,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_iflags |= SB_I_SKIP_SYNC;
 
 	err = -ENOMEM;
-	root_dentry = ovl_get_root(sb, upperpath.dentry, oe);
+	root_dentry = ovl_get_root(sb, upperpath.dentry, &oe);
 	if (!root_dentry)
 		goto out_free_oe;
 
@@ -2058,7 +2047,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 
 out_free_oe:
-	ovl_free_entry(oe);
+	ovl_free_entry(&oe);
 out_err:
 	kfree(splitlower);
 	path_put(&upperpath);

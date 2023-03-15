@@ -372,8 +372,10 @@ int ovl_can_decode_fh(struct super_block *sb);
 struct dentry *ovl_indexdir(struct super_block *sb);
 bool ovl_index_all(struct super_block *sb);
 bool ovl_verify_lower(struct super_block *sb);
-struct ovl_entry *ovl_alloc_entry(unsigned int numlower);
+struct ovl_path *ovl_alloc_stack(unsigned int numlower);
 void ovl_stack_put(struct ovl_path *stack, unsigned int numlower);
+int ovl_init_entry(struct ovl_entry *oe, struct ovl_path *stack,
+		   unsigned int numlower);
 void ovl_free_entry(struct ovl_entry *oe);
 bool ovl_dentry_remote(struct dentry *dentry);
 void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
@@ -646,10 +648,8 @@ bool ovl_is_private_xattr(struct super_block *sb, const char *name);
 struct ovl_inode_params {
 	struct inode *newinode;
 	struct dentry *upperdentry;
-	struct ovl_path *lowerpath;
 	struct ovl_entry *oe;
 	bool index;
-	unsigned int numlower;
 	char *redirect;
 	struct dentry *lowerdata;
 };

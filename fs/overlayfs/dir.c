@@ -266,6 +266,7 @@ static int ovl_instantiate(struct dentry *dentry, struct inode *inode,
 	struct ovl_inode_params oip = {
 		.upperdentry = newdentry,
 		.newinode = inode,
+		.oe = &oe,
 	};
 
 	ovl_dir_modified(dentry->d_parent, false);
