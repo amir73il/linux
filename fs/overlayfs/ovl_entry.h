@@ -40,6 +40,8 @@ struct ovl_layer {
 	int idx;
 	/* One fsid per unique underlying sb (upper fsid == 0) */
 	int fsid;
+	/* Accessible only via absolute redirect */
+	bool hidden;
 };
 
 struct ovl_path {
