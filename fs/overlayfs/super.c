@@ -223,6 +223,7 @@ static void ovl_free_fs(struct ovl_fs *ofs)
 	kfree(ofs->layers);
 	for (i = 0; i < ofs->numfs; i++)
 		free_anon_bdev(ofs->fs[i].pseudo_dev);
+	ovl_free_entry(&ofs->roe);
 	kfree(ofs->fs);
 
 	kfree(ofs->config.lowerdir);
@@ -1733,14 +1734,16 @@ static int ovl_get_lowerstack(struct super_block *sb, struct ovl_entry *oe,
 	if (err)
 		goto out_err;
 
-	err = ovl_init_entry(oe, NULL, numlower);
+	err = ovl_init_entry(&ofs->roe, NULL, numlower);
 	if (err)
 		goto out_err;
 
 	for (i = 0; i < numlower; i++) {
-		ovl_lowerstack(oe)[i].dentry = dget(stack[i].dentry);
-		ovl_lowerstack(oe)[i].layer = &ofs->layers[i+1];
+		ovl_lowerstack(&ofs->roe)[i].dentry = dget(stack[i].dentry);
+		ovl_lowerstack(&ofs->roe)[i].layer = &ofs->layers[i+1];
 	}
+
+	err = ovl_init_entry(oe, ovl_lowerstack(&ofs->roe), numlower);
 
 out_err:
 	for (i = 0; i < numlower; i++)

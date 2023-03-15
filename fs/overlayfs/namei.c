@@ -834,7 +834,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	const struct cred *old_cred;
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 	struct ovl_entry *poe = OVL_E(dentry->d_parent);
-	struct ovl_entry *roe = OVL_E(dentry->d_sb->s_root);
+	struct ovl_entry *roe = &ofs->roe;
 	struct ovl_path *stack = NULL, *origin_path = NULL;
 	struct dentry *upperdir, *upperdentry = NULL;
 	struct dentry *origin = NULL;
