@@ -262,6 +262,7 @@ static int ovl_set_opaque(struct dentry *dentry, struct dentry *upperdentry)
 static int ovl_instantiate(struct dentry *dentry, struct inode *inode,
 			   struct dentry *newdentry, bool hardlink)
 {
+	struct ovl_entry oe = {};
 	struct ovl_inode_params oip = {
 		.upperdentry = newdentry,
 		.newinode = inode,
@@ -269,7 +270,7 @@ static int ovl_instantiate(struct dentry *dentry, struct inode *inode,
 
 	ovl_dir_modified(dentry->d_parent, false);
 	ovl_dentry_set_upper_alias(dentry);
-	ovl_dentry_update_reval(dentry, newdentry,
+	ovl_dentry_update_reval(dentry, newdentry, &oe,
 			DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
 
 	if (!hardlink) {
