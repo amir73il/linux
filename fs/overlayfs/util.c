@@ -94,6 +94,22 @@ struct ovl_entry *ovl_alloc_entry(unsigned int numlower)
 	return oe;
 }
 
+void ovl_stack_put(struct ovl_path *stack, unsigned int numlower)
+{
+	unsigned int i;
+
+	for (i = 0; i < numlower; i++)
+		dput(stack[i].dentry);
+}
+
+void ovl_free_entry(struct ovl_entry *oe)
+{
+	if (oe) {
+		ovl_stack_put(oe->lowerstack, oe->numlower);
+		kfree(oe);
+	}
+}
+
 bool ovl_dentry_remote(struct dentry *dentry)
 {
 	return dentry->d_flags &

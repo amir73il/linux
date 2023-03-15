@@ -54,14 +54,6 @@ module_param_named(xino_auto, ovl_xino_auto_def, bool, 0644);
 MODULE_PARM_DESC(xino_auto,
 		 "Auto enable xino feature");
 
-static void ovl_entry_stack_free(struct ovl_entry *oe)
-{
-	unsigned int i;
-
-	for (i = 0; i < oe->numlower; i++)
-		dput(oe->lowerstack[i].dentry);
-}
-
 static bool ovl_metacopy_def = IS_ENABLED(CONFIG_OVERLAY_FS_METACOPY);
 module_param_named(metacopy, ovl_metacopy_def, bool, 0644);
 MODULE_PARM_DESC(metacopy,
@@ -72,7 +64,7 @@ static void ovl_dentry_release(struct dentry *dentry)
 	struct ovl_entry *oe = dentry->d_fsdata;
 
 	if (oe) {
-		ovl_entry_stack_free(oe);
+		ovl_stack_put(oe->lowerstack, oe->numlower);
 		kfree_rcu(oe, rcu);
 	}
 }
@@ -2075,8 +2067,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 
 out_free_oe:
-	ovl_entry_stack_free(oe);
-	kfree(oe);
+	ovl_free_entry(oe);
 out_err:
 	kfree(splitlower);
 	path_put(&upperpath);

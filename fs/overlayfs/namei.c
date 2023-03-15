@@ -1073,6 +1073,8 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		goto out_put;
 
 	memcpy(oe->lowerstack, stack, sizeof(struct ovl_path) * ctr);
+	kfree(stack);
+	stack = NULL;
 	dentry->d_fsdata = oe;
 
 	if (upperopaque)
@@ -1137,12 +1139,13 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 
 out_free_oe:
 	dentry->d_fsdata = NULL;
-	kfree(oe);
+	ovl_free_entry(oe);
 out_put:
 	dput(index);
-	for (i = 0; i < ctr; i++)
-		dput(stack[i].dentry);
-	kfree(stack);
+	if (stack) {
+		ovl_stack_put(stack, ctr);
+		kfree(stack);
+	}
 out_put_upper:
 	if (origin_path) {
 		dput(origin_path->dentry);
