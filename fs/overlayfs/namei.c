@@ -14,6 +14,8 @@
 #include <linux/exportfs.h>
 #include "overlayfs.h"
 
+#include "../internal.h"	/* for vfs_path_lookup */
+
 struct ovl_lookup_data {
 	struct super_block *sb;
 	struct vfsmount *mnt;
@@ -343,7 +345,6 @@ static int ovl_lookup_layer(struct dentry *base, struct ovl_lookup_data *d,
 	*ret = dentry;
 	return 0;
 }
-
 
 int ovl_check_origin_fh(struct ovl_fs *ofs, struct ovl_fh *fh, bool connected,
 			struct dentry *upperdentry, struct ovl_path **stackp)
@@ -822,6 +823,56 @@ static int ovl_fix_origin(struct ovl_fs *ofs, struct dentry *dentry,
 	return err;
 }
 
+/* Lazy lookup of lower data */
+int ovl_maybe_lookup_lowerdata(struct dentry *dentry)
+{
+	struct inode *inode = d_inode(dentry);
+	const char *redirect = OVL_I(inode)->redirect;
+	struct path datapath = {};
+	int err;
+
+	if (!redirect || ovl_dentry_upper(dentry) ||
+	    ovl_dentry_lowerdata(dentry))
+		return 0;
+
+	if (redirect[0] != '/')
+		return -EIO;
+
+	err = ovl_inode_lock_interruptible(inode);
+	if (err)
+		return err;
+
+	ovl_path_lowerdata(dentry, &datapath);
+	if (!datapath.mnt)
+		goto out_err;
+
+	err = 0;
+	/* Someone got here before us? */
+	if (datapath.dentry)
+		goto out;
+
+	err = vfs_path_lookup(datapath.mnt->mnt_root, datapath.mnt, redirect,
+			LOOKUP_BENEATH | LOOKUP_NO_SYMLINKS | LOOKUP_NO_XDEV,
+			&datapath);
+	if (err)
+		goto out_err;
+
+	err = ovl_dentry_set_lowerdata(dentry, datapath.dentry);
+	if (err)
+		goto out_err;
+
+out:
+	ovl_inode_unlock(inode);
+	path_put(&datapath);
+
+	return err;
+
+out_err:
+	pr_warn_ratelimited("lazy lower data lookup failed (%pd2, err=%i)\n",
+			    dentry, err);
+	goto out;
+}
+
 struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			  unsigned int flags)
 {
@@ -1004,11 +1055,16 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 				/* Find the current layer on the root dentry */
 				i = lower.layer->idx - 1;
 			}
-			/* TODO: lazy lookup of lowerdata in last layer */
+			/* Lazy lookup of lowerdata in last layer */
 			if (d.metacopy && !ovl_upper_mnt(ofs) &&
 			    i == roe->numlower - 2) {
 				upperredirect = d.redirect;
 				d.redirect = NULL;
+				d.metacopy = false;
+				stack[ctr].dentry = NULL;
+				stack[ctr].layer = &ofs->layers[ofs->numlayer - 1];
+				ctr++;
+				break;
 			}
 		}
 	}

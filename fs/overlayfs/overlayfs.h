@@ -377,7 +377,7 @@ void ovl_stack_put(struct ovl_path *stack, unsigned int numlower);
 int ovl_init_entry(struct ovl_entry *oe, struct ovl_path *stack,
 		   unsigned int numlower);
 void ovl_free_entry(struct ovl_entry *oe);
-bool ovl_dentry_remote(struct dentry *dentry);
+unsigned long ovl_dentry_remote(struct dentry *dentry);
 void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 			     struct ovl_entry *oe, unsigned int mask);
 bool ovl_dentry_weird(struct dentry *dentry);
@@ -391,6 +391,7 @@ enum ovl_path_type ovl_path_realdata(struct dentry *dentry, struct path *path);
 struct dentry *ovl_dentry_upper(struct dentry *dentry);
 struct dentry *ovl_dentry_lower(struct dentry *dentry);
 struct dentry *ovl_dentry_lowerdata(struct dentry *dentry);
+int ovl_dentry_set_lowerdata(struct dentry *dentry, struct dentry *lowerdata);
 const struct ovl_layer *ovl_i_layer_lower(struct inode *inode);
 const struct ovl_layer *ovl_layer_lower(struct dentry *dentry);
 struct dentry *ovl_dentry_real(struct dentry *dentry);
@@ -557,6 +558,7 @@ struct dentry *ovl_get_index_fh(struct ovl_fs *ofs, struct ovl_fh *fh);
 struct dentry *ovl_lookup_index(struct ovl_fs *ofs, struct dentry *upper,
 				struct dentry *origin, bool verify);
 int ovl_path_next(int idx, struct dentry *dentry, struct path *path);
+int ovl_maybe_lookup_lowerdata(struct dentry *dentry);
 struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			  unsigned int flags);
 bool ovl_lower_positive(struct dentry *dentry);

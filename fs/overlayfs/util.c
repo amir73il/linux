@@ -142,7 +142,7 @@ void ovl_free_entry(struct ovl_entry *oe)
 	}
 }
 
-bool ovl_dentry_remote(struct dentry *dentry)
+unsigned long ovl_dentry_remote(struct dentry *dentry)
 {
 	return dentry->d_flags &
 		(DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
@@ -232,7 +232,8 @@ void ovl_path_lowerdata(struct dentry *dentry, struct path *path)
 
 	if (ovl_numlower(oe)) {
 		path->mnt = ovl_lowerstack(oe)[ovl_numlower(oe) - 1].layer->mnt;
-		path->dentry = ovl_lowerstack(oe)[ovl_numlower(oe) - 1].dentry;
+		path->dentry =
+			READ_ONCE(ovl_lowerstack(oe)[ovl_numlower(oe) - 1].dentry);
 	} else {
 		*path = (struct path) { };
 	}
@@ -292,12 +293,31 @@ const struct ovl_layer *ovl_layer_lower(struct dentry *dentry)
 static struct dentry *ovl_oe_lowerdata(struct ovl_entry *oe)
 {
 	return ovl_numlower(oe) ?
-		ovl_lowerstack(oe)[ovl_numlower(oe) - 1].dentry : NULL;
+		READ_ONCE(ovl_lowerstack(oe)[ovl_numlower(oe) - 1].dentry) :
+		NULL;
 }
 
 struct dentry *ovl_dentry_lowerdata(struct dentry *dentry)
 {
 	return ovl_oe_lowerdata(OVL_E(dentry));
+
+}
+
+int ovl_dentry_set_lowerdata(struct dentry *dentry, struct dentry *lowerdata)
+{
+	struct ovl_entry *oe = OVL_E(dentry);
+
+	if (WARN_ON_ONCE(!oe->numlower) || !d_is_reg(lowerdata))
+		return -EIO;
+
+	if (ovl_dentry_weird(lowerdata) ||
+	    ovl_dentry_remote(lowerdata) & ~dentry->d_flags)
+		return -EREMOTE;
+
+	WRITE_ONCE(ovl_lowerstack(oe)[oe->numlower - 1].dentry,
+		   dget(lowerdata));
+
+	return 0;
 }
 
 struct dentry *ovl_dentry_real(struct dentry *dentry)
