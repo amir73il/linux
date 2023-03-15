@@ -280,12 +280,15 @@ const struct ovl_layer *ovl_layer_lower(struct dentry *dentry)
  * lower dentry which has data (and not metacopy dentry). This helper
  * returns the lower data dentry.
  */
-struct dentry *ovl_dentry_lowerdata(struct dentry *dentry)
+static struct dentry *ovl_oe_lowerdata(struct ovl_entry *oe)
 {
-	struct ovl_entry *oe = OVL_E(dentry);
-
 	return ovl_numlower(oe) ?
 		ovl_lowerstack(oe)[ovl_numlower(oe) - 1].dentry : NULL;
+}
+
+struct dentry *ovl_dentry_lowerdata(struct dentry *dentry)
+{
+	return ovl_oe_lowerdata(OVL_E(dentry));
 }
 
 struct dentry *ovl_dentry_real(struct dentry *dentry)
@@ -331,10 +334,14 @@ struct inode *ovl_inode_real(struct inode *inode)
 /* Return inode which contains lower data. Do not return metacopy */
 struct inode *ovl_inode_lowerdata(struct inode *inode)
 {
+	struct dentry *lowerdata;
+
 	if (WARN_ON(!S_ISREG(inode->i_mode)))
 		return NULL;
 
-	return OVL_I(inode)->lowerdata ?: ovl_inode_lower(inode);
+	lowerdata = ovl_oe_lowerdata(&OVL_I(inode)->oe);
+
+	return lowerdata ? d_inode(lowerdata) : NULL;
 }
 
 /* Return real inode which contains data. Does not return metacopy inode */

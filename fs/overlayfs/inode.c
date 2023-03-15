@@ -1006,8 +1006,6 @@ void ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 	oi->oe = *oip->oe;
 	oi->redirect = oip->redirect;
 	oi->__upperdentry = oip->upperdentry;
-	if (oip->lowerdata)
-		oi->lowerdata = igrab(d_inode(oip->lowerdata));
 
 	realinode = ovl_inode_real(inode);
 	ovl_copyattr(inode);
