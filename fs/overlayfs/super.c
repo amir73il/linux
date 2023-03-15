@@ -58,8 +58,8 @@ static void ovl_entry_stack_free(struct ovl_entry *oe)
 {
 	unsigned int i;
 
-	for (i = 0; i < oe->numlower; i++)
-		dput(oe->lowerstack[i].dentry);
+	for (i = 0; i < ovl_numlower(oe); i++)
+		dput(ovl_lowerstack(oe)[i].dentry);
 }
 
 static bool ovl_metacopy_def = IS_ENABLED(CONFIG_OVERLAY_FS_METACOPY);
@@ -152,8 +152,8 @@ static int ovl_dentry_revalidate_common(struct dentry *dentry,
 	if (upper)
 		ret = ovl_revalidate_real(upper, flags, weak);
 
-	for (i = 0; ret > 0 && i < oe->numlower; i++) {
-		ret = ovl_revalidate_real(oe->lowerstack[i].dentry, flags,
+	for (i = 0; ret > 0 && i < ovl_numlower(oe); i++) {
+		ret = ovl_revalidate_real(ovl_lowerstack(oe)[i].dentry, flags,
 					  weak);
 	}
 	return ret;
@@ -1462,7 +1462,7 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 
 	/* Verify lower root is upper root origin */
 	err = ovl_verify_origin(ofs, upperpath->dentry,
-				oe->lowerstack[0].dentry, true);
+				ovl_lowerstack(oe)[0].dentry, true);
 	if (err) {
 		pr_err("failed to verify upper root origin\n");
 		goto out;
@@ -1763,8 +1763,8 @@ static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
 		goto out_err;
 
 	for (i = 0; i < numlower; i++) {
-		oe->lowerstack[i].dentry = dget(stack[i].dentry);
-		oe->lowerstack[i].layer = &ofs->layers[i+1];
+		ovl_lowerstack(oe)[i].dentry = dget(stack[i].dentry);
+		ovl_lowerstack(oe)[i].layer = &ofs->layers[i+1];
 	}
 
 out:
@@ -1857,7 +1857,7 @@ static struct dentry *ovl_get_root(struct super_block *sb,
 				   struct ovl_entry *oe)
 {
 	struct dentry *root;
-	struct ovl_path *lowerpath = &oe->lowerstack[0];
+	struct ovl_path *lowerpath = ovl_lowerstack(oe);
 	unsigned long ino = d_inode(lowerpath->dentry)->i_ino;
 	int fsid = lowerpath->layer->fsid;
 	struct ovl_inode_params oip = {
