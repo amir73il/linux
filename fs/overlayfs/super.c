@@ -1583,6 +1583,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 {
 	int err;
 	unsigned int i;
+	bool hidden = false;
 
 	err = -ENOMEM;
 	ofs->fs = kcalloc(numlower + 1, sizeof(struct ovl_sb), GFP_KERNEL);
@@ -1656,8 +1657,13 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		layers[ofs->numlayer].idx = ofs->numlayer;
 		layers[ofs->numlayer].fsid = fsid;
 		layers[ofs->numlayer].fs = &ofs->fs[fsid];
+		layers[ofs->numlayer].hidden = hidden;
 		ofs->numlayer++;
 		ofs->fs[fsid].is_lower = true;
+
+		/* If this layer is opaque, make the layers beneath it hidden */
+		if (!hidden && i < numlower - 1)
+			hidden = ovl_is_opaquedir(ofs, &stack[i]);
 	}
 
 	/*
@@ -1743,7 +1749,17 @@ static int ovl_get_lowerstack(struct super_block *sb, struct ovl_entry *oe,
 		ovl_lowerstack(&ofs->roe)[i].layer = &ofs->layers[i+1];
 	}
 
-	err = ovl_init_entry(oe, ovl_lowerstack(&ofs->roe), numlower);
+	for (i = 0; i < numlower; i++) {
+		/*
+		 * Hidden layers are not visible to readdir and direct lookup in
+		 * the overlayfs (vfs) root dir.  They are only accessibale via
+		 * absolute redirect from the non-hidden layers above them.
+		 */
+		if (ofs->layers[i+1].hidden)
+			break;
+	}
+
+	err = ovl_init_entry(oe, ovl_lowerstack(&ofs->roe), i);
 
 out_err:
 	for (i = 0; i < numlower; i++)
