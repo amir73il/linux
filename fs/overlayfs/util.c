@@ -148,6 +148,15 @@ bool ovl_dentry_remote(struct dentry *dentry)
 		(DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
 }
 
+static unsigned int ovl_lower_d_flags(struct ovl_path *lowerpath)
+{
+	/* Return lower layer root d_flags for lazy lowerdata */
+	struct dentry *lower = lowerpath->dentry ?:
+				lowerpath->layer->mnt->mnt_root;
+
+	return lower->d_flags;
+}
+
 void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 			     struct ovl_entry *oe, unsigned int mask)
 {
@@ -156,7 +165,7 @@ void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 	if (upperdentry)
 		flags |= upperdentry->d_flags;
 	for (i = 0; i < ovl_numlower(oe); i++)
-		flags |= ovl_lowerstack(oe)[i].dentry->d_flags;
+		flags |= ovl_lower_d_flags(&ovl_lowerstack(oe)[i]);
 
 	spin_lock(&dentry->d_lock);
 	dentry->d_flags &= ~mask;
