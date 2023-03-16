@@ -287,30 +287,22 @@ static struct dentry *ovl_obtain_alias(struct super_block *sb,
 	struct dentry *upper = upper_alias ?: index;
 	struct dentry *dentry;
 	struct inode *inode = NULL;
-	struct ovl_entry *oe;
+	struct ovl_entry oe;
 	struct ovl_inode_params oip = {
-		.lowerpath = lowerpath,
+		.oe = &oe,
 		.index = index,
-		.numlower = !!lower
 	};
 
 	/* We get overlay directory dentries with ovl_lookup_real() */
 	if (d_is_dir(upper ?: lower))
 		return ERR_PTR(-EIO);
 
-	oe = ovl_alloc_entry(!!lower);
-	if (!oe)
-		goto nomem;
-
 	oip.upperdentry = dget(upper);
-	if (lower) {
-		ovl_lowerstack(oe)->dentry = dget(lower);
-		ovl_lowerstack(oe)->layer = lowerpath->layer;
-	}
-	oip.oe = oe;
+	/* Should not fail because does not allocate lowerstack */
+	ovl_init_entry(&oe, lowerpath, !!lower);
 	inode = ovl_get_inode(sb, &oip);
 	if (IS_ERR(inode)) {
-		ovl_free_entry(oe);
+		ovl_destroy_entry(&oe);
 		dput(upper);
 		return ERR_CAST(inode);
 	}

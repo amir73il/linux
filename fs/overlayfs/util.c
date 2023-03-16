@@ -111,21 +111,41 @@ void ovl_stack_free(struct ovl_path *stack, unsigned int n)
 	kfree(stack);
 }
 
-struct ovl_entry *ovl_alloc_entry(unsigned int numlower)
+/* On success, takes references on @stack dentries */
+int ovl_init_entry(struct ovl_entry *oe, struct ovl_path *stack,
+		   unsigned int numlower)
 {
-	size_t size = offsetof(struct ovl_entry, __lowerstack[numlower]);
-	struct ovl_entry *oe = kzalloc(size, GFP_KERNEL);
+	oe->__numlower = numlower;
+	oe->__lowerpath = (struct ovl_path) {};
 
-	if (oe)
-		oe->__numlower = numlower;
+	/* No allocated stack for numlower <= 1 */
+	if (numlower <= 1) {
+		if (numlower && stack)
+			oe->__lowerpath = *stack;
+		dget(oe->__lowerpath.dentry);
+		return 0;
+	}
 
-	return oe;
+	oe->__lowerstack = ovl_stack_alloc(numlower);
+	if (!oe->__lowerstack)
+		return -ENOMEM;
+
+	if (!stack)
+		return 0;
+
+	ovl_stack_cpy(oe->__lowerstack, stack, numlower);
+
+	return 0;
 }
 
-void ovl_free_entry(struct ovl_entry *oe)
+void ovl_destroy_entry(struct ovl_entry *oe)
 {
-	ovl_stack_put(ovl_lowerstack(oe), ovl_numlower(oe));
-	kfree(oe);
+	if (oe->__numlower > 1) {
+		ovl_stack_put(oe->__lowerstack, oe->__numlower);
+		kfree(oe->__lowerstack);
+	} else {
+		dput(oe->__lowerpath.dentry);
+	}
 }
 
 bool ovl_dentry_remote(struct dentry *dentry)
@@ -289,8 +309,8 @@ void ovl_i_path_real(struct inode *inode, struct path *path)
 {
 	path->dentry = ovl_i_dentry_upper(inode);
 	if (!path->dentry) {
-		path->dentry = OVL_I(inode)->lowerpath.dentry;
-		path->mnt = OVL_I(inode)->lowerpath.layer->mnt;
+		path->dentry = ovl_lowerstack(OVL_I_E(inode))->dentry;
+		path->mnt = ovl_lowerstack(OVL_I_E(inode))->layer->mnt;
 	} else {
 		path->mnt = ovl_upper_mnt(OVL_FS(inode->i_sb));
 	}
@@ -305,7 +325,7 @@ struct inode *ovl_inode_upper(struct inode *inode)
 
 struct inode *ovl_inode_lower(struct inode *inode)
 {
-	struct dentry *lowerdentry = OVL_I(inode)->lowerpath.dentry;
+	struct dentry *lowerdentry = ovl_lowerstack(OVL_I_E(inode))->dentry;
 
 	return lowerdentry ? d_inode(lowerdentry) : NULL;
 }
