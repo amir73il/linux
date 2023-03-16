@@ -1072,7 +1072,6 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		goto out_put;
 
 	ovl_stack_cpy(ovl_lowerstack(oe), stack, ctr);
-	dentry->d_fsdata = oe;
 
 	if (upperopaque)
 		ovl_dentry_set_opaque(dentry);
@@ -1106,6 +1105,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		struct ovl_inode_params oip = {
 			.upperdentry = upperdentry,
 			.lowerpath = stack,
+			.oe = oe,
 			.index = index,
 			.numlower = ctr,
 			.redirect = upperredirect,
@@ -1121,7 +1121,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			ovl_set_flag(OVL_UPPERDATA, inode);
 	}
 
-	ovl_dentry_update_reval(dentry, upperdentry,
+	ovl_dentry_update_reval(dentry, upperdentry, inode,
 			DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
 
 	revert_creds(old_cred);
@@ -1135,7 +1135,6 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	return d_splice_alias(inode, dentry);
 
 out_free_oe:
-	dentry->d_fsdata = NULL;
 	ovl_free_entry(oe);
 out_put:
 	dput(index);

@@ -380,7 +380,7 @@ struct ovl_entry *ovl_alloc_entry(unsigned int numlower);
 void ovl_free_entry(struct ovl_entry *oe);
 bool ovl_dentry_remote(struct dentry *dentry);
 void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
-			     unsigned int mask);
+			     struct inode *inode, unsigned int mask);
 bool ovl_dentry_weird(struct dentry *dentry);
 enum ovl_path_type ovl_path_type(struct dentry *dentry);
 void ovl_path_upper(struct dentry *dentry, struct path *path);
@@ -650,6 +650,7 @@ struct ovl_inode_params {
 	struct inode *newinode;
 	struct dentry *upperdentry;
 	struct ovl_path *lowerpath;
+	struct ovl_entry *oe;
 	bool index;
 	unsigned int numlower;
 	char *redirect;

@@ -135,9 +135,9 @@ bool ovl_dentry_remote(struct dentry *dentry)
 }
 
 void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
-			     unsigned int mask)
+			     struct inode *inode, unsigned int mask)
 {
-	struct ovl_entry *oe = OVL_E(dentry);
+	struct ovl_entry *oe = OVL_I_E(inode);
 	unsigned int i, flags = 0;
 
 	if (upperdentry)
