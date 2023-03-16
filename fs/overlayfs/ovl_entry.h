@@ -134,7 +134,7 @@ static inline unsigned long *OVL_E_FLAGS(struct dentry *dentry)
 struct ovl_inode {
 	union {
 		struct ovl_dir_cache *cache;	/* directory */
-		struct inode *lowerdata;	/* regular file */
+		const char *lowerdata_redirect;	/* regular file */
 	};
 	const char *redirect;
 	u64 version;

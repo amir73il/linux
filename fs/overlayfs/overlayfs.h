@@ -656,7 +656,7 @@ struct ovl_inode_params {
 	struct ovl_entry *oe;
 	bool index;
 	char *redirect;
-	struct dentry *lowerdata;
+	char *lowerdata_redirect;
 };
 void ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 		    unsigned long ino, int fsid);
