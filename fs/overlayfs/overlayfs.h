@@ -377,8 +377,12 @@ struct ovl_path *ovl_stack_alloc(unsigned int n);
 void ovl_stack_cpy(struct ovl_path *dst, struct ovl_path *src, unsigned int n);
 void ovl_stack_put(struct ovl_path *stack, unsigned int n);
 void ovl_stack_free(struct ovl_path *stack, unsigned int n);
-struct ovl_entry *ovl_alloc_entry(unsigned int numlower);
-void ovl_free_entry(struct ovl_entry *oe);
+struct ovl_path *ovl_alloc_stack(unsigned int n);
+void ovl_stack_cpy(struct ovl_path *dst, struct ovl_path *src, unsigned int n);
+void ovl_stack_put(struct ovl_path *stack, unsigned int n);
+int ovl_init_entry(struct ovl_entry *oe, struct ovl_path *stack,
+		   unsigned int numlower);
+void ovl_destroy_entry(struct ovl_entry *oe);
 bool ovl_dentry_remote(struct dentry *dentry);
 void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *realdentry);
 void ovl_dentry_init_reval(struct dentry *dentry, struct dentry *upperdentry,
@@ -653,10 +657,8 @@ bool ovl_is_private_xattr(struct super_block *sb, const char *name);
 struct ovl_inode_params {
 	struct inode *newinode;
 	struct dentry *upperdentry;
-	struct ovl_path *lowerpath;
 	struct ovl_entry *oe;
 	bool index;
-	unsigned int numlower;
 	char *redirect;
 	struct dentry *lowerdata;
 };
