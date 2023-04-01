@@ -831,7 +831,7 @@ static int ovl_fix_origin(struct ovl_fs *ofs, struct dentry *dentry,
 struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			  unsigned int flags)
 {
-	struct ovl_entry *oe;
+	struct ovl_entry oe;
 	const struct cred *old_cred;
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 	struct ovl_entry *poe = OVL_E(dentry->d_parent);
@@ -1067,12 +1067,9 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		}
 	}
 
-	oe = ovl_alloc_entry(ctr);
-	err = -ENOMEM;
-	if (!oe)
+	err = ovl_init_entry(&oe, stack, ctr);
+	if (err)
 		goto out_put;
-
-	ovl_stack_cpy(ovl_lowerstack(oe), stack, ctr);
 
 	if (upperopaque)
 		ovl_dentry_set_opaque(dentry);
@@ -1105,10 +1102,8 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	if (upperdentry || ctr) {
 		struct ovl_inode_params oip = {
 			.upperdentry = upperdentry,
-			.lowerpath = stack,
-			.oe = oe,
+			.oe = &oe,
 			.index = index,
-			.numlower = ctr,
 			.redirect = upperredirect,
 			.lowerdata = (ctr > 1 && !d.is_dir) ?
 				      stack[ctr - 1].dentry : NULL,
@@ -1135,7 +1130,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	return d_splice_alias(inode, dentry);
 
 out_free_oe:
-	ovl_free_entry(oe);
+	ovl_destroy_entry(&oe);
 out_put:
 	dput(index);
 	ovl_stack_free(stack, ctr);
