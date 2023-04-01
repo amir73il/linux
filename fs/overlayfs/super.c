@@ -1586,10 +1586,9 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 	int err;
 	unsigned int i;
 
-	err = -ENOMEM;
 	ofs->fs = kcalloc(numlower + 1, sizeof(struct ovl_sb), GFP_KERNEL);
 	if (ofs->fs == NULL)
-		goto out;
+		return -ENOMEM;
 
 	/* idx/fsid 0 are reserved for upper fs even with lower only overlay */
 	ofs->numfs++;
@@ -1603,7 +1602,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 	err = get_anon_bdev(&ofs->fs[0].pseudo_dev);
 	if (err) {
 		pr_err("failed to get anonymous bdev for upper fs\n");
-		goto out;
+		return err;
 	}
 
 	if (ovl_upper_mnt(ofs)) {
@@ -1616,9 +1615,9 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		struct inode *trap;
 		int fsid;
 
-		err = fsid = ovl_get_fsid(ofs, &stack[i]);
-		if (err < 0)
-			goto out;
+		fsid = ovl_get_fsid(ofs, &stack[i]);
+		if (fsid < 0)
+			return fsid;
 
 		/*
 		 * Check if lower root conflicts with this overlay layers before
@@ -1629,13 +1628,13 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		 */
 		err = ovl_setup_trap(sb, stack[i].dentry, &trap, "lowerdir");
 		if (err)
-			goto out;
+			return err;
 
 		if (ovl_is_inuse(stack[i].dentry)) {
 			err = ovl_report_in_use(ofs, "lowerdir");
 			if (err) {
 				iput(trap);
-				goto out;
+				return err;
 			}
 		}
 
@@ -1644,7 +1643,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		if (IS_ERR(mnt)) {
 			pr_err("failed to clone lowerpath\n");
 			iput(trap);
-			goto out;
+			return err;
 		}
 
 		/*
@@ -1694,9 +1693,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 			ofs->xino_mode);
 	}
 
-	err = 0;
-out:
-	return err;
+	return 0;
 }
 
 static int ovl_get_lowerstack(struct super_block *sb, struct ovl_entry *oe,
