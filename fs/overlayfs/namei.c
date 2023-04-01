@@ -356,7 +356,7 @@ int ovl_check_origin_fh(struct ovl_fs *ofs, struct ovl_fh *fh, bool connected,
 	struct dentry *origin = NULL;
 	int i;
 
-	for (i = 1; i < ofs->numlayer; i++) {
+	for (i = 1; i <= ovl_numlowerlayer(ofs); i++) {
 		/*
 		 * If lower fs uuid is not unique among lower fs we cannot match
 		 * fh->uuid to layer.
@@ -907,7 +907,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 
 	if (!d.stop && ovl_numlower(poe)) {
 		err = -ENOMEM;
-		stack = ovl_stack_alloc(ofs->numlayer - 1);
+		stack = ovl_stack_alloc(ovl_numlowerlayer(ofs));
 		if (!stack)
 			goto out_put_upper;
 	}
