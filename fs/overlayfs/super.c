@@ -103,6 +103,9 @@ static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak)
 {
 	int ret = 1;
 
+	if (!d)
+		return 1;
+
 	if (weak) {
 		if (d->d_flags & DCACHE_OP_WEAK_REVALIDATE)
 			ret =  d->d_op->d_weak_revalidate(d, flags);

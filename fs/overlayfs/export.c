@@ -343,7 +343,7 @@ static struct dentry *ovl_dentry_real_at(struct dentry *dentry, int idx)
 	if (!idx)
 		return ovl_dentry_upper(dentry);
 
-	for (i = 0; i < ovl_numlower(oe); i++) {
+	for (i = 0; i < ovl_numlower(oe) && lowerstack[i].layer; i++) {
 		if (lowerstack[i].layer->idx == idx)
 			return lowerstack[i].dentry;
 	}
