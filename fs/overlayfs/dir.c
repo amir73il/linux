@@ -269,7 +269,7 @@ static int ovl_instantiate(struct dentry *dentry, struct inode *inode,
 
 	ovl_dir_modified(dentry->d_parent, false);
 	ovl_dentry_set_upper_alias(dentry);
-	ovl_dentry_init_reval(dentry, newdentry, OVL_E(dentry));
+	ovl_dentry_init_reval(dentry, newdentry, NULL);
 
 	if (!hardlink) {
 		/*
@@ -293,6 +293,7 @@ static int ovl_instantiate(struct dentry *dentry, struct inode *inode,
 		WARN_ON(ovl_inode_real(inode) != d_inode(newdentry));
 		dput(newdentry);
 		inc_nlink(inode);
+		ovl_dentry_update_reval(dentry, NULL, OVL_I_E(inode));
 	}
 
 	d_instantiate(dentry, inode);
