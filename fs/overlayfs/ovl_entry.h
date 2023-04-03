@@ -125,6 +125,20 @@ static inline struct ovl_path *ovl_lowerstack(struct ovl_entry *oe)
 	return oe && oe->__numlower > 1 ? oe->__lowerstack : &oe->__lowerpath;
 }
 
+static inline struct ovl_path *ovl_lowerdata(struct ovl_entry *oe)
+{
+	struct ovl_path *lowerstack = ovl_lowerstack(oe);
+
+	return lowerstack ? &lowerstack[oe->__numlower - 1] : NULL;
+}
+
+static inline struct dentry *ovl_lowerdata_dentry(struct ovl_entry *oe)
+{
+	struct ovl_path *lowerdata = ovl_lowerdata(oe);
+
+	return lowerdata ? lowerdata->dentry : NULL;
+}
+
 /* private information held for every overlayfs dentry */
 static inline unsigned long *OVL_E_FLAGS(struct dentry *dentry)
 {
@@ -134,7 +148,7 @@ static inline unsigned long *OVL_E_FLAGS(struct dentry *dentry)
 struct ovl_inode {
 	union {
 		struct ovl_dir_cache *cache;	/* directory */
-		struct inode *lowerdata;	/* regular file */
+		const char *lowerdata_redirect;	/* regular file */
 	};
 	const char *redirect;
 	u64 version;

@@ -1006,8 +1006,7 @@ void ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 	oi->__upperdentry = oip->upperdentry;
 	oi->oe = *oip->oe;
 	oi->redirect = oip->redirect;
-	if (oip->lowerdata)
-		oi->lowerdata = igrab(d_inode(oip->lowerdata));
+	oi->lowerdata_redirect = oip->lowerdata_redirect;
 
 	realinode = ovl_inode_real(inode);
 	ovl_copyattr(inode);
@@ -1368,6 +1367,7 @@ struct inode *ovl_get_inode(struct super_block *sb,
 			dput(upperdentry);
 			ovl_destroy_entry(oip->oe);
 			kfree(oip->redirect);
+			kfree(oip->lowerdata_redirect);
 			goto out;
 		}
 
