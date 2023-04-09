@@ -177,10 +177,26 @@ static inline void fsnotify_inode_delete(struct inode *inode)
 }
 
 /*
+ * fsnotify_unmount - mount was unmounted.
+ */
+static inline int fsnotify_unmount(struct vfsmount *mnt)
+{
+	struct path path = { .mnt = mnt, .dentry = mnt->mnt_root };
+
+	if (atomic_long_read(&mnt->mnt_sb->s_fsnotify_connectors) == 0)
+		return 0;
+
+	return fsnotify(FS_UNMOUNT, &path, FSNOTIFY_EVENT_PATH, NULL, NULL,
+			d_inode(path.dentry), 0);
+}
+
+/*
  * fsnotify_vfsmount_delete - a vfsmount is being destroyed, clean up is needed
  */
 static inline void fsnotify_vfsmount_delete(struct vfsmount *mnt)
 {
+	/* Send FS_UNMOUNT to groups and then clear mount marks */
+	fsnotify_unmount(mnt);
 	__fsnotify_vfsmount_delete(mnt);
 }
 

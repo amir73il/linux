@@ -696,7 +696,7 @@ static struct fanotify_event *fanotify_alloc_error_event(
 	inode = report->inode;
 	fh_len = fanotify_encode_fh_len(inode);
 
-	/* Bad fh_len. Fallback to using an invalid fh. Should never happen. */
+	/* Record empty fh for errors not associated with specific inode */
 	if (!fh_len && inode)
 		inode = NULL;
 
@@ -728,7 +728,10 @@ static struct fanotify_event *fanotify_alloc_event(
 	bool ondir = mask & FAN_ONDIR;
 	struct pid *pid;
 
-	if ((fid_mode & FAN_REPORT_DIR_FID) && dirid) {
+	if (mask & FAN_UNMOUNT && !WARN_ON_ONCE(!path || !fid_mode)) {
+		/* Record fid event with fsid and empty fh */
+		id = NULL;
+	} else if ((fid_mode & FAN_REPORT_DIR_FID) && dirid) {
 		/*
 		 * For certain events and group flags, report the child fid
 		 * in addition to reporting the parent fid and maybe child name.
@@ -920,10 +923,11 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	BUILD_BUG_ON(FAN_ONDIR != FS_ISDIR);
 	BUILD_BUG_ON(FAN_OPEN_EXEC != FS_OPEN_EXEC);
 	BUILD_BUG_ON(FAN_OPEN_EXEC_PERM != FS_OPEN_EXEC_PERM);
+	BUILD_BUG_ON(FAN_UNMOUNT != FS_UNMOUNT);
 	BUILD_BUG_ON(FAN_FS_ERROR != FS_ERROR);
 	BUILD_BUG_ON(FAN_RENAME != FS_RENAME);
 
-	BUILD_BUG_ON(HWEIGHT32(ALL_FANOTIFY_EVENT_BITS) != 21);
+	BUILD_BUG_ON(HWEIGHT32(ALL_FANOTIFY_EVENT_BITS) != 22);
 
 	mask = fanotify_group_event_mask(group, iter_info, &match_mask,
 					 mask, data, data_type, dir);

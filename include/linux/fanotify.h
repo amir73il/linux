@@ -79,7 +79,8 @@
  * FSNOTIFY_EVENT_INODE.
  */
 #define FANOTIFY_PATH_EVENTS	(FAN_ACCESS | FAN_MODIFY | \
-				 FAN_CLOSE | FAN_OPEN | FAN_OPEN_EXEC)
+				 FAN_CLOSE | FAN_OPEN | FAN_OPEN_EXEC | \
+				 FAN_UNMOUNT)
 
 /*
  * Directory entry modification events - reported only to directory

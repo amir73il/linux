@@ -1759,6 +1759,16 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		goto fput_and_out;
 
 	/*
+	 * inotify sends unsoliciled IN_UNMOUNT per marked inode on sb shutdown.
+	 * FAN_UNMOUNT event is about unmount of a mount, not about sb shutdown,
+	 * so allow setting it only in mount mark mask.
+	 * FAN_UNMOUNT requires FAN_REPORT_FID to report fsid with empty fh.
+	 */
+	if (mask & FAN_UNMOUNT &&
+	    (!(fid_mode & FAN_REPORT_FID) || mark_type != FAN_MARK_MOUNT))
+		goto fput_and_out;
+
+	/*
 	 * FAN_RENAME uses special info type records to report the old and
 	 * new parent+name.  Reporting only old and new parent id is less
 	 * useful and was not implemented.

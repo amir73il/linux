@@ -19,6 +19,7 @@
 #define FAN_MOVE_SELF		0x00000800	/* Self was moved */
 #define FAN_OPEN_EXEC		0x00001000	/* File was opened for exec */
 
+#define FAN_UNMOUNT		0x00002000	/* Filesystem unmounted */
 #define FAN_Q_OVERFLOW		0x00004000	/* Event queued overflowed */
 #define FAN_FS_ERROR		0x00008000	/* Filesystem error */
 
