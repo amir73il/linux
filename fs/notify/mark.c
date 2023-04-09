@@ -619,8 +619,8 @@ static int fsnotify_add_mark_list(struct fsnotify_mark *mark,
 	if (WARN_ON(!fsnotify_valid_obj_type(obj_type)))
 		return -EINVAL;
 
-	/* Backend is expected to check for zero fsid (e.g. tmpfs) */
-	if (fsid && WARN_ON_ONCE(!fsid->val[0] && !fsid->val[1]))
+	/* Backend is expected to check for null fsid (e.g. fuse) */
+	if (fsid && WARN_ON_ONCE(fsnotify_is_null_fsid(fsid)))
 		return -ENODEV;
 
 restart:

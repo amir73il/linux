@@ -60,6 +60,7 @@
 #define FAN_REPORT_DIR_FID	0x00000400	/* Report unique directory id */
 #define FAN_REPORT_NAME		0x00000800	/* Report events with name */
 #define FAN_REPORT_TARGET_FID	0x00001000	/* Report dirent target id  */
+#define FAN_REPORT_ANY_FID	0x00002000	/* Fallback to dev/ino id  */
 
 /* Convenience macro - FAN_REPORT_NAME requires FAN_REPORT_DIR_FID */
 #define FAN_REPORT_DFID_NAME	(FAN_REPORT_DIR_FID | FAN_REPORT_NAME)
@@ -165,6 +166,10 @@ struct fanotify_event_info_header {
  */
 struct fanotify_event_info_fid {
 	struct fanotify_event_info_header hdr;
+	/*
+	 * f_fsid from statfs(2) if non-zero and
+	 * stx_dev_* from statx(2) otherwise.
+	 */
 	__kernel_fsid_t fsid;
 	/*
 	 * Following is an opaque struct file_handle that can be passed as

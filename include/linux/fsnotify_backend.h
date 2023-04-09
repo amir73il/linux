@@ -772,6 +772,11 @@ extern int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 				    unsigned int obj_type, int add_flags,
 				    __kernel_fsid_t *fsid);
 
+static inline bool fsnotify_is_null_fsid(__kernel_fsid_t *fsid)
+{
+	return !fsid->val[0] && !fsid->val[1];
+}
+
 /* attach the mark to the inode */
 static inline int fsnotify_add_inode_mark(struct fsnotify_mark *mark,
 					  struct inode *inode,

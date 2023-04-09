@@ -842,11 +842,13 @@ out:
  * All connectors are supposed to have the same fsid, but we do not verify that
  * here.
  */
-static __kernel_fsid_t fanotify_get_fsid(struct fsnotify_iter_info *iter_info)
+static int fanotify_get_fsid(struct fsnotify_group *group,
+			     struct fsnotify_iter_info *iter_info,
+			     const void *data, int data_type,
+			     __kernel_fsid_t *fsid)
 {
 	struct fsnotify_mark *mark;
 	int type;
-	__kernel_fsid_t fsid = {};
 
 	fsnotify_foreach_iter_mark_type(iter_info, mark, type) {
 		struct fsnotify_mark_connector *conn;
@@ -859,13 +861,25 @@ static __kernel_fsid_t fanotify_get_fsid(struct fsnotify_iter_info *iter_info)
 			continue;
 		/* Pairs with smp_wmb() in fsnotify_add_mark_list() */
 		smp_rmb();
-		fsid = conn->fsid;
-		if (WARN_ON_ONCE(!fsid.val[0] && !fsid.val[1]))
+		*fsid = conn->fsid;
+		if (WARN_ON_ONCE(fsnotify_is_null_fsid(fsid)))
 			continue;
-		return fsid;
+		return 0;
 	}
 
-	return fsid;
+	/* If filesystem does not advertise fsid, fallback to s_dev */
+	if (FAN_GROUP_FLAG(group, FAN_REPORT_ANY_FID)) {
+		struct super_block *sb = fsnotify_data_sb(data, data_type);
+
+		if (WARN_ON_ONCE(!sb))
+			return -ENODEV;
+
+		fsid->val[0] = MAJOR(sb->s_dev);
+		fsid->val[1] = MINOR(sb->s_dev);
+		return 0;
+	}
+
+	return -ENOENT;
 }
 
 /*
@@ -943,9 +957,10 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	}
 
 	if (FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS)) {
-		fsid = fanotify_get_fsid(iter_info);
+		ret = fanotify_get_fsid(group, iter_info, data, data_type,
+					&fsid);
 		/* Racing with mark destruction or creation? */
-		if (!fsid.val[0] && !fsid.val[1])
+		if (ret)
 			return 0;
 	}
 

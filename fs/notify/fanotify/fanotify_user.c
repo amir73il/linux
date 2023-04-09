@@ -1444,6 +1444,10 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if (fid_mode && class != FAN_CLASS_NOTIF)
 		return -EINVAL;
 
+	/* FAN_REPORT_ANY_FID not enabled yet */
+	if (fid_mode & FAN_REPORT_ANY_FID)
+		return -EINVAL;
+
 	/*
 	 * Child name is reported with parent fid so requires dir fid.
 	 * We can report both child fid and dir fid with or without name.
@@ -1561,7 +1565,7 @@ static int fanotify_test_fsid(struct dentry *dentry, __kernel_fsid_t *fsid)
 	if (err)
 		return err;
 
-	if (!fsid->val[0] && !fsid->val[1])
+	if (fsnotify_is_null_fsid(fsid))
 		return -ENODEV;
 
 	/*
@@ -1790,15 +1794,21 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	}
 
 	if (fid_mode) {
+		/*
+		 * With FAN_REPORT_ANY_FID, if filesystem does not advertise
+		 * fsid, we fallback to encoding fsid from s_dev.
+		 */
 		ret = fanotify_test_fsid(path.dentry, &__fsid);
-		if (ret)
+		if (!ret)
+			fsid = &__fsid;
+		else if (ret == -ENODEV && (fid_mode & FAN_REPORT_ANY_FID))
+			fsid = NULL;
+		else
 			goto path_put_and_out;
 
 		ret = fanotify_test_fid(path.dentry);
 		if (ret)
 			goto path_put_and_out;
-
-		fsid = &__fsid;
 	}
 
 	/* inode held in place by reference to path; group by fget on fd */
@@ -1905,7 +1915,7 @@ static int __init fanotify_user_setup(void)
 				     FANOTIFY_DEFAULT_MAX_USER_MARKS);
 
 	BUILD_BUG_ON(FANOTIFY_INIT_FLAGS & FANOTIFY_INTERNAL_GROUP_FLAGS);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 12);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 13);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 11);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
