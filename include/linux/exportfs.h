@@ -99,6 +99,11 @@ enum fid_type {
 	FILEID_FAT_WITH_PARENT = 0x72,
 
 	/*
+	 * 64 bit inode number.
+	 */
+	FILEID_INO64 = 0x80,
+
+	/*
 	 * 64 bit inode number, 32 bit generation number.
 	 */
 	FILEID_INO64_GEN = 0x81,

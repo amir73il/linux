@@ -25,6 +25,8 @@ enum {
  */
 #define FANOTIFY_INLINE_FH_LEN	(3 << 2)
 #define FANOTIFY_FH_HDR_LEN	offsetof(struct fanotify_fh, buf)
+#define FANOTIFY_FHANDLE_LEN	sizeof(struct fanotify_fhandle)
+
 
 /* Fixed size struct for file handle */
 struct fanotify_fh {
@@ -501,4 +503,9 @@ static inline unsigned int fanotify_mark_user_flags(struct fsnotify_mark *mark)
 		mflags |= FAN_MARK_IGNORE;
 
 	return mflags;
+}
+
+static inline bool fanotify_can_decode_fh(struct super_block *sb)
+{
+	return sb->s_export_op && sb->s_export_op->fh_to_dentry;
 }

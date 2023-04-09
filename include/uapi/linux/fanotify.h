@@ -172,10 +172,15 @@ struct fanotify_event_info_fid {
 	 */
 	__kernel_fsid_t fsid;
 	/*
-	 * Following is an opaque struct file_handle that can be passed as
-	 * an argument to open_by_handle_at(2).
+	 * An opaque struct file_handle obtained from name_to_handle_at(2)
+	 * or file_handle of type FILEID_INO64 encoded by fanotify.
 	 */
 	unsigned char handle[];
+};
+
+/* File handle buffer format for file handle of type FILEID_INO64 */
+struct fanotify_fhandle {
+	__u64 fh_ino;
 };
 
 /*

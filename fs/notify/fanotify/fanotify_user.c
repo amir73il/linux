@@ -1584,7 +1584,7 @@ static int fanotify_test_fsid(struct dentry *dentry, __kernel_fsid_t *fsid)
 }
 
 /* Check if filesystem can encode a unique fid */
-static int fanotify_test_fid(struct dentry *dentry)
+static int fanotify_test_fid(struct dentry *dentry, int fid_mode)
 {
 	/*
 	 * We need to make sure that the file system supports at least
@@ -1592,9 +1592,12 @@ static int fanotify_test_fid(struct dentry *dentry)
 	 * compare fid returned with event to the file handle of watched
 	 * objects. However, name_to_handle_at() requires that the
 	 * filesystem also supports decoding file handles.
+	 *
+	 * With FAN_REPORT_ANY_FID, fallback to encoding FILEID_INO64
+	 * file handles that cannot be used with open_by_handle_at().
 	 */
-	if (!dentry->d_sb->s_export_op ||
-	    !dentry->d_sb->s_export_op->fh_to_dentry)
+	if (!fanotify_can_decode_fh(dentry->d_sb) &&
+	    !(fid_mode & FAN_REPORT_ANY_FID))
 		return -EOPNOTSUPP;
 
 	return 0;
@@ -1806,7 +1809,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		else
 			goto path_put_and_out;
 
-		ret = fanotify_test_fid(path.dentry);
+		ret = fanotify_test_fid(path.dentry, fid_mode);
 		if (ret)
 			goto path_put_and_out;
 	}

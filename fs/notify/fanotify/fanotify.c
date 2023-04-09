@@ -380,6 +380,10 @@ static int fanotify_encode_fh_len(struct inode *inode)
 	if (!inode)
 		return 0;
 
+	/* Fallback to encoding FILEID_INO64 */
+	if (!fanotify_can_decode_fh(inode->i_sb))
+		return FANOTIFY_FHANDLE_LEN;
+
 	exportfs_encode_inode_fh(inode, NULL, &dwords, NULL);
 	fh_len = dwords << 2;
 
@@ -428,6 +432,19 @@ static int fanotify_encode_fh(struct fanotify_fh *fh, struct inode *inode,
 	err = -ENOENT;
 	if (fh_len < 4 || WARN_ON_ONCE(fh_len % 4) || fh_len > MAX_HANDLE_SZ)
 		goto out_err;
+
+	/* Fallback to encoding FILEID_INO64 */
+	if (!fanotify_can_decode_fh(inode->i_sb)) {
+		struct fanotify_fhandle *fhandle = buf;
+
+		if (WARN_ON_ONCE(fh_len != FANOTIFY_FHANDLE_LEN))
+			goto out_err;
+
+		fhandle->fh_ino = inode->i_ino;
+		fh->type = FILEID_INO64;
+		fh->len = fh_len;
+		goto out;
+	}
 
 	/* No external buffer in a variable size allocated fh */
 	if (gfp && fh_len > FANOTIFY_INLINE_FH_LEN) {
