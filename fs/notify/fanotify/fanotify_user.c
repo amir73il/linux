@@ -1444,8 +1444,8 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if (fid_mode && class != FAN_CLASS_NOTIF)
 		return -EINVAL;
 
-	/* FAN_REPORT_ANY_FID not enabled yet */
-	if (fid_mode & FAN_REPORT_ANY_FID)
+	/* FAN_REPORT_ANY_FID cannot be the only FID flag */
+	if (fid_mode == FAN_REPORT_ANY_FID)
 		return -EINVAL;
 
 	/*
