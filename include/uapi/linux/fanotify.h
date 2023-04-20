@@ -143,6 +143,7 @@ struct fanotify_event_metadata {
 #define FAN_EVENT_INFO_TYPE_DFID	3
 #define FAN_EVENT_INFO_TYPE_PIDFD	4
 #define FAN_EVENT_INFO_TYPE_ERROR	5
+#define FAN_EVENT_INFO_TYPE_MNTID	6
 
 /* Special info types for FAN_RENAME */
 #define FAN_EVENT_INFO_TYPE_OLD_DFID_NAME	10
@@ -172,6 +173,15 @@ struct fanotify_event_info_fid {
 	 * an argument to open_by_handle_at(2).
 	 */
 	unsigned char handle[];
+};
+
+/*
+ * This structure is used for info records of type FAN_EVENT_INFO_TYPE_MNTID.
+ */
+struct fanotify_event_info_mntid {
+	struct fanotify_event_info_header hdr;
+	/* matches mount_id from name_to_handle_at(2) */
+	__s32 mnt_id;
 };
 
 /*

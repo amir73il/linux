@@ -17,6 +17,7 @@
 #include <linux/stringhash.h>
 
 #include "fanotify.h"
+#include "../../mount.h" /* for mnt_id */
 
 static bool fanotify_path_equal(const struct path *p1, const struct path *p2)
 {
@@ -133,6 +134,12 @@ static bool fanotify_error_event_equal(struct fanotify_error_event *fee1,
 	return true;
 }
 
+/*
+ * FAN_RENAME and FAN_UNMOUNT are reported with special info record types
+ * and multiple events with the same info are unlikely.
+ */
+#define FANOTIFY_NO_MERGE_EVENTS (FAN_RENAME | FAN_UNMOUNT)
+
 static bool fanotify_should_merge(struct fanotify_event *old,
 				  struct fanotify_event *new)
 {
@@ -153,11 +160,8 @@ static bool fanotify_should_merge(struct fanotify_event *old,
 	if ((old->mask & FS_ISDIR) != (new->mask & FS_ISDIR))
 		return false;
 
-	/*
-	 * FAN_RENAME event is reported with special info record type
-	 * and multiple events with the same info are unlikely.
-	 */
-	if ((old->mask & FAN_RENAME) || (new->mask & FAN_RENAME))
+	if ((old->mask & FANOTIFY_NO_MERGE_EVENTS) ||
+	    (new->mask & FANOTIFY_NO_MERGE_EVENTS))
 		return false;
 
 	switch (old->type) {
@@ -576,9 +580,11 @@ static struct fanotify_event *fanotify_alloc_perm_event(const struct path *path,
 
 static struct fanotify_event *fanotify_alloc_fid_event(struct inode *id,
 						       __kernel_fsid_t *fsid,
+						       struct mount *mnt,
 						       unsigned int *hash,
 						       gfp_t gfp)
 {
+	unsigned int fh_len = fanotify_encode_fh_len(id);
 	struct fanotify_fid_event *ffe;
 
 	ffe = kmem_cache_alloc(fanotify_fid_event_cachep, gfp);
@@ -588,8 +594,15 @@ static struct fanotify_event *fanotify_alloc_fid_event(struct inode *id,
 	ffe->fae.type = FANOTIFY_EVENT_TYPE_FID;
 	ffe->fsid = *fsid;
 	*hash ^= fanotify_hash_fsid(fsid);
-	fanotify_encode_fh(&ffe->object_fh, id, fanotify_encode_fh_len(id),
-			   hash, gfp);
+	fanotify_encode_fh(&ffe->object_fh, id, fh_len, hash, gfp);
+	/*
+	 * Record fid event with fsid, mntid and empty fh.
+	 * No need to hash mntid because we do not merge UNMOUNT events.
+	 */
+	if (mnt && !WARN_ON_ONCE(fh_len)) {
+		ffe->mnt_id = mnt->mnt_id;
+		ffe->object_fh.flags = FANOTIFY_FH_FLAG_MNT_ID;
+	}
 
 	return &ffe->fae;
 }
@@ -720,6 +733,7 @@ static struct fanotify_event *fanotify_alloc_event(
 					      fid_mode);
 	struct inode *dirid = fanotify_dfid_inode(mask, data, data_type, dir);
 	const struct path *path = fsnotify_data_path(data, data_type);
+	struct mount *mnt = NULL;
 	struct mem_cgroup *old_memcg;
 	struct dentry *moved = NULL;
 	struct inode *child = NULL;
@@ -729,7 +743,8 @@ static struct fanotify_event *fanotify_alloc_event(
 	struct pid *pid;
 
 	if (mask & FAN_UNMOUNT && !WARN_ON_ONCE(!path || !fid_mode)) {
-		/* Record fid event with fsid and empty fh */
+		/* Record fid event with fsid, mntid and empty fh */
+		mnt = real_mount(path->mnt);
 		id = NULL;
 	} else if ((fid_mode & FAN_REPORT_DIR_FID) && dirid) {
 		/*
@@ -817,7 +832,7 @@ static struct fanotify_event *fanotify_alloc_event(
 		event = fanotify_alloc_name_event(dirid, fsid, file_name, child,
 						  moved, &hash, gfp);
 	} else if (fid_mode) {
-		event = fanotify_alloc_fid_event(id, fsid, &hash, gfp);
+		event = fanotify_alloc_fid_event(id, fsid, mnt, &hash, gfp);
 	} else {
 		event = fanotify_alloc_path_event(path, &hash, gfp);
 	}

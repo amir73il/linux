@@ -120,6 +120,8 @@ struct kmem_cache *fanotify_perm_event_cachep __read_mostly;
 #define FANOTIFY_EVENT_ALIGN 4
 #define FANOTIFY_FID_INFO_HDR_LEN \
 	(sizeof(struct fanotify_event_info_fid) + sizeof(struct file_handle))
+#define FANOTIFY_MNTID_INFO_LEN \
+	sizeof(struct fanotify_event_info_mntid)
 #define FANOTIFY_PIDFD_INFO_LEN \
 	sizeof(struct fanotify_event_info_pidfd)
 #define FANOTIFY_ERROR_INFO_LEN \
@@ -177,6 +179,9 @@ static size_t fanotify_event_len(unsigned int info_mode,
 		 */
 		dot_len = 1;
 	}
+
+	if (fanotify_event_mntid(event))
+		event_len += FANOTIFY_MNTID_INFO_LEN;
 
 	if (info_mode & FAN_REPORT_PIDFD)
 		event_len += FANOTIFY_PIDFD_INFO_LEN;
@@ -530,6 +535,26 @@ static int copy_pidfd_info_to_user(int pidfd,
 	return info_len;
 }
 
+static int copy_mntid_info_to_user(int mntid,
+				   char __user *buf,
+				   size_t count)
+{
+	struct fanotify_event_info_mntid info = { };
+	size_t info_len = FANOTIFY_MNTID_INFO_LEN;
+
+	if (WARN_ON_ONCE(info_len > count))
+		return -EFAULT;
+
+	info.hdr.info_type = FAN_EVENT_INFO_TYPE_MNTID;
+	info.hdr.len = info_len;
+	info.mnt_id = mntid;
+
+	if (copy_to_user(buf, &info, info_len))
+		return -EFAULT;
+
+	return info_len;
+}
+
 static int copy_info_records_to_user(struct fanotify_event *event,
 				     struct fanotify_info *info,
 				     unsigned int info_mode, int pidfd,
@@ -538,6 +563,7 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 	int ret, total_bytes = 0, info_type = 0;
 	unsigned int fid_mode = info_mode & FANOTIFY_FID_BITS;
 	unsigned int pidfd_mode = info_mode & FAN_REPORT_PIDFD;
+	int mntid = fanotify_event_mntid(event);
 
 	/*
 	 * Event info records order is as follows:
@@ -624,6 +650,16 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 					    fanotify_event_object_fh(event),
 					    info_type, dot, dot_len,
 					    buf, count);
+		if (ret < 0)
+			return ret;
+
+		buf += ret;
+		count -= ret;
+		total_bytes += ret;
+	}
+
+	if (mntid) {
+		ret = copy_mntid_info_to_user(mntid, buf, count);
 		if (ret < 0)
 			return ret;
 
@@ -1762,7 +1798,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 * inotify sends unsoliciled IN_UNMOUNT per marked inode on sb shutdown.
 	 * FAN_UNMOUNT event is about unmount of a mount, not about sb shutdown,
 	 * so allow setting it only in mount mark mask.
-	 * FAN_UNMOUNT requires FAN_REPORT_FID to report fsid with empty fh.
+	 * FAN_UNMOUNT requires FAN_REPORT_FID to report fsid and mntid.
 	 */
 	if (mask & FAN_UNMOUNT &&
 	    (!(fid_mode & FAN_REPORT_FID) || mark_type != FAN_MARK_MOUNT))

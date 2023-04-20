@@ -31,6 +31,7 @@ struct fanotify_fh {
 	u8 type;
 	u8 len;
 #define FANOTIFY_FH_FLAG_EXT_BUF 1
+#define FANOTIFY_FH_FLAG_MNT_ID  2
 	u8 flags;
 	u8 pad;
 	unsigned char buf[];
@@ -277,7 +278,10 @@ static inline void fanotify_init_event(struct fanotify_event *event,
 struct {								\
 	struct fanotify_fh (name);					\
 	/* Space for object_fh.buf[] - access with fanotify_fh_buf() */	\
-	unsigned char _inline_fh_buf[(size)];				\
+	union {								\
+		unsigned char _inline_fh_buf[(size)];			\
+		int mnt_id;	/* For FAN_UNMOUNT */			\
+	};								\
 }
 
 struct fanotify_fid_event {
@@ -331,6 +335,20 @@ static inline __kernel_fsid_t *fanotify_event_fsid(struct fanotify_event *event)
 		return &FANOTIFY_EE(event)->fsid;
 	else
 		return NULL;
+}
+
+static inline int fanotify_event_mntid(struct fanotify_event *event)
+{
+	struct fanotify_fh *fh = NULL;
+
+	if (event->mask & FAN_UNMOUNT &&
+	    event->type == FANOTIFY_EVENT_TYPE_FID)
+		fh = &FANOTIFY_FE(event)->object_fh;
+
+	if (fh && !fh->len && fh->flags == FANOTIFY_FH_FLAG_MNT_ID)
+		return FANOTIFY_FE(event)->mnt_id;
+
+	return 0;
 }
 
 static inline struct fanotify_fh *fanotify_event_object_fh(
