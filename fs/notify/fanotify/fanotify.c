@@ -154,10 +154,10 @@ static bool fanotify_should_merge(struct fanotify_event *old,
 		return false;
 
 	/*
-	 * FAN_RENAME event is reported with special info record types,
-	 * so we cannot merge it with other events.
+	 * FAN_RENAME event is reported with special info record type
+	 * and multiple events with the same info are unlikely.
 	 */
-	if ((old->mask & FAN_RENAME) != (new->mask & FAN_RENAME))
+	if ((old->mask & FAN_RENAME) || (new->mask & FAN_RENAME))
 		return false;
 
 	switch (old->type) {
