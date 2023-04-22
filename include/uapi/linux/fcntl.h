@@ -112,4 +112,9 @@
 
 #define AT_RECURSIVE		0x8000	/* Apply to the entire subtree */
 
+/* Flags for name_to_handle_at(2) */
+#define AT_HANDLE_FID		0x10000	/* file handle is needed to compare
+					   object indentity and may not be
+					   usable to open_by_handle_at(2) */
+
 #endif /* _UAPI_LINUX_FCNTL_H */
