@@ -317,6 +317,7 @@ static int ovl_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 	struct dentry *root_dentry = dentry->d_sb->s_root;
+	uuid_t *uuid = &dentry->d_sb->s_uuid;
 	struct path path;
 	int err;
 
@@ -326,6 +327,8 @@ static int ovl_statfs(struct dentry *dentry, struct kstatfs *buf)
 	if (!err) {
 		buf->f_namelen = ofs->namelen;
 		buf->f_type = OVERLAYFS_SUPER_MAGIC;
+		if (!uuid_is_null(uuid))
+			buf->f_fsid = uuid_to_fsid(uuid->b);
 	}
 
 	return err;
@@ -353,6 +356,25 @@ static inline int ovl_xino_def(void)
 	return ovl_xino_auto_def ? OVL_XINO_AUTO : OVL_XINO_OFF;
 }
 
+static const char * const ovl_uuid_str[] = {
+	"off",
+	"nogen",
+	"on",
+};
+
+/* XXX: do we need a config for this? */
+static const bool ovl_uuid_gen_def = true;
+
+static inline int ovl_uuid_def(void)
+{
+	return ovl_uuid_gen_def ? OVL_UUID_ON : OVL_UUID_NOGEN;
+}
+
+static inline int ovl_want_uuid_gen(struct ovl_fs *ofs)
+{
+	return ofs->config.uuid != OVL_UUID_NOGEN;
+}
+
 /**
  * ovl_show_options
  * @m: the seq_file handle
@@ -377,8 +399,8 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 		seq_printf(m, ",redirect_dir=%s", ofs->config.redirect_mode);
 	if (ofs->config.index != ovl_index_def)
 		seq_printf(m, ",index=%s", ofs->config.index ? "on" : "off");
-	if (!ofs->config.uuid)
-		seq_puts(m, ",uuid=off");
+	if (ofs->config.uuid != ovl_uuid_def())
+		seq_printf(m, ",uuid=%s", ovl_uuid_str[ofs->config.uuid]);
 	if (ofs->config.nfs_export != ovl_nfs_export_def)
 		seq_printf(m, ",nfs_export=%s", ofs->config.nfs_export ?
 						"on" : "off");
@@ -437,6 +459,7 @@ enum {
 	OPT_INDEX_OFF,
 	OPT_UUID_ON,
 	OPT_UUID_OFF,
+	OPT_UUID_NOGEN,
 	OPT_NFS_EXPORT_ON,
 	OPT_USERXATTR,
 	OPT_NFS_EXPORT_OFF,
@@ -460,6 +483,7 @@ static const match_table_t ovl_tokens = {
 	{OPT_USERXATTR,			"userxattr"},
 	{OPT_UUID_ON,			"uuid=on"},
 	{OPT_UUID_OFF,			"uuid=off"},
+	{OPT_UUID_NOGEN,		"uuid=nogen"},
 	{OPT_NFS_EXPORT_ON,		"nfs_export=on"},
 	{OPT_NFS_EXPORT_OFF,		"nfs_export=off"},
 	{OPT_XINO_ON,			"xino=on"},
@@ -581,11 +605,15 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 			break;
 
 		case OPT_UUID_ON:
-			config->uuid = true;
+			config->uuid = OVL_UUID_ON;
 			break;
 
 		case OPT_UUID_OFF:
-			config->uuid = false;
+			config->uuid = OVL_UUID_OFF;
+			break;
+
+		case OPT_UUID_NOGEN:
+			config->uuid = OVL_UUID_NOGEN;
 			break;
 
 		case OPT_NFS_EXPORT_ON:
@@ -1924,7 +1952,7 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	ofs->share_whiteout = true;
 
 	ofs->config.index = ovl_index_def;
-	ofs->config.uuid = true;
+	ofs->config.uuid = ovl_uuid_def();
 	ofs->config.nfs_export = ovl_nfs_export_def;
 	ofs->config.xino = ovl_xino_def();
 	ofs->config.metacopy = ovl_metacopy_def;
@@ -2019,9 +2047,13 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 		sb->s_flags |= SB_RDONLY;
 
 	if (!ofs->config.uuid && ofs->numfs > 1) {
-		pr_warn("The uuid=off requires a single fs for lower and upper, falling back to uuid=on.\n");
-		ofs->config.uuid = true;
+		ofs->config.uuid = ovl_uuid_def();
+		pr_warn("The uuid=off requires a single fs for lower and upper, falling back to uuid=%s.\n",
+			ovl_uuid_str[ofs->config.uuid]);
 	}
+
+	if (ovl_want_uuid_gen(ofs))
+		uuid_gen(&sb->s_uuid);
 
 	if (!ovl_force_readonly(ofs) && ofs->config.index) {
 		err = ovl_get_indexdir(sb, ofs, oe, &upperpath);
