@@ -1535,6 +1535,9 @@ static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
 		if (err)
 			pr_err("failed to verify index dir 'upper' xattr\n");
 
+		/* Best effort get or set persistent uuid */
+		ovl_init_uuid_xattr(sb, ofs, ofs->indexdir, true);
+
 		/* Cleanup bad/stale/orphan index entries */
 		if (!err)
 			err = ovl_indexdir_cleanup(ofs);
@@ -2052,6 +2055,10 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 			ovl_uuid_str[ofs->config.uuid]);
 	}
 
+	/*
+	 * This uuid may be overridden by a persistent uuid stored in xattr on
+	 * index dir and it may be persisted in xattr on first index=on mount.
+	 */
 	if (ovl_want_uuid_gen(ofs))
 		uuid_gen(&sb->s_uuid);
 

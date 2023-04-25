@@ -589,6 +589,45 @@ bool ovl_path_check_origin_xattr(struct ovl_fs *ofs, const struct path *path)
 	return false;
 }
 
+/*
+ * Load persistent uuid from xattr into s_uuid if found, possibly overriding
+ * the random generated value in s_uuid.
+ * Otherwise, if @set is true and s_uuid contains a valid value, store this
+ * value in xattr.
+ */
+bool ovl_init_uuid_xattr(struct super_block *sb, struct ovl_fs *ofs,
+			 struct dentry *upperdentry, bool set)
+{
+	struct path path = {
+		.dentry = upperdentry,
+		.mnt = ovl_upper_mnt(ofs),
+	};
+	uuid_t uuid;
+	int res;
+
+	res = ovl_path_getxattr(ofs, &path, OVL_XATTR_UUID, uuid.b, UUID_SIZE);
+	if (res == UUID_SIZE) {
+		uuid_copy(&sb->s_uuid, &uuid);
+		return true;
+	}
+
+	if (res == -ENODATA) {
+		if (!set || uuid_is_null(&sb->s_uuid))
+			return false;
+
+		res = ovl_setxattr(ofs, upperdentry, OVL_XATTR_UUID,
+				   sb->s_uuid.b, UUID_SIZE);
+		if (res == 0)
+			return true;
+	} else {
+		set = false;
+	}
+
+	pr_warn("failed to %s uuid (%pd2, err=%i)\n",
+		set ? "set" : "get", upperdentry, res);
+	return false;
+}
+
 bool ovl_path_check_dir_xattr(struct ovl_fs *ofs, const struct path *path,
 			       enum ovl_xattr ox)
 {
@@ -611,6 +650,7 @@ bool ovl_path_check_dir_xattr(struct ovl_fs *ofs, const struct path *path,
 #define OVL_XATTR_IMPURE_POSTFIX	"impure"
 #define OVL_XATTR_NLINK_POSTFIX		"nlink"
 #define OVL_XATTR_UPPER_POSTFIX		"upper"
+#define OVL_XATTR_UUID_POSTFIX		"uuid"
 #define OVL_XATTR_METACOPY_POSTFIX	"metacopy"
 #define OVL_XATTR_PROTATTR_POSTFIX	"protattr"
 
@@ -625,6 +665,7 @@ const char *const ovl_xattr_table[][2] = {
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_IMPURE),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_NLINK),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_UPPER),
+	OVL_XATTR_TAB_ENTRY(OVL_XATTR_UUID),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_METACOPY),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_PROTATTR),
 };
