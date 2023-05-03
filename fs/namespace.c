@@ -431,6 +431,42 @@ int mnt_want_write_srcu(struct vfsmount *m, int *pidx)
 }
 
 /**
+ * mnt_want_write_path_attr - get write access to a path's mount
+ * @path: the path who's mount on which to take a write
+ * @attr: indicate when changing attribute (0 for data)
+ * @pidx: output value to pass to mnt_drop_write_srcu()
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ * A successful call must be paired with mnt_drop_write_srcu().
+ */
+int mnt_want_write_path_attr(const struct path *path, unsigned int attr,
+			     int *pidx)
+{
+	struct super_block *sb = path->mnt->mnt_sb;
+	int idx, ret;
+
+	/* vfs write barrier covers also the pre-modify event */
+	idx = __sb_start_write_srcu(sb);
+
+	ret = fsnotify_change_perm(path, attr);
+	if (ret)
+		goto out_write_srcu;
+
+	ret = mnt_want_write(path->mnt);
+	if (ret)
+		goto out_write_srcu;
+
+	*pidx = idx;
+	return 0;
+
+out_write_srcu:
+	__sb_end_write_srcu(sb, idx);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mnt_want_write_path_attr);
+
+/**
  * __mnt_want_write_file - get write access to a file's mount
  * @file: the file who's mount on which to take a write
  *
@@ -454,7 +490,7 @@ int __mnt_want_write_file(struct file *file)
 }
 
 /**
- * mnt_want_write_file - get write access to a file's mount
+ * __sb_mnt_want_write_file - get write access to a file's mount and sb
  * @file: the file who's mount on which to take a write
  *
  * This is like mnt_want_write, but if the file is already open for writing it
@@ -462,7 +498,7 @@ int __mnt_want_write_file(struct file *file)
  * and instead only does the freeze protection and the check for emergency r/o
  * remounts.  This must be paired with mnt_drop_write_file.
  */
-int mnt_want_write_file(struct file *file)
+int __sb_mnt_want_write_file(struct file *file)
 {
 	int ret;
 
@@ -472,7 +508,59 @@ int mnt_want_write_file(struct file *file)
 		sb_end_write(file_inode(file)->i_sb);
 	return ret;
 }
+
+/**
+ * mnt_want_write_file - get write access to a file's mount and sb
+ * @file: the file who's mount on which to take a write
+ *
+ * This is like mnt_want_write, but if the file is already open for writing it
+ * skips incrementing mnt_writers (since the open file already has a reference)
+ * and instead only does the freeze protection and the check for emergency r/o
+ * remounts.  This must be paired with mnt_drop_write_file.
+ */
+int mnt_want_write_file(struct file *file)
+{
+	return mnt_want_write_file_attr(file, ATTR_OTHER, NULL);
+}
 EXPORT_SYMBOL_GPL(mnt_want_write_file);
+
+/**
+ * mnt_want_write_file_attr - get write access to a file's mount for attr change
+ * @file: the file who's mount on which to take a write
+ * @attr: indicate the changing attributes
+ * @pidx: optional output value to pass to mnt_drop_write_file_srcu()
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ * A successful call must be paired with mnt_drop_write_file_srcu().
+ */
+int mnt_want_write_file_attr(struct file *file, unsigned int attr, int *pidx)
+{
+	struct super_block *sb = file_inode(file)->i_sb;
+	int idx, ret;
+
+	/* vfs write barrier covers also the pre-modify event */
+	idx = __sb_start_write_srcu(sb);
+
+	if (!(file->f_mode & FMODE_NONOTIFY)) {
+		ret = fsnotify_change_perm(&file->f_path, attr);
+		if (ret)
+			goto out_write_srcu;
+	}
+	ret = __sb_mnt_want_write_file(file);
+	if (ret)
+		goto out_write_srcu;
+
+	if (pidx) {
+		*pidx = idx;
+		return 0;
+	}
+
+out_write_srcu:
+	__sb_end_write_srcu(sb, idx);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mnt_want_write_file_attr);
 
 /**
  * mnt_want_write_file_srcu - get write access to a file's mount

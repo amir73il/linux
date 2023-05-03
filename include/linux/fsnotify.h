@@ -440,4 +440,30 @@ static inline int fsnotify_sb_error(struct super_block *sb, struct inode *inode,
 			NULL, NULL, NULL, 0);
 }
 
+/*
+ * Pre modify hooks
+ *
+ * Caller must NOT hold any filesystem locks, because backend may need to
+ * write to filesystem.
+ */
+
+/*
+ * fsnotify_change_perm - object at path is about to be modified and/or metadata
+ * about to be changed.
+ */
+static inline int fsnotify_change_perm(const struct path *path,
+				       unsigned int attr)
+{
+	__u32 mask = (attr ? FS_PRE_ATTRIB : FS_PRE_MODIFY) | FS_PRE_VFS;
+
+	/*
+	 * To avoid ambiguity, any change of attribute is reported as metadata
+	 * change and change of size and mtime is also reported as data change.
+	 */
+	if (attr & (ATTR_SIZE | ATTR_MTIME | ATTR_TOUCH))
+		mask |= FS_PRE_MODIFY;
+
+	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
+}
+
 #endif	/* _LINUX_FS_NOTIFY_H */

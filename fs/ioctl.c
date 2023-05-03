@@ -719,14 +719,15 @@ static int ioctl_setflags(struct file *file, unsigned int __user *argp)
 	struct fileattr fa;
 	unsigned int flags;
 	int err;
+	int idx;
 
 	err = get_user(flags, argp);
 	if (!err) {
-		err = mnt_want_write_file(file);
+		err = mnt_want_write_file_attr(file, ATTR_OTHER, &idx);
 		if (!err) {
 			fileattr_fill_flags(&fa, flags);
 			err = vfs_fileattr_set(idmap, dentry, &fa);
-			mnt_drop_write_file(file);
+			mnt_drop_write_file_srcu(file, idx);
 		}
 	}
 	return err;
@@ -750,13 +751,14 @@ static int ioctl_fssetxattr(struct file *file, void __user *argp)
 	struct dentry *dentry = file->f_path.dentry;
 	struct fileattr fa;
 	int err;
+	int idx;
 
 	err = copy_fsxattr_from_user(&fa, argp);
 	if (!err) {
-		err = mnt_want_write_file(file);
+		err = mnt_want_write_file_attr(file, ATTR_OTHER, &idx);
 		if (!err) {
 			err = vfs_fileattr_set(idmap, dentry, &fa);
-			mnt_drop_write_file(file);
+			mnt_drop_write_file_srcu(file, idx);
 		}
 	}
 	return err;

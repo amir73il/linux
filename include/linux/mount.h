@@ -84,6 +84,10 @@ extern int mnt_want_write(struct vfsmount *mnt);
 extern int mnt_want_write_srcu(struct vfsmount *m, int *pidx);
 extern int mnt_want_write_file(struct file *file);
 extern int mnt_want_write_file_srcu(struct file *file, int *pidx);
+extern int mnt_want_write_file_attr(struct file *file, unsigned int attr,
+				    int *pidx);
+extern int mnt_want_write_path_attr(const struct path *path, unsigned int attr,
+				    int *pidx);
 extern int file_start_write_area(struct file *file, const loff_t *ppos,
 				 size_t count, int *pidx);
 extern void mnt_drop_write(struct vfsmount *mnt);
