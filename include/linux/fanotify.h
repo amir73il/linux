@@ -132,7 +132,14 @@
 /* These masks check for invalid bits in permission responses. */
 #define FANOTIFY_RESPONSE_ACCESS (FAN_ALLOW | FAN_DENY)
 #define FANOTIFY_RESPONSE_FLAGS (FAN_AUDIT | FAN_INFO)
-#define FANOTIFY_RESPONSE_VALID_MASK (FANOTIFY_RESPONSE_ACCESS | FANOTIFY_RESPONSE_FLAGS)
+#define FANOTIFY_RESPONSE_ERRNO	(FAN_ERRNO_MASK << FAN_ERRNO_SHIFT)
+#define FANOTIFY_RESPONSE_VALID_MASK \
+	(FANOTIFY_RESPONSE_ACCESS | FANOTIFY_RESPONSE_FLAGS | \
+	 FANOTIFY_RESPONSE_ERRNO)
+
+/* errno other than EPERM can specified in upper byte of deny response */
+#define FAN_RESPONSE_ACCESS(res)	((res) & FANOTIFY_RESPONSE_ACCESS)
+#define FAN_RESPONSE_ERRNO(res)		((int)((res) >> FAN_ERRNO_SHIFT))
 
 /* Do not use these old uapi constants internally */
 #undef FAN_ALL_CLASS_BITS
