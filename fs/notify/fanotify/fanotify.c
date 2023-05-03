@@ -262,10 +262,15 @@ static int fanotify_get_response(struct fsnotify_group *group,
 	}
 
 	/* userspace responded, convert to something usable */
-	switch (event->response & FANOTIFY_RESPONSE_ACCESS) {
+	switch (FAN_RESPONSE(event->response)) {
 	case FAN_ALLOW:
 		ret = 0;
 		break;
+	case FAN_ERRNO:
+		ret = -(int)event->errno;
+		if (ret)
+			break;
+		fallthrough;
 	case FAN_DENY:
 	default:
 		ret = -EPERM;
@@ -273,7 +278,7 @@ static int fanotify_get_response(struct fsnotify_group *group,
 
 	/* Check if the response should be audited */
 	if (event->response & FAN_AUDIT)
-		audit_fanotify(event->response & ~FAN_AUDIT,
+		audit_fanotify(FAN_RESPONSE(event->response),
 			       &event->audit_rule);
 
 	pr_debug("%s: group=%p event=%p about to return ret=%d\n", __func__,
@@ -564,6 +569,7 @@ static struct fanotify_event *fanotify_alloc_perm_event(const struct path *path,
 
 	pevent->fae.type = FANOTIFY_EVENT_TYPE_PATH_PERM;
 	pevent->response = 0;
+	pevent->errno = 0;
 	pevent->hdr.type = FAN_RESPONSE_INFO_NONE;
 	pevent->hdr.pad = 0;
 	pevent->hdr.len = 0;

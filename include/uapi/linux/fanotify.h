@@ -204,9 +204,16 @@ struct fanotify_event_info_error {
 #define FAN_RESPONSE_INFO_NONE		0
 #define FAN_RESPONSE_INFO_AUDIT_RULE	1
 
-struct fanotify_response {
+struct fanotify_response_old {
 	__s32 fd;
 	__u32 response;
+};
+
+struct fanotify_response_error {
+	__s32 fd;
+	__u32 response	:16,
+	      error	:8,
+	      reserved	:8;
 };
 
 struct fanotify_response_info_header {
@@ -225,6 +232,10 @@ struct fanotify_response_info_audit_rule {
 /* Legit userspace responses to a _PERM event */
 #define FAN_ALLOW	0x01
 #define FAN_DENY	0x02
+#define FAN_ERRNO	0x03	/* errno specified in response */
+#define FAN_RESPONSE_MASK 0x0f
+#define FAN_RESPONSE(res) ((res) & FAN_RESPONSE_MASK)
+
 #define FAN_AUDIT	0x10	/* Bitmask to create audit record for result */
 #define FAN_INFO	0x20	/* Bitmask to indicate additional information */
 
