@@ -104,6 +104,9 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 #define MAY_NOT_BLOCK		0x00000080
 /* called with vfs locks held, do not call sb_start_write() */
 #define MAY_NOT_START_WRITE	0x00000100
+/* for fsnotify_name_perm() */
+#define MAY_CREATE		0x00000200
+#define MAY_DELETE		0x00000400
 
 /*
  * flags in file.f_mode.  Note that FMODE_READ and FMODE_WRITE must correspond
