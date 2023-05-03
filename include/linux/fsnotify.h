@@ -466,4 +466,51 @@ static inline int fsnotify_change_perm(const struct path *path,
 	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
 }
 
+/*
+ * fsnotify_name_perm - object at path/name is about to be linked/unlinked
+ *
+ * The object at path/name may or may not already exist.
+ */
+static inline int fsnotify_name_perm(const struct path *path,
+				     const struct qstr *name,int mask)
+{
+	__u32 fsnotify_mask = FS_PRE_VFS;
+
+	if (!(mask & (MAY_CREATE | MAY_DELETE)))
+		return 0;
+
+	if (mask & MAY_CREATE)
+		fsnotify_mask |= FS_PRE_CREATE;
+	else
+		fsnotify_mask |= FS_PRE_DELETE;
+
+	return fsnotify_name(fsnotify_mask, path, FSNOTIFY_EVENT_PATH,
+			     d_inode(path->dentry), name, 0);
+}
+
+/*
+ * fsnotify_rename_perm - object is about to be renamed
+ *
+ * The object at new_path/new_name could be negative.  If positive, it
+ * could be overwritten or exchanged with old_path/old_name.
+ */
+static inline int fsnotify_rename_perm(const struct path *old_path,
+				       const struct qstr *old_name,
+				       const struct path *new_path,
+				       const struct qstr *new_name)
+{
+	u32 cookie = fsnotify_get_cookie();
+	int ret;
+
+	ret = fsnotify_name(FS_PRE_MOVE_FROM | FS_PRE_VFS, old_path,
+			    FSNOTIFY_EVENT_PATH, d_inode(old_path->dentry),
+			    old_name, cookie);
+	if (ret)
+		return ret;
+
+	return fsnotify_name(FS_PRE_MOVE_TO | FS_PRE_VFS, new_path,
+			     FSNOTIFY_EVENT_PATH, d_inode(new_path->dentry),
+			     new_name, cookie);
+}
+
 #endif	/* _LINUX_FS_NOTIFY_H */

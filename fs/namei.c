@@ -3565,6 +3565,7 @@ static const char *open_last_lookups(struct nameidata *nd,
 	bool got_write = false;
 	struct dentry *dentry;
 	const char *res;
+	int idx;
 
 	nd->flags |= op->intent;
 
@@ -3598,7 +3599,13 @@ static const char *open_last_lookups(struct nameidata *nd,
 	}
 
 	if (open_flag & (O_CREAT | O_TRUNC | O_WRONLY | O_RDWR)) {
-		got_write = !mnt_want_write(nd->path.mnt);
+		struct lookup_result res = {
+			.last = nd->last,
+			.flags = nd->flags & LOOKUP_RES_FLAGS_MASK,
+		};
+
+		got_write = !mnt_want_write_parent(&nd->path, MAY_CREATE,
+						   &res, &idx);
 		/*
 		 * do _not_ fail yet - we might not need that or fail with
 		 * a different error; let lookup_open() decide; we'll be
@@ -3618,7 +3625,7 @@ static const char *open_last_lookups(struct nameidata *nd,
 		inode_unlock_shared(dir->d_inode);
 
 	if (got_write)
-		mnt_drop_write(nd->path.mnt);
+		mnt_drop_write_srcu(nd->path.mnt, idx);
 
 	if (IS_ERR(dentry))
 		return ERR_CAST(dentry);
@@ -3912,8 +3919,9 @@ struct file *do_file_open_root(const struct path *root,
 	return file;
 }
 
-static struct dentry *filename_create(int dfd, struct filename *name,
-				      struct path *path, unsigned int lookup_flags)
+static struct dentry *filename_create_srcu(int dfd, struct filename *name,
+					   struct path *path,
+					   unsigned int lookup_flags, int *pidx)
 {
 	struct dentry *dentry = ERR_PTR(-EEXIST);
 	struct lookup_result res;
@@ -3935,7 +3943,7 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 		goto out;
 
 	/* don't fail immediately if it's r/o, at least try to report other errors */
-	err2 = mnt_want_write(path->mnt);
+	err2 = mnt_want_write_parent(path, MAY_CREATE, &res, pidx);
 	/*
 	 * Do the final lookup.  Suppress 'create' if there is a trailing
 	 * '/', and a directory wasn't requested.
@@ -3973,10 +3981,30 @@ fail:
 unlock:
 	inode_unlock(path->dentry->d_inode);
 	if (!err2)
-		mnt_drop_write(path->mnt);
+		mnt_drop_write_srcu(path->mnt, *pidx);
 out:
 	path_put(path);
 	return dentry;
+}
+
+static void done_path_create_srcu(struct path *path, struct dentry *dentry,
+				  int idx)
+{
+	__sb_end_write_srcu(path->mnt->mnt_sb, idx);
+	done_path_create(path, dentry);
+}
+
+static struct dentry *filename_create(int dfd, struct filename *name,
+				      struct path *path,
+				      unsigned int lookup_flags)
+{
+	struct dentry *res;
+	int idx;
+
+	res = filename_create_srcu(dfd, name, path, lookup_flags, &idx);
+	if (!IS_ERR(res))
+		__sb_end_write_srcu(path->mnt->mnt_sb, idx);
+	return res;
 }
 
 struct dentry *kern_path_create(int dfd, const char *pathname,
@@ -4083,12 +4111,13 @@ static int do_mknodat(int dfd, struct filename *name, umode_t mode,
 	struct path path;
 	int error;
 	unsigned int lookup_flags = 0;
+	int idx;
 
 	error = may_mknod(mode);
 	if (error)
 		goto out1;
 retry:
-	dentry = filename_create(dfd, name, &path, lookup_flags);
+	dentry = filename_create_srcu(dfd, name, &path, lookup_flags, &idx);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto out1;
@@ -4116,7 +4145,7 @@ retry:
 			break;
 	}
 out2:
-	done_path_create(&path, dentry);
+	done_path_create_srcu(&path, dentry, idx);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
 		goto retry;
@@ -4186,9 +4215,10 @@ int do_mkdirat(int dfd, struct filename *name, umode_t mode)
 	struct path path;
 	int error;
 	unsigned int lookup_flags = LOOKUP_DIRECTORY;
+	int idx;
 
 retry:
-	dentry = filename_create(dfd, name, &path, lookup_flags);
+	dentry = filename_create_srcu(dfd, name, &path, lookup_flags, &idx);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto out_putname;
@@ -4199,7 +4229,7 @@ retry:
 		error = vfs_mkdir(mnt_idmap(path.mnt), path.dentry->d_inode,
 				  dentry, mode);
 	}
-	done_path_create(&path, dentry);
+	done_path_create_srcu(&path, dentry, idx);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
 		goto retry;
@@ -4281,6 +4311,7 @@ int do_rmdir(int dfd, struct filename *name)
 	struct path path;
 	struct lookup_result res;
 	unsigned int lookup_flags = 0;
+	int idx;
 retry:
 	error = filename_parentat(dfd, name, lookup_flags, &path, &res);
 	if (error)
@@ -4298,7 +4329,7 @@ retry:
 		goto exit2;
 	}
 
-	error = mnt_want_write(path.mnt);
+	error = mnt_want_write_parent(&path, MAY_DELETE, &res, &idx);
 	if (error)
 		goto exit2;
 
@@ -4319,7 +4350,7 @@ exit4:
 	dput(dentry);
 exit3:
 	inode_unlock(path.dentry->d_inode);
-	mnt_drop_write(path.mnt);
+	mnt_drop_write_srcu(path.mnt, idx);
 exit2:
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
@@ -4421,6 +4452,7 @@ int do_unlinkat(int dfd, struct filename *name)
 	struct inode *inode = NULL;
 	struct inode *delegated_inode = NULL;
 	unsigned int lookup_flags = 0;
+	int idx;
 retry:
 	error = filename_parentat(dfd, name, lookup_flags, &path, &res);
 	if (error)
@@ -4430,7 +4462,7 @@ retry:
 	if (res.type != LAST_NORM)
 		goto exit2;
 
-	error = mnt_want_write(path.mnt);
+	error = mnt_want_write_parent(&path, MAY_DELETE, &res, &idx);
 	if (error)
 		goto exit2;
 retry_deleg:
@@ -4463,7 +4495,7 @@ exit3:
 		if (!error)
 			goto retry_deleg;
 	}
-	mnt_drop_write(path.mnt);
+	mnt_drop_write_srcu(path.mnt, idx);
 exit2:
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
@@ -4544,13 +4576,14 @@ int do_symlinkat(struct filename *from, int newdfd, struct filename *to)
 	struct dentry *dentry;
 	struct path path;
 	unsigned int lookup_flags = 0;
+	int idx;
 
 	if (IS_ERR(from)) {
 		error = PTR_ERR(from);
 		goto out_putnames;
 	}
 retry:
-	dentry = filename_create(newdfd, to, &path, lookup_flags);
+	dentry = filename_create_srcu(newdfd, to, &path, lookup_flags, &idx);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto out_putnames;
@@ -4559,7 +4592,7 @@ retry:
 	if (!error)
 		error = vfs_symlink(mnt_idmap(path.mnt), path.dentry->d_inode,
 				    dentry, from->name);
-	done_path_create(&path, dentry);
+	done_path_create_srcu(&path, dentry, idx);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
 		goto retry;
@@ -4688,6 +4721,7 @@ int do_linkat(int olddfd, struct filename *old, int newdfd,
 	struct inode *delegated_inode = NULL;
 	int how = 0;
 	int error;
+	int idx;
 
 	if ((flags & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH)) != 0) {
 		error = -EINVAL;
@@ -4710,8 +4744,8 @@ retry:
 	if (error)
 		goto out_putnames;
 
-	new_dentry = filename_create(newdfd, new, &new_path,
-					(how & LOOKUP_REVAL));
+	new_dentry = filename_create_srcu(newdfd, new, &new_path,
+					  (how & LOOKUP_REVAL), &idx);
 	error = PTR_ERR(new_dentry);
 	if (IS_ERR(new_dentry))
 		goto out_putpath;
@@ -4729,7 +4763,7 @@ retry:
 	error = vfs_link(old_path.dentry, idmap, new_path.dentry->d_inode,
 			 new_dentry, &delegated_inode);
 out_dput:
-	done_path_create(&new_path, new_dentry);
+	done_path_create_srcu(&new_path, new_dentry, idx);
 	if (delegated_inode) {
 		error = break_deleg_wait(&delegated_inode);
 		if (!error) {
@@ -4962,6 +4996,7 @@ int do_renameat2(int olddfd, struct filename *from, int newdfd,
 	unsigned int lookup_flags = 0, target_flags = LOOKUP_RENAME_TARGET;
 	bool should_retry = false;
 	int error = -EINVAL;
+	int idx;
 
 	if (flags & ~(RENAME_NOREPLACE | RENAME_EXCHANGE | RENAME_WHITEOUT))
 		goto put_names;
@@ -4997,7 +5032,8 @@ retry:
 	if (new_res.type != LAST_NORM)
 		goto exit2;
 
-	error = mnt_want_write(old_path.mnt);
+	error = mnt_want_write_parents(&old_path, &old_res,
+				       &new_path, &new_res, &idx);
 	if (error)
 		goto exit2;
 
@@ -5076,7 +5112,7 @@ exit3:
 		if (!error)
 			goto retry_deleg;
 	}
-	mnt_drop_write(old_path.mnt);
+	mnt_drop_write_srcu(old_path.mnt, idx);
 exit2:
 	if (retry_estale(error, lookup_flags))
 		should_retry = true;

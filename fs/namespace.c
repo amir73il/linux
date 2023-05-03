@@ -467,6 +467,87 @@ out_write_srcu:
 EXPORT_SYMBOL_GPL(mnt_want_write_path_attr);
 
 /**
+ * mnt_want_write_parent - get write access to parent's mount before link/unlink
+ * @mask: either MAY_CREATE or MAY_DELETE
+ * @path: the path who's mount on which to take a write
+ * @res: additional path lookup results
+ * @pidx: output value to pass to mnt_drop_write_srcu()
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ * A successful call must be paired with mnt_drop_write_srcu().
+ */
+int mnt_want_write_parent(const struct path *path, int mask,
+			  const struct lookup_result *res, int *pidx)
+{
+	struct super_block *sb = path->mnt->mnt_sb;
+	int idx, ret;
+
+	/* vfs write barrier covers also the pre-modify event */
+	idx = __sb_start_write_srcu(sb);
+
+	if (!(res->flags & LOOKUP_NONOTIFY)) {
+		ret = fsnotify_name_perm(path, &res->last, mask);
+		if (ret)
+			goto out_write_srcu;
+	}
+	ret = mnt_want_write(path->mnt);
+	if (ret || !pidx)
+		goto out_write_srcu;
+
+	*pidx = idx;
+	return 0;
+
+out_write_srcu:
+	__sb_end_write_srcu(sb, idx);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mnt_want_write_parent);
+
+/**
+ * mnt_want_write_parents - get write access to parents' mount before rename
+ * @oldpath: the old path who's mount on which to take a write
+ * @oldres: additional old path lookup results
+ * @newpath: the new path who's mount on which to take a write
+ * @newres: additional new path lookup results
+ * @pidx: output value to pass to mnt_drop_write_srcu()
+ *
+ * In addition to taking write access, it is also used to notify
+ * listeners on an intent to make modifications in the filesystem.
+ * A successful call must be paired with mnt_drop_write_srcu().
+ */
+int mnt_want_write_parents(const struct path *oldpath,
+			   const struct lookup_result *oldres,
+			   const struct path *newpath,
+			   const struct lookup_result *newres, int *pidx)
+{
+	struct super_block *sb = oldpath->mnt->mnt_sb;
+	int idx, ret;
+
+	/* vfs write barrier covers also the pre-modify event */
+	idx = __sb_start_write_srcu(sb);
+
+	if (!(oldres->flags & LOOKUP_NONOTIFY) ||
+	    !(newres->flags & LOOKUP_NONOTIFY)) {
+		ret = fsnotify_rename_perm(oldpath, &oldres->last,
+					   newpath, &newres->last);
+		if (ret)
+			goto out_write_srcu;
+	}
+	ret = mnt_want_write(oldpath->mnt);
+	if (ret)
+		goto out_write_srcu;
+
+	*pidx = idx;
+	return 0;
+
+out_write_srcu:
+	__sb_end_write_srcu(sb, idx);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mnt_want_write_parents);
+
+/**
  * __mnt_want_write_file - get write access to a file's mount
  * @file: the file who's mount on which to take a write
  *
