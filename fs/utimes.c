@@ -23,6 +23,7 @@ int vfs_utimes(const struct path *path, struct timespec64 *times)
 	struct iattr newattrs;
 	struct inode *inode = path->dentry->d_inode;
 	struct inode *delegated_inode = NULL;
+	int idx;
 
 	if (times) {
 		if (!nsec_valid(times[0].tv_nsec) ||
@@ -32,10 +33,6 @@ int vfs_utimes(const struct path *path, struct timespec64 *times)
 		    times[1].tv_nsec == UTIME_NOW)
 			times = NULL;
 	}
-
-	error = mnt_want_write(path->mnt);
-	if (error)
-		goto out;
 
 	newattrs.ia_valid = ATTR_CTIME | ATTR_MTIME | ATTR_ATIME;
 	if (times) {
@@ -61,6 +58,11 @@ int vfs_utimes(const struct path *path, struct timespec64 *times)
 	} else {
 		newattrs.ia_valid |= ATTR_TOUCH;
 	}
+
+	error = mnt_want_write_path_attr(path, newattrs.ia_valid, &idx);
+	if (error)
+		goto out;
+
 retry_deleg:
 	inode_lock(inode);
 	error = notify_change(mnt_idmap(path->mnt), path->dentry, &newattrs,
@@ -72,7 +74,7 @@ retry_deleg:
 			goto retry_deleg;
 	}
 
-	mnt_drop_write(path->mnt);
+	mnt_drop_write_srcu(path->mnt, idx);
 out:
 	return error;
 }

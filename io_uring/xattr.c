@@ -208,11 +208,12 @@ static int __io_setxattr(struct io_kiocb *req, unsigned int issue_flags,
 {
 	struct io_xattr *ix = io_kiocb_to_cmd(req, struct io_xattr);
 	int ret;
+	int idx;
 
-	ret = mnt_want_write(path->mnt);
+	ret = mnt_want_write_path_attr(path, ATTR_OTHER, &idx);
 	if (!ret) {
 		ret = do_setxattr(mnt_idmap(path->mnt), path->dentry, &ix->ctx);
-		mnt_drop_write(path->mnt);
+		mnt_drop_write_srcu(path->mnt, idx);
 	}
 
 	return ret;
