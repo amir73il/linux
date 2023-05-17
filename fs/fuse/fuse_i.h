@@ -179,13 +179,16 @@ struct fuse_mount;
 struct fuse_release_args;
 
 /**
- * Reference to backing file for read/write operations in passthrough mode.
+ * Reference to backing file for read/write operations in passthrough mode
+ * and the credentials to be used for passthrough operations.
  */
 struct fuse_passthrough {
 	struct file *filp;
+	struct cred *cred;
 
 	/** refcount */
 	refcount_t count;
+	struct rcu_head rcu;
 };
 
 /** FUSE specific file data */

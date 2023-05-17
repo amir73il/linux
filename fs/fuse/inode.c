@@ -1327,6 +1327,7 @@ static int fuse_passthrough_id_free(int id, void *p, void *data)
 
 	WARN_ON_ONCE(refcount_read(&passthrough->count) != 1);
 	fuse_passthrough_free(passthrough);
+
 	return 0;
 }
 
