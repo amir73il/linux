@@ -145,9 +145,7 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 
 		err = fuse_send_open(fm, nodeid, open_flags, opcode, &outarg);
 		if (!err) {
-			ff->fh = outarg.fh;
-			ff->open_flags = outarg.open_flags;
-
+			fuse_file_parse_open_args(ff, nodeid, &outarg);
 		} else if (err != -ENOSYS) {
 			fuse_file_free(ff);
 			return ERR_PTR(err);
