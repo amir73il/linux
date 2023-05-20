@@ -211,6 +211,10 @@
  *  7.39
  *  - add FUSE_DIRECT_IO_RELAX
  *  - add FUSE_STATX and related structures
+ *
+ *  7.40
+ *  - add max_stack_depth to fuse_init_out, add FUSE_PASSTHROUGH flag
+ *  - add FOPEN_PASSTHROUGH
  */
 
 #ifndef _LINUX_FUSE_H
@@ -246,7 +250,7 @@
 #define FUSE_KERNEL_VERSION 7
 
 /** Minor version number of this interface */
-#define FUSE_KERNEL_MINOR_VERSION 39
+#define FUSE_KERNEL_MINOR_VERSION 40
 
 /** The node ID of the root inode */
 #define FUSE_ROOT_ID 1
@@ -353,6 +357,7 @@ struct fuse_file_lock {
  * FOPEN_STREAM: the file is stream-like (no file position at all)
  * FOPEN_NOFLUSH: don't flush data cache on close (unless FUSE_WRITEBACK_CACHE)
  * FOPEN_PARALLEL_DIRECT_WRITES: Allow concurrent direct writes on the same inode
+ * FOPEN_PASSTHROUGH: passthrough read/write operations for this open file
  */
 #define FOPEN_DIRECT_IO		(1 << 0)
 #define FOPEN_KEEP_CACHE	(1 << 1)
@@ -361,6 +366,7 @@ struct fuse_file_lock {
 #define FOPEN_STREAM		(1 << 4)
 #define FOPEN_NOFLUSH		(1 << 5)
 #define FOPEN_PARALLEL_DIRECT_WRITES	(1 << 6)
+#define FOPEN_PASSTHROUGH	(1 << 7)
 
 /**
  * INIT request/reply flags
@@ -450,6 +456,7 @@ struct fuse_file_lock {
 #define FUSE_CREATE_SUPP_GROUP	(1ULL << 34)
 #define FUSE_HAS_EXPIRE_ONLY	(1ULL << 35)
 #define FUSE_DIRECT_IO_RELAX	(1ULL << 36)
+#define FUSE_PASSTHROUGH	(1ULL << 37)
 
 /**
  * CUSE INIT request/reply flags
@@ -875,7 +882,8 @@ struct fuse_init_out {
 	uint16_t	max_pages;
 	uint16_t	map_alignment;
 	uint32_t	flags2;
-	uint32_t	unused[7];
+	uint32_t	max_stack_depth;
+	uint32_t	unused[6];
 };
 
 #define CUSE_INIT_INFO_MAX 4096

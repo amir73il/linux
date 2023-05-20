@@ -676,9 +676,7 @@ static int fuse_create_open(struct inode *dir, struct dentry *entry,
 	    fuse_invalid_attr(&outentry.attr))
 		goto out_free_ff;
 
-	ff->fh = outopen.fh;
-	ff->nodeid = outentry.nodeid;
-	ff->open_flags = outopen.open_flags;
+	fuse_file_parse_open_args(ff, outentry.nodeid, &outopen);
 	inode = fuse_iget(dir->i_sb, outentry.nodeid, outentry.generation,
 			  &outentry.attr, ATTR_TIMEOUT(&outentry), 0);
 	if (!inode) {
