@@ -2255,16 +2255,19 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
 	int res;
-	int oldfd;
-	struct fuse_dev *fud = NULL;
+	int fd, id;
+	struct fuse_dev *fud = fuse_get_dev(file);
 	struct fd f;
+
+	if (!fud)
+		return -EINVAL;
 
 	switch (cmd) {
 	case FUSE_DEV_IOC_CLONE:
-		if (get_user(oldfd, (__u32 __user *)arg))
+		if (get_user(fd, (__u32 __user *)arg))
 			return -EFAULT;
 
-		f = fdget(oldfd);
+		f = fdget(fd);
 		if (!f.file)
 			return -EINVAL;
 
@@ -2272,16 +2275,31 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 		 * Check against file->f_op because CUSE
 		 * uses the same ioctl handler.
 		 */
-		if (f.file->f_op == file->f_op)
-			fud = fuse_get_dev(f.file);
-
 		res = -EINVAL;
-		if (fud) {
+		if (f.file->f_op == file->f_op) {
+			fud = fuse_get_dev(f.file);
 			mutex_lock(&fuse_mutex);
 			res = fuse_device_clone(fud->fc, file);
 			mutex_unlock(&fuse_mutex);
 		}
 		fdput(f);
+		break;
+	case FUSE_DEV_IOC_PASSTHROUGH_OPEN:
+		if (get_user(fd, (__u32 __user *)arg))
+			return -EFAULT;
+
+		f = fdget(fd);
+		if (!f.file)
+			return -EINVAL;
+
+		res = fuse_passthrough_open(fud->fc, fd);
+		fdput(f);
+		break;
+	case FUSE_DEV_IOC_PASSTHROUGH_CLOSE:
+		if (get_user(id, (__u32 __user *)arg))
+			return -EFAULT;
+
+		res = fuse_passthrough_close(fud->fc, id);
 		break;
 	default:
 		res = -ENOTTY;

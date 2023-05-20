@@ -131,6 +131,7 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 	struct fuse_conn *fc = fm->fc;
 	struct fuse_file *ff;
 	int opcode = isdir ? FUSE_OPENDIR : FUSE_OPEN;
+	int err;
 
 	ff = fuse_file_alloc(fm);
 	if (!ff)
@@ -141,16 +142,17 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 	ff->open_flags = FOPEN_KEEP_CACHE | (isdir ? FOPEN_CACHE_DIR : 0);
 	if (isdir ? !fc->no_opendir : !fc->no_open) {
 		struct fuse_open_out outarg;
-		int err;
 
 		err = fuse_send_open(fm, nodeid, open_flags, opcode, &outarg);
 		if (!err) {
 			ff->fh = outarg.fh;
 			ff->open_flags = outarg.open_flags;
-
+			if (ff->open_flags & FOPEN_PASSTHROUGH)
+				err = fuse_passthrough_setup(fc, ff, &outarg);
+			if (err)
+				goto out_free_ff;
 		} else if (err != -ENOSYS) {
-			fuse_file_free(ff);
-			return ERR_PTR(err);
+			goto out_free_ff;
 		} else {
 			if (isdir)
 				fc->no_opendir = 1;
@@ -165,6 +167,10 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 	ff->nodeid = nodeid;
 
 	return ff;
+
+out_free_ff:
+	fuse_file_free(ff);
+	return ERR_PTR(err);
 }
 
 int fuse_do_open(struct fuse_mount *fm, u64 nodeid, struct file *file,
@@ -277,6 +283,9 @@ static void fuse_prepare_release(struct fuse_inode *fi, struct fuse_file *ff,
 {
 	struct fuse_conn *fc = ff->fm->fc;
 	struct fuse_release_args *ra = ff->release_args;
+
+	fuse_passthrough_put(ff->passthrough);
+	ff->passthrough = NULL;
 
 	/* Inode is NULL on error path of fuse_create_open() */
 	if (likely(fi)) {
