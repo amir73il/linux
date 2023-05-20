@@ -63,6 +63,15 @@ struct fuse_forget_link {
 	struct fuse_forget_link *next;
 };
 
+/** Container for data related to mapping to backing file */
+struct fuse_backing {
+	struct file *file;
+
+	/** refcount */
+	refcount_t count;
+	struct rcu_head rcu;
+};
+
 /** FUSE inode */
 struct fuse_inode {
 	/** Inode data */
@@ -803,6 +812,12 @@ struct fuse_conn {
 	/* Is statx not implemented by fs? */
 	unsigned int no_statx:1;
 
+	/** Passthrough support for read/write IO */
+	unsigned int passthrough:1;
+
+	/** Maximum stack depth for passthrough backing files */
+	int max_stack_depth;
+
 	/** The number of requests waiting for completion */
 	atomic_t num_waiting;
 
@@ -1339,5 +1354,9 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 				 unsigned int open_flags, bool isdir);
 void fuse_file_release(struct inode *inode, struct fuse_file *ff,
 		       unsigned int open_flags, fl_owner_t id, bool isdir);
+
+/* passthrough.c */
+struct fuse_backing *fuse_backing_get(struct fuse_backing *fb);
+void fuse_backing_put(struct fuse_backing *fb);
 
 #endif /* _FS_FUSE_I_H */
