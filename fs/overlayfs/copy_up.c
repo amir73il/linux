@@ -426,22 +426,56 @@ out_err:
 	return ERR_PTR(err);
 }
 
-int ovl_set_origin(struct ovl_fs *ofs, struct dentry *lower,
-		   struct dentry *upper)
+static struct ovl_fh *ovl_encode_xino_fh(struct ovl_fs *ofs, unsigned long ino)
+{
+	struct ovl_fh *fh;
+
+	fh = kzalloc(sizeof(ino) + OVL_FH_FID_OFFSET, GFP_KERNEL);
+	if (!fh)
+		return ERR_PTR(-ENOMEM);
+
+	*(unsigned long *)fh->fb.fid = ino;
+
+	fh->fb.version = OVL_FH_VERSION;
+	fh->fb.magic = OVL_FH_MAGIC;
+	fh->fb.type = OVL_FILEID_XINO64;
+	fh->fb.flags = OVL_FH_FLAG_CPU_ENDIAN;
+	fh->fb.len = sizeof(fh->fb) + sizeof(ino);
+
+	return fh;
+}
+
+static const struct ovl_fh *ovl_encode_origin_fh(struct ovl_fs *ofs,
+						 struct inode *inode,
+						 struct dentry *lower)
 {
 	const struct ovl_fh *fh = NULL;
-	int err;
 
 	/*
-	 * When lower layer doesn't support export operations store a 'null' fh,
+	 * When lower layer doesn't support file handles, store a 'dummy' fh,
 	 * so we can use the overlay.origin xattr to distignuish between a copy
 	 * up and a pure upper inode.
+	 * The 'dummy' fh is either empty or contains the overlay composed xino,
+	 * so that inode number may remain persistent after copy up even when
+	 * lower layer doesn't support decoding file handles.
 	 */
-	if (ovl_can_decode_fh(lower->d_sb)) {
+	if (ovl_can_decode_fh(lower->d_sb))
 		fh = ovl_encode_real_fh(ofs, lower, false);
-		if (IS_ERR(fh))
-			return PTR_ERR(fh);
-	}
+	else if (ovl_test_flag(OVL_PERSIST_INO, inode))
+		fh = ovl_encode_xino_fh(ofs, inode->i_ino);
+
+	return fh;
+}
+
+int ovl_set_origin(struct ovl_fs *ofs, struct dentry *dentry,
+		   struct dentry *lower, struct dentry *upper)
+{
+	const struct ovl_fh *fh;
+	int err;
+
+	fh = ovl_encode_origin_fh(ofs, d_inode(dentry), lower);
+	if (IS_ERR(fh))
+		return PTR_ERR(fh);
 
 	/*
 	 * Do not fail when upper doesn't support xattrs.
@@ -635,7 +669,7 @@ static int ovl_copy_up_metadata(struct ovl_copy_up_ctx *c, struct dentry *temp)
 	 * hard link.
 	 */
 	if (c->origin) {
-		err = ovl_set_origin(ofs, c->lowerpath.dentry, temp);
+		err = ovl_set_origin(ofs, c->dentry, c->lowerpath.dentry, temp);
 		if (err)
 			return err;
 	}

@@ -79,6 +79,8 @@ enum {
 #define OVL_FH_FLAG_ANY_ENDIAN	(1 << 1)
 /* Is the real inode encoded in fid an upper inode? */
 #define OVL_FH_FLAG_PATH_UPPER	(1 << 2)
+/* "origin" encodes overlay inode number (not a file handle) */
+#define OVL_FH_FLAG_XINO	(1 << 3)
 
 #define OVL_FH_FLAG_ALL (OVL_FH_FLAG_BIG_ENDIAN | OVL_FH_FLAG_ANY_ENDIAN | \
 			 OVL_FH_FLAG_PATH_UPPER)
@@ -95,6 +97,8 @@ enum {
 #define OVL_FILEID_V0	0xfb
 /* The type returned by overlay exportfs for 32bit aligned fid */
 #define OVL_FILEID_V1	0xf8
+/* The type to store "origin" fid that is a 64bit inode number */
+#define OVL_FILEID_XINO64	0x80
 
 /* On-disk format for "origin" file handle */
 struct ovl_fb {
@@ -741,8 +745,8 @@ int ovl_copy_xattr(struct super_block *sb, const struct path *path, struct dentr
 int ovl_set_attr(struct ovl_fs *ofs, struct dentry *upper, struct kstat *stat);
 struct ovl_fh *ovl_encode_real_fh(struct ovl_fs *ofs, struct dentry *real,
 				  bool is_upper);
-int ovl_set_origin(struct ovl_fs *ofs, struct dentry *lower,
-		   struct dentry *upper);
+int ovl_set_origin(struct ovl_fs *ofs, struct dentry *dentry,
+		   struct dentry *lower, struct dentry *upper);
 
 /* export.c */
 extern const struct export_operations ovl_export_operations;
