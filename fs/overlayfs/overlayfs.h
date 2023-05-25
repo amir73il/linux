@@ -505,6 +505,15 @@ static inline bool ovl_xino_warn(struct ovl_fs *ofs)
 	return ofs->config.xino == OVL_XINO_ON;
 }
 
+/*
+ * Use xino stored in origin xattr when user opted-in with xino=on
+ * and when using trusted.overlay.* xattrs.
+ */
+static inline bool ovl_trust_xino_in_xattr(struct ovl_fs *ofs)
+{
+	return ofs->config.xino == OVL_XINO_ON && !ofs->config.userxattr;
+}
+
 /* All layers on same fs? */
 static inline bool ovl_same_fs(struct ovl_fs *ofs)
 {
@@ -663,6 +672,7 @@ struct ovl_inode_params {
 	struct inode *newinode;
 	struct dentry *upperdentry;
 	struct ovl_entry *oe;
+	unsigned long xino;
 	bool index;
 	char *redirect;
 	char *lowerdata_redirect;

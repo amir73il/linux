@@ -98,6 +98,7 @@ out:
 static void ovl_map_dev_ino(struct dentry *dentry, struct kstat *stat, int fsid)
 {
 	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+	struct inode *inode = d_inode(dentry);
 	bool samefs = ovl_same_fs(ofs);
 	unsigned int xinobits = ovl_xino_bits(ofs);
 	unsigned int xinoshift = 64 - xinobits;
@@ -131,7 +132,7 @@ static void ovl_map_dev_ino(struct dentry *dentry, struct kstat *stat, int fsid)
 	}
 
 	/* The inode could not be mapped to a unified st_ino address space */
-	if (S_ISDIR(dentry->d_inode->i_mode)) {
+	if (S_ISDIR(inode->i_mode) || ovl_test_flag(OVL_PERSIST_INO, inode)) {
 		/*
 		 * Always use the overlay st_dev for directories, so 'find
 		 * -xdev' will scan the entire overlay mount and won't cross the
@@ -142,7 +143,7 @@ static void ovl_map_dev_ino(struct dentry *dentry, struct kstat *stat, int fsid)
 		 * overlay st_ino for directories.
 		 */
 		stat->dev = dentry->d_sb->s_dev;
-		stat->ino = dentry->d_inode->i_ino;
+		stat->ino = inode->i_ino;
 	} else {
 		/*
 		 * For non-samefs setup, if we cannot map all layers st_ino
@@ -1032,6 +1033,11 @@ bool ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 	realinode = ovl_inode_real(inode);
 	ovl_copyattr(inode);
 	ovl_copyflags(realinode, inode);
+	if (oip->xino) {
+		inode->i_ino = oip->xino;
+		return true;
+	}
+
 	return ovl_map_ino(inode, ino, fsid);
 }
 
@@ -1417,7 +1423,7 @@ struct inode *ovl_get_inode(struct super_block *sb,
 	if (oip->index)
 		ovl_set_flag(OVL_INDEX, inode);
 
-	if (bylower)
+	if (bylower || oip->xino)
 		ovl_set_flag(OVL_CONST_INO, inode);
 	if (xino)
 		ovl_set_flag(OVL_PERSIST_INO, inode);

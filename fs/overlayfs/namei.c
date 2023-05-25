@@ -463,13 +463,20 @@ invalid:
 }
 
 static int ovl_check_origin(struct ovl_fs *ofs, struct dentry *upperdentry,
-			    struct ovl_path **stackp)
+			    struct ovl_path **stackp, unsigned long *pxino)
 {
 	struct ovl_fh *fh = ovl_get_fh(ofs, upperdentry, OVL_XATTR_ORIGIN);
 	int err;
 
 	if (IS_ERR_OR_NULL(fh))
 		return PTR_ERR(fh);
+
+	/* Not decoding lower from origin, just the inode number */
+	if (fh->fb.type == OVL_FILEID_XINO64) {
+		if (ovl_trust_xino_in_xattr(ofs))
+			*pxino = *(unsigned long *)fh->fb.fid;
+		return 0;
+	}
 
 	err = ovl_check_origin_fh(ofs, fh, false, upperdentry, stackp);
 	kfree(fh);
@@ -947,6 +954,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	struct dentry *upperdir, *upperdentry = NULL;
 	struct dentry *origin = NULL;
 	struct dentry *index = NULL;
+	unsigned long xino = 0;
 	unsigned int ctr = 0;
 	struct inode *inode = NULL;
 	bool upperopaque = false;
@@ -993,7 +1001,8 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			 * number - it's the same as if we held a reference
 			 * to a dentry in lower layer that was moved under us.
 			 */
-			err = ovl_check_origin(ofs, upperdentry, &origin_path);
+			err = ovl_check_origin(ofs, upperdentry, &origin_path,
+					       &xino);
 			if (err)
 				goto out_put_upper;
 
@@ -1219,6 +1228,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		struct ovl_inode_params oip = {
 			.upperdentry = upperdentry,
 			.oe = oe,
+			.xino = xino,
 			.index = index,
 			.redirect = upperredirect,
 		};
