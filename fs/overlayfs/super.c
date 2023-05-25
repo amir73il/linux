@@ -1900,6 +1900,7 @@ static struct dentry *ovl_get_root(struct super_block *sb,
 
 	/* Root is always merge -> can have whiteouts */
 	ovl_set_flag(OVL_WHITEOUTS, d_inode(root));
+	ovl_set_flag(OVL_PERSIST_INO, d_inode(root));
 	ovl_dentry_set_flag(OVL_E_CONNECTED, root);
 	ovl_set_upperdata(d_inode(root));
 	ovl_inode_init(d_inode(root), &oip, ino, fsid);

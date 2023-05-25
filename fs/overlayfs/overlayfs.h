@@ -49,6 +49,8 @@ enum ovl_inode_flag {
 	OVL_UPPERDATA,
 	/* Inode number will remain constant over copy up. */
 	OVL_CONST_INO,
+	/* Inode number will persist over mount cycle. */
+	OVL_PERSIST_INO,
 };
 
 enum ovl_entry_flag {
@@ -661,7 +663,7 @@ struct ovl_inode_params {
 	char *redirect;
 	char *lowerdata_redirect;
 };
-void ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
+bool ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 		    unsigned long ino, int fsid);
 struct inode *ovl_new_inode(struct super_block *sb, umode_t mode, dev_t rdev);
 struct inode *ovl_lookup_inode(struct super_block *sb, struct dentry *real,

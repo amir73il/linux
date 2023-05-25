@@ -969,7 +969,16 @@ static void ovl_next_ino(struct inode *inode)
 		inode->i_ino = atomic_long_inc_return(&ofs->last_ino);
 }
 
-static void ovl_map_ino(struct inode *inode, unsigned long ino, int fsid)
+/*
+ * Try to create an ino that is both consistent (survives copy up)
+ * and persistent (survives mount cycle).
+ *
+ * For directory, fallback to consistent and non-persistent ino.
+ * For non-dir, fallback to persistent and non-consistent ino.
+ *
+ * Return true if a persistent and consistent ino was created.
+ */
+static bool ovl_map_ino(struct inode *inode, unsigned long ino, int fsid)
 {
 	struct ovl_fs *ofs = OVL_FS(inode->i_sb);
 	int xinobits = ovl_xino_bits(ofs);
@@ -984,10 +993,10 @@ static void ovl_map_ino(struct inode *inode, unsigned long ino, int fsid)
 	 */
 	inode->i_ino = ino;
 	if (ovl_same_fs(ofs)) {
-		return;
+		return true;
 	} else if (xinobits && likely(!(ino >> xinoshift))) {
 		inode->i_ino |= (unsigned long)fsid << (xinoshift + 1);
-		return;
+		return true;
 	}
 
 	/*
@@ -1006,9 +1015,10 @@ static void ovl_map_ino(struct inode *inode, unsigned long ino, int fsid)
 			inode->i_ino |= 1UL << xinoshift;
 		}
 	}
+	return false;
 }
 
-void ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
+bool ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 		    unsigned long ino, int fsid)
 {
 	struct inode *realinode;
@@ -1022,7 +1032,7 @@ void ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 	realinode = ovl_inode_real(inode);
 	ovl_copyattr(inode);
 	ovl_copyflags(realinode, inode);
-	ovl_map_ino(inode, ino, fsid);
+	return ovl_map_ino(inode, ino, fsid);
 }
 
 static void ovl_fill_inode(struct inode *inode, umode_t mode, dev_t rdev)
@@ -1343,7 +1353,7 @@ struct inode *ovl_get_inode(struct super_block *sb,
 	bool bylower = ovl_hash_bylower(sb, upperdentry, lowerdentry,
 					oip->index);
 	int fsid = bylower ? lowerpath->layer->fsid : 0;
-	bool is_dir;
+	bool is_dir, xino;
 	unsigned long ino = 0;
 	int err = oip->newinode ? -EEXIST : -ENOMEM;
 
@@ -1399,7 +1409,7 @@ struct inode *ovl_get_inode(struct super_block *sb,
 		fsid = lowerpath->layer->fsid;
 	}
 	ovl_fill_inode(inode, realinode->i_mode, realinode->i_rdev);
-	ovl_inode_init(inode, oip, ino, fsid);
+	xino = ovl_inode_init(inode, oip, ino, fsid);
 
 	if (upperdentry && ovl_is_impuredir(sb, upperdentry))
 		ovl_set_flag(OVL_IMPURE, inode);
@@ -1409,6 +1419,8 @@ struct inode *ovl_get_inode(struct super_block *sb,
 
 	if (bylower)
 		ovl_set_flag(OVL_CONST_INO, inode);
+	if (xino)
+		ovl_set_flag(OVL_PERSIST_INO, inode);
 
 	/* Check for non-merge dir that may have whiteouts */
 	if (is_dir) {
