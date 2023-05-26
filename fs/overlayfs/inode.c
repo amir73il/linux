@@ -1407,7 +1407,8 @@ struct inode *ovl_get_inode(struct super_block *sb,
 	if (oip->index)
 		ovl_set_flag(OVL_INDEX, inode);
 
-	if (bylower)
+	/* Use st_ino from copy up origin unless xino=nofollow */
+	if (bylower && ovl_follow_origin(ofs))
 		ovl_set_flag(OVL_CONST_INO, inode);
 
 	/* Check for non-merge dir that may have whiteouts */

@@ -70,6 +70,8 @@ Inode properties
 | on same fs,  |     |      |     |      |        |        |        |       |
 | xino=off     |     |      |     |      |        |        |        |       |
 +--------------+-----+------+-----+------+--------+--------+--------+-------+
+| xino=nofollow|  Y  |  N   |  Y  |  Y   |  Y     |   Y    |  Y     |  N    |
++--------------+-----+------+-----+------+--------+--------+--------+-------+
 | xino=on/auto |  Y  |  Y   |  Y  |  Y   |  Y     |   Y    |  Y     |  Y    |
 +--------------+-----+------+-----+------+--------+--------+--------+-------+
 | xino=on/auto,|  N  |  N   |  Y  |  N   |  N     |   Y    |  N     |  Y    |
@@ -487,7 +489,7 @@ other names referring to the same inode.
 
 3) "xino"
 
-Enabled with the mount option "xino=auto" or "xino=on", with the module
+Enabled with the mount option "xino=auto/on/nofollow", with the module
 option "xino_auto=on" or with the kernel config option
 CONFIG_OVERLAY_FS_XINO_AUTO=y.  Also implicitly enabled by using the same
 underlying filesystem for all layers making up the overlay.
@@ -501,6 +503,10 @@ overlay filesystem and the value of st_ino for filesystem objects may not be
 persistent and could change even while the overlay filesystem is mounted, as
 summarized in the `Inode properties`_ table above.
 
+With mount option "xino=nofollow", overlayfs does not try to preserve the
+pre-copyup values of st_ino and st_dev of a non-directory object across copyup,
+but after copyup, the values of st_ino and st_dev are persistent and st_ino
+is consistent with d_ino.
 
 Changes to underlying filesystems
 ---------------------------------

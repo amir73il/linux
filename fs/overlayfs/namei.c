@@ -982,7 +982,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			err = -EREMOTE;
 			goto out;
 		}
-		if (upperdentry && !d.is_dir) {
+		if (upperdentry && !d.is_dir && ovl_follow_origin(ofs)) {
 			/*
 			 * Lookup copy up origin by decoding origin file handle.
 			 * We may get a disconnected dentry, which is fine,
@@ -996,9 +996,6 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			err = ovl_check_origin(ofs, upperdentry, &origin_path);
 			if (err)
 				goto out_put_upper;
-
-			if (d.metacopy)
-				uppermetacopy = true;
 		}
 
 		if (d.redirect) {
@@ -1009,6 +1006,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			if (d.redirect[0] == '/')
 				poe = roe;
 		}
+		uppermetacopy = d.metacopy;
 		upperopaque = d.opaque;
 	}
 

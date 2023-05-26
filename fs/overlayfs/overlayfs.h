@@ -58,6 +58,7 @@ enum ovl_entry_flag {
 };
 
 enum {
+	OVL_XINO_NOFOLLOW,
 	OVL_XINO_OFF,
 	OVL_XINO_AUTO,
 	OVL_XINO_ON,
@@ -497,6 +498,15 @@ static inline bool ovl_is_impuredir(struct super_block *sb,
 static inline bool ovl_xino_warn(struct ovl_fs *ofs)
 {
 	return ofs->config.xino == OVL_XINO_ON;
+}
+
+/*
+ * With xino=nofollow, copy up origin of non-dir inode is not followed,
+ * to st_ino is not preserved across copy up.
+ */
+static inline bool ovl_follow_origin(struct ovl_fs *ofs)
+{
+	return ofs->config.xino != OVL_XINO_NOFOLLOW;
 }
 
 /* All layers on same fs? */

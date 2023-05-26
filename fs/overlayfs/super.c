@@ -335,6 +335,7 @@ static const char *ovl_redirect_mode_def(void)
 }
 
 static const char * const ovl_xino_str[] = {
+	"nofollow",
 	"off",
 	"auto",
 	"on",
@@ -435,6 +436,7 @@ enum {
 	OPT_XINO_ON,
 	OPT_XINO_OFF,
 	OPT_XINO_AUTO,
+	OPT_XINO_NOFOLLOW,
 	OPT_METACOPY_ON,
 	OPT_METACOPY_OFF,
 	OPT_VOLATILE,
@@ -457,6 +459,7 @@ static const match_table_t ovl_tokens = {
 	{OPT_XINO_ON,			"xino=on"},
 	{OPT_XINO_OFF,			"xino=off"},
 	{OPT_XINO_AUTO,			"xino=auto"},
+	{OPT_XINO_NOFOLLOW,		"xino=nofollow"},
 	{OPT_METACOPY_ON,		"metacopy=on"},
 	{OPT_METACOPY_OFF,		"metacopy=off"},
 	{OPT_VOLATILE,			"volatile"},
@@ -600,6 +603,10 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 
 		case OPT_XINO_AUTO:
 			config->xino = OVL_XINO_AUTO;
+			break;
+
+		case OPT_XINO_NOFOLLOW:
+			config->xino = OVL_XINO_NOFOLLOW;
 			break;
 
 		case OPT_METACOPY_ON:
@@ -1691,8 +1698,9 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 	 * dedicated range.
 	 */
 	if (ofs->numfs - !ovl_upper_mnt(ofs) == 1) {
-		if (ofs->config.xino == OVL_XINO_ON)
-			pr_info("\"xino=on\" is useless with all layers on same fs, ignore.\n");
+		if (ofs->config.xino != ovl_xino_def())
+			pr_info("\"xino=%s\" is useless with all layers on same fs, ignore.\n",
+				ovl_xino_str[ofs->config.xino]);
 		ofs->xino_mode = 0;
 	} else if (ofs->config.xino == OVL_XINO_OFF) {
 		ofs->xino_mode = -1;
@@ -1999,7 +2007,8 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	atomic_long_set(&ofs->last_ino, 1);
 	/* Assume underlying fs uses 32bit inodes unless proven otherwise */
-	if (ofs->config.xino != OVL_XINO_OFF) {
+	if (ofs->config.xino == OVL_XINO_AUTO ||
+	    ofs->config.xino == OVL_XINO_ON) {
 		ofs->xino_mode = BITS_PER_LONG - 32;
 		if (!ofs->xino_mode) {
 			pr_warn("xino not supported on 32bit kernel, falling back to xino=off.\n");
@@ -2078,6 +2087,9 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 			pr_warn("NFS export requires an index dir, falling back to nfs_export=off.\n");
 			ofs->config.nfs_export = false;
 		}
+	} else if (ofs->config.xino == OVL_XINO_NOFOLLOW) {
+		pr_warn("\"xino=nofollow\" conflicts with \"index=on\", falling back to \"xino=off\".\n");
+		ofs->config.xino = OVL_XINO_OFF;
 	}
 
 	if (ofs->config.metacopy && ofs->config.nfs_export) {
