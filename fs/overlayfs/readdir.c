@@ -46,6 +46,7 @@ struct ovl_readdir_data {
 	int count;
 	int err;
 	bool is_upper;
+	bool calc_d_ino;
 	bool d_type_supported;
 };
 
@@ -113,8 +114,7 @@ static struct ovl_cache_entry *ovl_cache_entry_find(struct rb_root *root,
 static bool ovl_calc_d_ino(struct ovl_readdir_data *rdd,
 			   struct ovl_cache_entry *p)
 {
-	/* Don't care if not doing ovl_iter() */
-	if (!rdd->dentry)
+	if (!rdd->calc_d_ino)
 		return false;
 
 	/* Always recalc d_ino when remapping lower inode numbers */
@@ -345,12 +345,14 @@ static int ovl_dir_read_merged(struct dentry *dentry, struct list_head *list,
 {
 	int err;
 	struct path realpath;
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	struct ovl_readdir_data rdd = {
 		.ctx.actor = ovl_fill_merge,
 		.dentry = dentry,
 		.list = list,
 		.root = root,
 		.is_lowest = false,
+		.calc_d_ino = ovl_same_dev(ofs),
 	};
 	int idx, next;
 
