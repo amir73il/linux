@@ -231,8 +231,7 @@ struct dentry *ovl_create_temp(struct ovl_fs *ofs, struct dentry *workdir,
 			       ovl_lookup_temp(ofs, workdir), attr);
 }
 
-static int ovl_set_opaque_xerr(struct dentry *dentry, struct dentry *upper,
-			       int xerr)
+int ovl_set_opaque_xerr(struct dentry *dentry, struct dentry *upper, int xerr)
 {
 	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	int err;
@@ -244,7 +243,7 @@ static int ovl_set_opaque_xerr(struct dentry *dentry, struct dentry *upper,
 	return err;
 }
 
-static int ovl_set_opaque(struct dentry *dentry, struct dentry *upperdentry)
+int ovl_set_opaque(struct dentry *dentry, struct dentry *upperdentry)
 {
 	/*
 	 * Fail with -EIO when trying to create opaque dir and upper doesn't

@@ -70,7 +70,7 @@ Inode properties
 | on same fs,  |     |      |     |      |        |        |        |       |
 | xino=off     |     |      |     |      |        |        |        |       |
 +--------------+-----+------+-----+------+--------+--------+--------+-------+
-| xino=nofollow|  Y  |  N   |  Y  |  Y   |  Y     |   Y    |  Y     |  N    |
+| xino=nofollow|  N  |  N   |  Y  |  Y   |  Y     |   Y    |  N     |  N    |
 +--------------+-----+------+-----+------+--------+--------+--------+-------+
 | xino=on/auto |  Y  |  Y   |  Y  |  Y   |  Y     |   Y    |  Y     |  Y    |
 +--------------+-----+------+-----+------+--------+--------+--------+-------+
@@ -506,7 +506,9 @@ summarized in the `Inode properties`_ table above.
 With mount option "xino=nofollow", overlayfs does not try to preserve the
 pre-copyup values of st_ino and st_dev of a non-directory object across copyup,
 but after copyup, the values of st_ino and st_dev are persistent and st_ino
-is consistent with d_ino.
+is consistent with d_ino.  In this mode, merged directories can become "opaque"
+when all the lower children are covered by upper objects and then the values
+of st_ino and st_dev will change similar to the non-directory copyup case.
 
 Changes to underlying filesystems
 ---------------------------------

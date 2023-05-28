@@ -49,6 +49,7 @@ struct ovl_readdir_data {
 	bool calc_d_ino;
 	bool d_type_supported;
 	bool has_whiteout;
+	bool has_lower;
 };
 
 struct ovl_dir_file {
@@ -167,6 +168,9 @@ static struct ovl_cache_entry *ovl_cache_entry_new(struct ovl_readdir_data *rdd,
 	if (d_type == DT_CHR) {
 		p->next_maybe_whiteout = rdd->first_maybe_whiteout;
 		rdd->first_maybe_whiteout = p;
+	} else if (!rdd->is_upper) {
+		/* A non-whiteout lower entry exists in the merge */
+		rdd->has_lower = true;
 	}
 	return p;
 }
@@ -286,6 +290,8 @@ static int ovl_check_whiteouts(const struct path *path, struct ovl_readdir_data 
 			}
 			if (p->is_whiteout)
 				rdd->has_whiteout = true;
+			else if (!rdd->is_upper)
+				rdd->has_lower = true;
 		}
 		inode_unlock(dir->d_inode);
 	}
@@ -346,7 +352,7 @@ static void ovl_dir_reset(struct file *file)
 /*
  * Populate list of merge dir entries including whiteout entries.
  *
- * Return > 0 if list contains entries not needed in readdir cache.
+ * Return > 0 if list contains entries that need update in readdir cache.
  * Return < 0 on error.
  */
 static int ovl_dir_read_merged(struct dentry *dentry, struct list_head *list,
@@ -384,7 +390,7 @@ static int ovl_dir_read_merged(struct dentry *dentry, struct list_head *list,
 			list_del(&rdd.middle);
 		}
 	}
-	return err ?: rdd.has_whiteout;
+	return err ?: rdd.has_whiteout + (!rdd.has_lower && rdd.calc_d_ino);
 }
 
 static void ovl_seek_cursor(struct ovl_dir_file *od, loff_t pos)
@@ -401,27 +407,80 @@ static void ovl_seek_cursor(struct ovl_dir_file *od, loff_t pos)
 	od->cursor = p;
 }
 
-/* Filter out entries unneeded for merge dir cache */
-static int ovl_dir_cache_finalize(struct list_head *list)
+static int ovl_cache_update_ino(const struct path *path, struct ovl_cache_entry *p);
+
+/*
+ * Update entries and remove unneeded entires for merge dir cache.
+ *
+ * With xino=nofollow, we allow st_ino of merge directory to change to the
+ * upper st_ino in the same manner that a non-dir changes its st_ino on
+ * copy up when all the children of the directory are "fully copied up"
+ * by making the directory opaque.
+ */
+static int ovl_dir_cache_finalize(struct path *path, struct list_head *list)
 {
+	struct dentry *dentry = path->dentry;
+	struct dentry *upperdentry = ovl_dentry_upper(dentry);
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	struct ovl_cache_entry *p;
 	struct ovl_cache_entry *n;
+	bool has_lower = false;
+	bool update_ino = false;
+	bool opaquify = !ovl_follow_origin(ofs) && upperdentry &&
+			!ovl_dentry_is_opaque(dentry);
+	int err;
 
 	list_for_each_entry_safe(p, n, list, l_node) {
 		if (p->is_whiteout) {
 			list_del(&p->l_node);
 			kfree(p);
+			continue;
+		}
+		if (!p->is_upper)
+			has_lower = true;
+
+		if (!opaquify || has_lower || update_ino ||
+		    strcmp(p->name, ".") == 0 ||
+		    strcmp(p->name, "..") == 0)
+			continue;
+
+		/* Update d_ino to find out if we can set the dir opaque */
+		if (!p->ino) {
+			err = ovl_cache_update_ino(path, p);
+			if (err)
+				return err;
+		}
+		if (p->ino != p->real_ino) {
+			pr_debug("%s(./%s): ino=%llu, real_ino=%llu\n",
+				 __func__, p->name, p->ino, p->real_ino);
+			update_ino = true;
+		}
+	}
+
+	pr_debug("%s(%pd2): opaquify=%d, has_lower=%d, update_ino=%d\n",
+		 __func__, dentry, opaquify, has_lower, update_ino);
+
+	if (opaquify && !has_lower && !update_ino) {
+		/*
+		 * A good opportunity to get rid of useless lower stack
+		 * which contributes no entries to the merge and does not
+		 * update any d_ino.
+		 * Setting the "opaque" xattr is best effort.
+		 */
+		if (!ovl_want_write(dentry)) {
+			ovl_set_opaque(dentry, upperdentry);
+			ovl_drop_write(dentry);
 		}
 	}
 
 	return 0;
 }
 
-static struct ovl_dir_cache *ovl_cache_get(struct dentry *dentry)
+static struct ovl_dir_cache *ovl_cache_get(struct path *path)
 {
 	int res;
 	struct ovl_dir_cache *cache;
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = d_inode(path->dentry);
 
 	cache = ovl_dir_cache(inode);
 	if (cache && ovl_inode_version_get(inode) == cache->version) {
@@ -429,7 +488,7 @@ static struct ovl_dir_cache *ovl_cache_get(struct dentry *dentry)
 		cache->refcount++;
 		return cache;
 	}
-	ovl_set_dir_cache(d_inode(dentry), NULL);
+	ovl_set_dir_cache(inode, NULL);
 
 	cache = kzalloc(sizeof(struct ovl_dir_cache), GFP_KERNEL);
 	if (!cache)
@@ -439,9 +498,9 @@ static struct ovl_dir_cache *ovl_cache_get(struct dentry *dentry)
 	INIT_LIST_HEAD(&cache->entries);
 	cache->root = RB_ROOT;
 
-	res = ovl_dir_read_merged(dentry, &cache->entries, &cache->root);
+	res = ovl_dir_read_merged(path->dentry, &cache->entries, &cache->root);
 	if (res > 0)
-		res = ovl_dir_cache_finalize(&cache->entries);
+		res = ovl_dir_cache_finalize(path, &cache->entries);
 	if (res) {
 		ovl_cache_free(&cache->entries);
 		kfree(cache);
@@ -795,7 +854,7 @@ static int ovl_iterate(struct file *file, struct dir_context *ctx)
 	if (!od->cache) {
 		struct ovl_dir_cache *cache;
 
-		cache = ovl_cache_get(dentry);
+		cache = ovl_cache_get(&file->f_path);
 		err = PTR_ERR(cache);
 		if (IS_ERR(cache))
 			goto out;

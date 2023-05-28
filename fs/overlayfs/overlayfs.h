@@ -470,6 +470,8 @@ static inline bool ovl_check_origin_xattr(struct ovl_fs *ofs,
 int ovl_check_setxattr(struct ovl_fs *ofs, struct dentry *upperdentry,
 		       enum ovl_xattr ox, const void *value, size_t size,
 		       int xerr);
+int ovl_set_opaque_xerr(struct dentry *dentry, struct dentry *upper, int xerr);
+int ovl_set_opaque(struct dentry *dentry, struct dentry *upper);
 int ovl_set_impure(struct dentry *dentry, struct dentry *upperdentry);
 bool ovl_inuse_trylock(struct dentry *dentry);
 void ovl_inuse_unlock(struct dentry *dentry);
