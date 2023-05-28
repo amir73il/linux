@@ -48,6 +48,7 @@ struct ovl_readdir_data {
 	bool is_upper;
 	bool calc_d_ino;
 	bool d_type_supported;
+	bool has_whiteout;
 };
 
 struct ovl_dir_file {
@@ -283,6 +284,8 @@ static int ovl_check_whiteouts(const struct path *path, struct ovl_readdir_data 
 				p->is_whiteout = ovl_is_whiteout(dentry);
 				dput(dentry);
 			}
+			if (p->is_whiteout)
+				rdd->has_whiteout = true;
 		}
 		inode_unlock(dir->d_inode);
 	}
@@ -340,6 +343,12 @@ static void ovl_dir_reset(struct file *file)
 	}
 }
 
+/*
+ * Populate list of merge dir entries including whiteout entries.
+ *
+ * Return > 0 if list contains entries not needed in readdir cache.
+ * Return < 0 on error.
+ */
 static int ovl_dir_read_merged(struct dentry *dentry, struct list_head *list,
 	struct rb_root *root)
 {
@@ -375,7 +384,7 @@ static int ovl_dir_read_merged(struct dentry *dentry, struct list_head *list,
 			list_del(&rdd.middle);
 		}
 	}
-	return err;
+	return err ?: rdd.has_whiteout;
 }
 
 static void ovl_seek_cursor(struct ovl_dir_file *od, loff_t pos)
@@ -390,6 +399,22 @@ static void ovl_seek_cursor(struct ovl_dir_file *od, loff_t pos)
 	}
 	/* Cursor is safe since the cache is stable */
 	od->cursor = p;
+}
+
+/* Filter out entries unneeded for merge dir cache */
+static int ovl_dir_cache_finalize(struct list_head *list)
+{
+	struct ovl_cache_entry *p;
+	struct ovl_cache_entry *n;
+
+	list_for_each_entry_safe(p, n, list, l_node) {
+		if (p->is_whiteout) {
+			list_del(&p->l_node);
+			kfree(p);
+		}
+	}
+
+	return 0;
 }
 
 static struct ovl_dir_cache *ovl_cache_get(struct dentry *dentry)
@@ -415,6 +440,8 @@ static struct ovl_dir_cache *ovl_cache_get(struct dentry *dentry)
 	cache->root = RB_ROOT;
 
 	res = ovl_dir_read_merged(dentry, &cache->entries, &cache->root);
+	if (res > 0)
+		res = ovl_dir_cache_finalize(&cache->entries);
 	if (res) {
 		ovl_cache_free(&cache->entries);
 		kfree(cache);
@@ -975,7 +1002,7 @@ int ovl_check_empty_dir(struct dentry *dentry, struct list_head *list)
 	old_cred = ovl_override_creds(dentry->d_sb);
 	err = ovl_dir_read_merged(dentry, list, &root);
 	revert_creds(old_cred);
-	if (err)
+	if (err < 0)
 		return err;
 
 	err = 0;
