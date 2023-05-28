@@ -19,11 +19,13 @@ enum ovl_path_type {
 	__OVL_PATH_UPPER	= (1 << 0),
 	__OVL_PATH_MERGE	= (1 << 1),
 	__OVL_PATH_ORIGIN	= (1 << 2),
+	__OVL_PATH_OPAQUE	= (1 << 3),
 };
 
 #define OVL_TYPE_UPPER(type)	((type) & __OVL_PATH_UPPER)
 #define OVL_TYPE_MERGE(type)	((type) & __OVL_PATH_MERGE)
 #define OVL_TYPE_ORIGIN(type)	((type) & __OVL_PATH_ORIGIN)
+#define OVL_TYPE_OPAQUE(type)	((type) & __OVL_PATH_OPAQUE)
 
 #define OVL_XATTR_NAMESPACE "overlay."
 #define OVL_XATTR_TRUSTED_PREFIX XATTR_TRUSTED_PREFIX OVL_XATTR_NAMESPACE
@@ -388,6 +390,24 @@ void ovl_dentry_init_flags(struct dentry *dentry, struct dentry *upperdentry,
 			   struct ovl_entry *oe, unsigned int mask);
 bool ovl_dentry_weird(struct dentry *dentry);
 enum ovl_path_type ovl_path_type(struct dentry *dentry);
+
+inline static bool ovl_type_merge(struct dentry *dentry)
+{
+	return OVL_TYPE_MERGE(ovl_path_type(dentry));
+}
+
+inline static bool ovl_type_origin(struct dentry *dentry)
+{
+	return OVL_TYPE_ORIGIN(ovl_path_type(dentry));
+}
+
+inline static bool ovl_type_merge_or_lower(struct dentry *dentry)
+{
+	enum ovl_path_type type = ovl_path_type(dentry);
+
+	return OVL_TYPE_MERGE(type) || !OVL_TYPE_UPPER(type);
+}
+
 void ovl_path_upper(struct dentry *dentry, struct path *path);
 void ovl_path_lower(struct dentry *dentry, struct path *path);
 void ovl_path_lowerdata(struct dentry *dentry, struct path *path);

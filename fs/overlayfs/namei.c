@@ -854,14 +854,19 @@ int ovl_path_next(int idx, struct dentry *dentry, struct path *path)
 	struct ovl_entry *oe = OVL_E(dentry);
 	struct ovl_path *lowerstack = ovl_lowerstack(oe);
 
-	BUG_ON(idx < 0);
+	if (WARN_ON_ONCE(idx < 0))
+		return -1;
+
 	if (idx == 0) {
 		ovl_path_upper(dentry, path);
 		if (path->dentry)
-			return ovl_numlower(oe) ? 1 : -1;
+			return ovl_type_merge(dentry) ? 1 : -1;
 		idx++;
 	}
-	BUG_ON(idx > ovl_numlower(oe));
+
+	if (WARN_ON_ONCE(idx > ovl_numlower(oe)))
+		return -1;
+
 	path->dentry = lowerstack[idx - 1].dentry;
 	path->mnt = lowerstack[idx - 1].layer->mnt;
 
@@ -942,6 +947,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	const struct cred *old_cred;
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 	struct ovl_entry *poe = OVL_E(dentry->d_parent);
+	bool pure_upper_parent = !ovl_type_merge_or_lower(dentry->d_parent);
 	struct ovl_entry *roe = OVL_E(dentry->d_sb->s_root);
 	struct ovl_path *stack = NULL, *origin_path = NULL;
 	struct dentry *upperdir, *upperdentry = NULL;
@@ -960,8 +966,9 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		.name = dentry->d_name,
 		.is_dir = false,
 		.opaque = false,
-		.stop = false,
-		.last = ofs->config.redirect_follow ? false : !ovl_numlower(poe),
+		.stop = pure_upper_parent,
+		/* An absolure redirect can escape a pure upper parent */
+		.last = ofs->config.redirect_follow ? false : pure_upper_parent,
 		.redirect = NULL,
 		.metacopy = false,
 	};
@@ -1272,6 +1279,10 @@ bool ovl_lower_positive(struct dentry *dentry)
 	unsigned int i;
 	bool positive = false;
 	bool done = false;
+
+	/* Pure upper parent -> negative lower children */
+	if (!ovl_type_merge_or_lower(dentry->d_parent))
+		return false;
 
 	/*
 	 * If dentry is negative, then lower is positive iff this is a

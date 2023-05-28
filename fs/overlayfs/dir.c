@@ -308,16 +308,6 @@ static int ovl_instantiate(struct dentry *dentry, struct inode *inode,
 	return 0;
 }
 
-static bool ovl_type_merge(struct dentry *dentry)
-{
-	return OVL_TYPE_MERGE(ovl_path_type(dentry));
-}
-
-static bool ovl_type_origin(struct dentry *dentry)
-{
-	return OVL_TYPE_ORIGIN(ovl_path_type(dentry));
-}
-
 static int ovl_create_upper(struct dentry *dentry, struct inode *inode,
 			    struct ovl_cattr *attr)
 {
@@ -941,13 +931,6 @@ static int ovl_unlink(struct inode *dir, struct dentry *dentry)
 static int ovl_rmdir(struct inode *dir, struct dentry *dentry)
 {
 	return ovl_do_remove(dentry, true);
-}
-
-static bool ovl_type_merge_or_lower(struct dentry *dentry)
-{
-	enum ovl_path_type type = ovl_path_type(dentry);
-
-	return OVL_TYPE_MERGE(type) || !OVL_TYPE_UPPER(type);
 }
 
 static bool ovl_can_move(struct dentry *dentry)

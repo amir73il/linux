@@ -189,7 +189,9 @@ enum ovl_path_type ovl_path_type(struct dentry *dentry)
 		 * With xino=nofollow, st_ino is taken from copy up origin only
 		 * in a merge directory or metacopy file.
 		 */
-		if (ovl_numlower(oe)) {
+		if (ovl_dentry_is_opaque(dentry)) {
+			type |= __OVL_PATH_OPAQUE;
+		} else if (ovl_numlower(oe)) {
 			if (ovl_test_flag(OVL_CONST_INO, d_inode(dentry)))
 				type |= __OVL_PATH_ORIGIN;
 			if (d_is_dir(dentry) ||
