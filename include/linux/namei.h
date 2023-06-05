@@ -50,14 +50,25 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT};
 /* dirfd was opened by fanotify and lookup shouldn't generate fanotify events */
 #define LOOKUP_NONOTIFY		0x4000000
 
+/* path lookup helpers may return these lookup flags in results */
+#define LOOKUP_RES_FLAGS_MASK	(LOOKUP_NONOTIFY)
+
+struct lookup_result {
+	struct qstr last;
+	int type;
+	int empty;
+	unsigned int flags;
+};
+
 extern int path_pts(struct path *path);
 
-extern int user_path_at_empty(int, const char __user *, unsigned, struct path *, int *empty);
+extern int user_path_lookupat(int, const char __user *, unsigned, struct path *,
+			      struct lookup_result *res);
 
 static inline int user_path_at(int dfd, const char __user *name, unsigned flags,
 		 struct path *path)
 {
-	return user_path_at_empty(dfd, name, flags, path, NULL);
+	return user_path_lookupat(dfd, name, flags, path, NULL);
 }
 
 struct dentry *lookup_one_qstr_excl(const struct qstr *name,
@@ -70,7 +81,7 @@ extern struct dentry *user_path_create(int, const char __user *, struct path *, 
 extern void done_path_create(struct path *, struct dentry *);
 extern struct dentry *kern_path_locked(const char *, struct path *);
 int vfs_path_parent_lookup(struct filename *filename, unsigned int flags,
-			   struct path *parent, struct qstr *last, int *type,
+			   struct path *parent, struct lookup_result *res,
 			   const struct path *root);
 int vfs_path_lookup(struct dentry *, struct vfsmount *, const char *,
 		    unsigned int, struct path *);

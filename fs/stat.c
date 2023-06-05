@@ -467,18 +467,18 @@ static int do_readlinkat(int dfd, const char __user *pathname,
 {
 	struct path path;
 	int error;
-	int empty = 0;
+	struct lookup_result res = { .empty = 0 };
 	unsigned int lookup_flags = LOOKUP_EMPTY;
 
 	if (bufsiz <= 0)
 		return -EINVAL;
 
 retry:
-	error = user_path_at_empty(dfd, pathname, lookup_flags, &path, &empty);
+	error = user_path_lookupat(dfd, pathname, lookup_flags, &path, &res);
 	if (!error) {
 		struct inode *inode = d_backing_inode(path.dentry);
 
-		error = empty ? -ENOENT : -EINVAL;
+		error = res.empty ? -ENOENT : -EINVAL;
 		/*
 		 * AFS mountpoints allow readlink(2) but are not symlinks
 		 */
