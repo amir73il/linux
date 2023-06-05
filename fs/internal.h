@@ -17,6 +17,7 @@ struct fs_context;
 struct pipe_inode_info;
 struct iov_iter;
 struct mnt_idmap;
+struct lookup_result;
 
 /*
  * block/bdev.c
@@ -59,6 +60,9 @@ extern int finish_clean_context(struct fs_context *fc);
  */
 extern int filename_lookup(int dfd, struct filename *name, unsigned flags,
 			   struct path *path, struct path *root);
+extern int filename_lookupat(int dfd, struct filename *name, unsigned flags,
+			     struct path *path, struct path *root,
+			     struct lookup_result *res);
 int do_rmdir(int dfd, struct filename *name);
 int do_unlinkat(int dfd, struct filename *name);
 int may_linkat(struct mnt_idmap *idmap, const struct path *link);

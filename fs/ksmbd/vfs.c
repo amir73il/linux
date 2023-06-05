@@ -65,10 +65,10 @@ static int ksmbd_vfs_path_lookup_locked(struct ksmbd_share_config *share_conf,
 					char *pathname, unsigned int flags,
 					struct path *path)
 {
-	struct qstr last;
+	struct lookup_result res;
 	struct filename *filename;
 	struct path *root_share_path = &share_conf->vfs_path;
-	int err, type;
+	int err;
 	struct path parent_path;
 	struct dentry *d;
 
@@ -84,19 +84,19 @@ static int ksmbd_vfs_path_lookup_locked(struct ksmbd_share_config *share_conf,
 		return PTR_ERR(filename);
 
 	err = vfs_path_parent_lookup(filename, flags,
-				     &parent_path, &last, &type,
+				     &parent_path, &res,
 				     root_share_path);
 	putname(filename);
 	if (err)
 		return err;
 
-	if (unlikely(type != LAST_NORM)) {
+	if (unlikely(res.type != LAST_NORM)) {
 		path_put(&parent_path);
 		return -ENOENT;
 	}
 
 	inode_lock_nested(parent_path.dentry->d_inode, I_MUTEX_PARENT);
-	d = lookup_one_qstr_excl(&last, parent_path.dentry, 0);
+	d = lookup_one_qstr_excl(&res.last, parent_path.dentry, 0);
 	if (IS_ERR(d))
 		goto err_out;
 
