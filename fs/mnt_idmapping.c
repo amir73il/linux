@@ -6,13 +6,37 @@
 #include <linux/mnt_idmapping.h>
 #include <linux/slab.h>
 #include <linux/user_namespace.h>
+#include <linux/fsnotify_backend.h>
 
 #include "internal.h"
 
 struct mnt_idmap {
 	struct user_namespace *owner;
+	struct fsnotify_mark_connector __rcu *fsnotify_marks;
+	__u32 fsnotify_mask;
 	refcount_t count;
 };
+
+struct mnt_idmap *fsnotify_conn_mnt_idmap(struct fsnotify_mark_connector *conn)
+{
+	return container_of(conn->obj, struct mnt_idmap, fsnotify_marks);
+}
+
+fsnotify_connp_t *mnt_idmap_fsnotify_conn_p(struct mnt_idmap *idmap)
+{
+	return &idmap->fsnotify_marks;
+}
+
+__u32 *mnt_idmap_fsnotify_mask_p(struct mnt_idmap *idmap)
+{
+	return &idmap->fsnotify_mask;
+}
+
+/* A "protected" idmap denies access if there is no listener */
+bool mnt_idmap_prot(struct mnt_idmap *idmap)
+{
+	return idmap->fsnotify_mask & FS_PRE_VFS;
+}
 
 /*
  * Carries the initial idmapping of 0:0:4294967295 which is an identity
@@ -228,7 +252,7 @@ int vfsgid_in_group_p(vfsgid_t vfsgid)
 #endif
 EXPORT_SYMBOL_GPL(vfsgid_in_group_p);
 
-struct mnt_idmap *alloc_mnt_idmap(struct user_namespace *mnt_userns)
+struct mnt_idmap *alloc_mnt_idmap(struct user_namespace *mnt_userns, bool prot)
 {
 	struct mnt_idmap *idmap;
 
@@ -237,6 +261,9 @@ struct mnt_idmap *alloc_mnt_idmap(struct user_namespace *mnt_userns)
 		return ERR_PTR(-ENOMEM);
 
 	idmap->owner = get_user_ns(mnt_userns);
+	/* Require fsnotify pre vfs filter */
+	if (prot)
+		idmap->fsnotify_mask = FS_PRE_VFS;
 	refcount_set(&idmap->count, 1);
 	return idmap;
 }

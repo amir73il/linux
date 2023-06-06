@@ -13,6 +13,7 @@
 
 #include <linux/fsnotify_backend.h>
 #include "fsnotify.h"
+#include "../internal.h"
 
 /*
  * Clear all of the marks on an inode when it is being evicted from core
@@ -23,8 +24,17 @@ void __fsnotify_inode_delete(struct inode *inode)
 }
 EXPORT_SYMBOL_GPL(__fsnotify_inode_delete);
 
+void __fsnotify_vfsmount_idmap(struct vfsmount *mnt)
+{
+	if (mnt_idmap_prot(mnt->mnt_idmap))
+		fsnotify_get_sb_perm_watchers(mnt->mnt_sb);
+}
+
 void __fsnotify_vfsmount_delete(struct vfsmount *mnt)
 {
+	if (mnt_idmap_prot(mnt->mnt_idmap))
+		fsnotify_put_sb_perm_watchers(mnt->mnt_sb);
+
 	fsnotify_clear_marks_by_mount(mnt);
 }
 
@@ -493,13 +503,26 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	struct fsnotify_iter_info iter_info = {};
 	struct mount *mnt = NULL;
 	struct inode *inode2 = NULL;
+	fsnotify_connp_t *idmap_marks = NULL;
 	struct dentry *moved;
 	int inode2_type;
 	int ret = 0;
-	__u32 test_mask, marks_mask;
+	__u32 test_mask, marks_mask = 0;
 
-	if (path)
+	if (path) {
+		struct mnt_idmap *idmap = mnt_idmap(path->mnt);
+
+		/* A "protected" idmap denies access if there is no listener */
+		if (mask & FSNOTIFY_PERM_EVENTS && mnt_idmap_prot(idmap)) {
+			idmap_marks = mnt_idmap_fsnotify_conn_p(idmap);
+			marks_mask = *mnt_idmap_fsnotify_mask_p(idmap);
+
+			if (!idmap_marks)
+				return -EPERM;
+		}
+
 		mnt = real_mount(path->mnt);
+	}
 
 	if (!inode) {
 		/* Dirent event - report on TYPE_INODE to dir */
@@ -526,13 +549,13 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	 * SRCU because we have no references to any objects and do not
 	 * need SRCU to keep them "alive".
 	 */
-	if (!sb->s_fsnotify_marks &&
+	if (!sb->s_fsnotify_marks && !idmap_marks &&
 	    (!mnt || !mnt->mnt_fsnotify_marks) &&
 	    (!inode || !inode->i_fsnotify_marks) &&
 	    (!inode2 || !inode2->i_fsnotify_marks))
 		return 0;
 
-	marks_mask = sb->s_fsnotify_mask;
+	marks_mask |= sb->s_fsnotify_mask;
 	if (mnt)
 		marks_mask |= mnt->mnt_fsnotify_mask;
 	if (inode)
@@ -555,6 +578,10 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 
 	iter_info.marks[FSNOTIFY_ITER_TYPE_SB] =
 		fsnotify_first_mark(&sb->s_fsnotify_marks);
+	if (idmap_marks) {
+		iter_info.marks[FSNOTIFY_ITER_TYPE_MNTIDMAP] =
+			fsnotify_first_mark(idmap_marks);
+	}
 	if (mnt) {
 		iter_info.marks[FSNOTIFY_ITER_TYPE_VFSMOUNT] =
 			fsnotify_first_mark(&mnt->mnt_fsnotify_marks);

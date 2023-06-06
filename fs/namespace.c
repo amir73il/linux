@@ -81,6 +81,7 @@ struct mount_kattr {
 	unsigned int propagation;
 	unsigned int lookup_flags;
 	bool recurse;
+	bool prot;
 	struct user_namespace *mnt_userns;
 	struct mnt_idmap *mnt_idmap;
 };
@@ -1400,6 +1401,7 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 
 	atomic_inc(&sb->s_active);
 	mnt->mnt.mnt_idmap = mnt_idmap_get(mnt_idmap(&old->mnt));
+	fsnotify_vfsmount_idmap(&mnt->mnt);
 
 	mnt->mnt.mnt_sb = sb;
 	mnt->mnt.mnt_root = dget(root);
@@ -3891,7 +3893,10 @@ out_type:
 	 MOUNT_ATTR_NOEXEC | MOUNT_ATTR__ATIME | MOUNT_ATTR_NODIRATIME |       \
 	 MOUNT_ATTR_NOSYMFOLLOW)
 
-#define MOUNT_SETATTR_VALID_FLAGS (FSMOUNT_VALID_FLAGS | MOUNT_ATTR_IDMAP)
+#define VFS_FILTER_FLAGS \
+	(MOUNT_ATTR_IDMAP | MOUNT_ATTR_PROT)
+
+#define MOUNT_SETATTR_VALID_FLAGS (FSMOUNT_VALID_FLAGS | VFS_FILTER_FLAGS)
 
 #define MOUNT_SETATTR_PROPAGATION_FLAGS \
 	(MS_UNBINDABLE | MS_PRIVATE | MS_SLAVE | MS_SHARED)
@@ -4381,6 +4386,7 @@ static void do_idmap_mount(const struct mount_kattr *kattr, struct mount *mnt)
 	 * references.
 	 */
 	smp_store_release(&mnt->mnt.mnt_idmap, mnt_idmap_get(kattr->mnt_idmap));
+	fsnotify_vfsmount_idmap(&mnt->mnt);
 }
 
 static void mount_setattr_commit(struct mount_kattr *kattr, struct mount *mnt)
@@ -4417,7 +4423,7 @@ static int do_mount_setattr(struct path *path, struct mount_kattr *kattr)
 	if (kattr->mnt_userns) {
 		struct mnt_idmap *mnt_idmap;
 
-		mnt_idmap = alloc_mnt_idmap(kattr->mnt_userns);
+		mnt_idmap = alloc_mnt_idmap(kattr->mnt_userns, kattr->prot);
 		if (IS_ERR(mnt_idmap))
 			return PTR_ERR(mnt_idmap);
 		kattr->mnt_idmap = mnt_idmap;
@@ -4480,10 +4486,10 @@ static int build_mount_idmapped(const struct mount_attr *attr, size_t usize,
 {
 	int err = 0;
 	struct ns_common *ns;
-	struct user_namespace *mnt_userns;
-	struct fd f;
+	struct user_namespace *mnt_userns = &init_user_ns;
+	struct fd f = {};
 
-	if (!((attr->attr_set | attr->attr_clr) & MOUNT_ATTR_IDMAP))
+	if (!((attr->attr_set | attr->attr_clr) & VFS_FILTER_FLAGS))
 		return 0;
 
 	/*
@@ -4491,8 +4497,12 @@ static int build_mount_idmapped(const struct mount_attr *attr, size_t usize,
 	 * is a use-case we can revisit this but for now let's keep it simple
 	 * and not allow it.
 	 */
-	if (attr->attr_clr & MOUNT_ATTR_IDMAP)
+	if (attr->attr_clr & VFS_FILTER_FLAGS)
 		return -EINVAL;
+
+	/* With MOUNT_ATTR_PROT only, create idmap with init_user_ns */
+	if (!(attr->attr_set & MOUNT_ATTR_IDMAP))
+		goto done;
 
 	if (attr->userns_fd > INT_MAX)
 		return -EINVAL;
@@ -4526,6 +4536,7 @@ static int build_mount_idmapped(const struct mount_attr *attr, size_t usize,
 		goto out_fput;
 	}
 
+done:
 	/* We're not controlling the target namespace. */
 	if (!ns_capable(mnt_userns, CAP_SYS_ADMIN)) {
 		err = -EPERM;
@@ -4554,6 +4565,7 @@ static int build_mount_kattr(const struct mount_attr *attr, size_t usize,
 	*kattr = (struct mount_kattr) {
 		.lookup_flags	= lookup_flags,
 		.recurse	= !!(flags & AT_RECURSIVE),
+		.prot		= attr->attr_set & MOUNT_ATTR_PROT,
 	};
 
 	if (attr->propagation & ~MOUNT_SETATTR_PROPAGATION_FLAGS)

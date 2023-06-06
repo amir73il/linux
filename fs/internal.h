@@ -17,6 +17,7 @@ struct fs_context;
 struct pipe_inode_info;
 struct iov_iter;
 struct mnt_idmap;
+struct fsnotify_mark_connector;
 struct lookup_result;
 
 /*
@@ -260,11 +261,15 @@ static inline ssize_t do_get_acl(struct mnt_idmap *idmap,
 ssize_t __kernel_write_iter(struct file *file, struct iov_iter *from, loff_t *pos);
 
 /*
- * fs/attr.c
+ * fs/mnt_idmapping.c
  */
-struct mnt_idmap *alloc_mnt_idmap(struct user_namespace *mnt_userns);
+struct mnt_idmap *alloc_mnt_idmap(struct user_namespace *mnt_userns, bool prot);
 struct mnt_idmap *mnt_idmap_get(struct mnt_idmap *idmap);
 void mnt_idmap_put(struct mnt_idmap *idmap);
+struct fsnotify_mark_connector **mnt_idmap_fsnotify_conn_p(
+						struct mnt_idmap *idmap);
+__u32 *mnt_idmap_fsnotify_mask_p(struct mnt_idmap *idmap);
+bool mnt_idmap_prot(struct mnt_idmap *idmap);
 
 /*
  * fs/read_write.c:

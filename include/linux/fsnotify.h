@@ -223,6 +223,14 @@ static inline void fsnotify_inode_delete(struct inode *inode)
 }
 
 /*
+ * fsnotify_vfsmount_idmap - a vfsmount idmapping was created (called once)
+ */
+static inline void fsnotify_vfsmount_idmap(struct vfsmount *mnt)
+{
+	__fsnotify_vfsmount_idmap(mnt);
+}
+
+/*
  * fsnotify_vfsmount_delete - a vfsmount is being destroyed, clean up is needed
  */
 static inline void fsnotify_vfsmount_delete(struct vfsmount *mnt)

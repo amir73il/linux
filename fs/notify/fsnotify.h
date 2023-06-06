@@ -27,6 +27,8 @@ static inline struct super_block *fsnotify_conn_sb(
 	return container_of(conn->obj, struct super_block, s_fsnotify_marks);
 }
 
+struct mnt_idmap *fsnotify_conn_mnt_idmap(struct fsnotify_mark_connector *conn);
+
 static inline struct super_block *fsnotify_connector_sb(
 				struct fsnotify_mark_connector *conn)
 {

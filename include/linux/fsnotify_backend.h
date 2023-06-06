@@ -437,6 +437,7 @@ static inline const struct file_range *fsnotify_data_file_range(
 enum fsnotify_iter_type {
 	FSNOTIFY_ITER_TYPE_INODE,
 	FSNOTIFY_ITER_TYPE_VFSMOUNT,
+	FSNOTIFY_ITER_TYPE_MNTIDMAP,
 	FSNOTIFY_ITER_TYPE_SB,
 	FSNOTIFY_ITER_TYPE_PARENT,
 	FSNOTIFY_ITER_TYPE_INODE2,
@@ -448,6 +449,7 @@ enum fsnotify_obj_type {
 	FSNOTIFY_OBJ_TYPE_ANY = -1,
 	FSNOTIFY_OBJ_TYPE_INODE,
 	FSNOTIFY_OBJ_TYPE_VFSMOUNT,
+	FSNOTIFY_OBJ_TYPE_MNTIDMAP,
 	FSNOTIFY_OBJ_TYPE_SB,
 	FSNOTIFY_OBJ_TYPE_COUNT,
 	FSNOTIFY_OBJ_TYPE_DETACHED = FSNOTIFY_OBJ_TYPE_COUNT
@@ -605,6 +607,7 @@ extern int fsnotify(__u32 mask, const void *data, int data_type,
 extern int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 			   int data_type);
 extern void __fsnotify_inode_delete(struct inode *inode);
+extern void __fsnotify_vfsmount_idmap(struct vfsmount *mnt);
 extern void __fsnotify_vfsmount_delete(struct vfsmount *mnt);
 extern void fsnotify_sb_delete(struct super_block *sb);
 extern u32 fsnotify_get_cookie(void);
@@ -905,6 +908,9 @@ static inline int __fsnotify_parent(struct dentry *dentry, __u32 mask,
 }
 
 static inline void __fsnotify_inode_delete(struct inode *inode)
+{}
+
+static inline void __fsnotify_vfsmount_idmap(struct vfsmount *mnt)
 {}
 
 static inline void __fsnotify_vfsmount_delete(struct vfsmount *mnt)
