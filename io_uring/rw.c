@@ -220,18 +220,14 @@ static bool io_rw_should_reissue(struct io_kiocb *req)
 }
 #endif
 
-static void kiocb_end_write(struct io_kiocb *req)
+static void kiocb_end_write(struct io_kiocb *req, int idx)
 {
 	/*
 	 * Tell lockdep we inherited freeze protection from submission
 	 * thread.
 	 */
-	if (req->flags & REQ_F_ISREG) {
-		struct super_block *sb = file_inode(req->file)->i_sb;
-
-		__sb_writers_acquired(sb, SB_FREEZE_WRITE);
-		sb_end_write(sb);
-	}
+	__file_write_srcu_acquire(req->file, idx);
+	file_end_write_srcu(req->file, idx);
 }
 
 /*
@@ -243,7 +239,7 @@ static void io_req_io_end(struct io_kiocb *req)
 	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
 
 	if (rw->kiocb.ki_flags & IOCB_WRITE) {
-		kiocb_end_write(req);
+		kiocb_end_write(req, rw->kiocb.ki_idx);
 		fsnotify_modify(req->file);
 	} else {
 		fsnotify_access(req->file);
@@ -313,7 +309,7 @@ static void io_complete_rw_iopoll(struct kiocb *kiocb, long res)
 	struct io_kiocb *req = cmd_to_io_kiocb(rw);
 
 	if (kiocb->ki_flags & IOCB_WRITE)
-		kiocb_end_write(req);
+		kiocb_end_write(req, kiocb->ki_idx);
 	if (unlikely(res != req->cqe.res)) {
 		if (res == -EAGAIN && io_rw_should_reissue(req)) {
 			req->flags |= REQ_F_REISSUE | REQ_F_PARTIAL_IO;
@@ -858,6 +854,7 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
 	bool force_nonblock = issue_flags & IO_URING_F_NONBLOCK;
 	ssize_t ret, ret2;
 	loff_t *ppos;
+	int idx;
 
 	if (!req_has_async_data(req)) {
 		ret = io_import_iovec(ITER_SOURCE, req, &iovec, s, issue_flags);
@@ -897,24 +894,21 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
 	ppos = io_kiocb_update_pos(req);
 
 	ret = rw_verify_area(WRITE, req->file, ppos, req->cqe.res);
-	if (unlikely(ret)) {
-		kfree(iovec);
-		return ret;
-	}
+	if (unlikely(ret))
+		goto free_iov;
+
+	ret = file_start_write_area(req->file, ppos, req->cqe.res, &idx);
+	if (unlikely(ret))
+		goto free_iov;
 
 	/*
-	 * Open-code file_start_write here to grab freeze protection,
-	 * which will be released by another thread in
-	 * io_complete_rw().  Fool lockdep by telling it the lock got
-	 * released so that it doesn't complain about the held lock when
-	 * we return to userspace.
+	 * Fool lockdep by telling it the lock got released so that it doesn't
+	 * complain about the held lock when we return to userspace.
 	 */
-	if (req->flags & REQ_F_ISREG) {
-		sb_start_write(file_inode(req->file)->i_sb);
-		__sb_writers_release(file_inode(req->file)->i_sb,
-					SB_FREEZE_WRITE);
-	}
+	__file_write_srcu_release(req->file, idx);
+
 	kiocb->ki_flags |= IOCB_WRITE;
+	kiocb->ki_idx = idx;
 
 	if (likely(req->file->f_op->write_iter))
 		ret2 = call_write_iter(req->file, kiocb, &s->iter);
@@ -961,7 +955,7 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
 				io->bytes_done += ret2;
 
 			if (kiocb->ki_flags & IOCB_WRITE)
-				kiocb_end_write(req);
+				kiocb_end_write(req, idx);
 			return ret ? ret : -EAGAIN;
 		}
 done:
@@ -972,11 +966,12 @@ copy_iov:
 		ret = io_setup_async_rw(req, iovec, s, false);
 		if (!ret) {
 			if (kiocb->ki_flags & IOCB_WRITE)
-				kiocb_end_write(req);
+				kiocb_end_write(req, idx);
 			return -EAGAIN;
 		}
 		return ret;
 	}
+free_iov:
 	/* it's reportedly faster than delegating the null check to kfree() */
 	if (iovec)
 		kfree(iovec);

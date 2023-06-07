@@ -260,7 +260,7 @@ static void cachefiles_write_complete(struct kiocb *iocb, long ret)
 	_enter("%ld", ret);
 
 	/* Tell lockdep we inherited freeze protection from submission thread */
-	__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
+	__sb_writers_acquire(inode->i_sb, SB_FREEZE_WRITE);
 	__sb_end_write(inode->i_sb, SB_FREEZE_WRITE);
 
 	if (ret < 0)
