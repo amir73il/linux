@@ -42,6 +42,7 @@
 #include <linux/percpu-refcount.h>
 #include <linux/mount.h>
 #include <linux/pseudo_fs.h>
+#include <linux/fsnotify.h>
 
 #include <linux/uaccess.h>
 #include <linux/nospec.h>
@@ -1437,17 +1438,14 @@ static void aio_remove_iocb(struct aio_kiocb *iocb)
 	spin_unlock_irqrestore(&ctx->ctx_lock, flags);
 }
 
-static void aio_end_write(struct file *file)
+static void aio_end_write(struct file *file, int idx)
 {
-	struct inode *inode = file_inode(file);
-
 	/*
 	 * Tell lockdep we inherited freeze protection from submission
 	 * thread.
 	 */
-	if (S_ISREG(inode->i_mode))
-		__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
-	file_end_write(file);
+	__file_write_srcu_acquire(file, idx);
+	file_end_write_srcu(file, idx);
 }
 
 static void aio_complete_rw(struct kiocb *kiocb, long res)
@@ -1458,7 +1456,7 @@ static void aio_complete_rw(struct kiocb *kiocb, long res)
 		aio_remove_iocb(iocb);
 
 	if (kiocb->ki_flags & IOCB_WRITE)
-		aio_end_write(kiocb->ki_filp);
+		aio_end_write(kiocb->ki_filp, kiocb->ki_idx);
 
 	iocb->ki_res.res = res;
 	iocb->ki_res.res2 = 0;
@@ -1569,6 +1567,7 @@ static int aio_write(struct kiocb *req, const struct iocb *iocb,
 	struct iov_iter iter;
 	struct file *file;
 	int ret;
+	int idx;
 
 	ret = aio_prep_rw(req, iocb);
 	if (ret)
@@ -1584,21 +1583,25 @@ static int aio_write(struct kiocb *req, const struct iocb *iocb,
 	if (ret < 0)
 		return ret;
 	ret = rw_verify_area(WRITE, file, &req->ki_pos, iov_iter_count(&iter));
-	if (!ret) {
-		/*
-		 * Open-code file_start_write here to grab freeze protection,
-		 * which will be released by another thread in
-		 * aio_complete_rw().  Fool lockdep by telling it the lock got
-		 * released so that it doesn't complain about the held lock when
-		 * we return to userspace.
-		 */
-		if (S_ISREG(file_inode(file)->i_mode)) {
-			sb_start_write(file_inode(file)->i_sb);
-			__sb_writers_release(file_inode(file)->i_sb, SB_FREEZE_WRITE);
-		}
-		req->ki_flags |= IOCB_WRITE;
-		aio_rw_done(req, call_write_iter(file, req, &iter));
-	}
+	if (ret)
+		goto free_iov;
+
+	ret = file_start_write_area(file, &req->ki_pos, iov_iter_count(&iter),
+				    &idx);
+	if (ret)
+		goto free_iov;
+
+	/*
+	 * Fool lockdep by telling it the lock got released so that it doesn't
+	 * complain about the held lock when we return to userspace.
+	 */
+	__file_write_srcu_release(file, idx);
+
+	req->ki_flags |= IOCB_WRITE;
+	req->ki_idx = idx;
+	aio_rw_done(req, call_write_iter(file, req, &iter));
+
+free_iov:
 	kfree(iovec);
 	return ret;
 }
