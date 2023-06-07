@@ -291,8 +291,8 @@ static void ovl_aio_cleanup_handler(struct ovl_aio_req *aio_req)
 		struct inode *inode = file_inode(orig_iocb->ki_filp);
 
 		/* Actually acquired in ovl_write_iter() */
-		__sb_writers_acquired(file_inode(iocb->ki_filp)->i_sb,
-				      SB_FREEZE_WRITE);
+		__sb_writers_acquire(file_inode(iocb->ki_filp)->i_sb,
+				     SB_FREEZE_WRITE);
 		file_end_write(iocb->ki_filp);
 		ovl_copyattr(inode);
 	}
