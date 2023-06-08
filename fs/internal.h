@@ -97,8 +97,9 @@ extern void chroot_fs_refs(const struct path *, const struct path *);
 /*
  * file_table.c
  */
-extern struct file *alloc_empty_file(int, const struct cred *);
-extern struct file *alloc_empty_file_noaccount(int, const struct cred *);
+extern struct file *alloc_empty_file(int flags, const struct cred *cred);
+extern struct file *alloc_empty_file_fake(int flags, const struct cred *cred);
+extern struct path *__f_real_path(struct file *f);
 
 static inline void put_file_access(struct file *file)
 {

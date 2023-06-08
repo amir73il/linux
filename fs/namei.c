@@ -3721,14 +3721,16 @@ struct file *vfs_tmpfile_open(struct mnt_idmap *idmap,
 	struct file *file;
 	int error;
 
-	file = alloc_empty_file_noaccount(open_flag, cred);
-	if (!IS_ERR(file)) {
-		error = vfs_tmpfile(idmap, parentpath, file, mode);
-		if (error) {
-			fput(file);
-			file = ERR_PTR(error);
-		}
+	file = alloc_empty_file_fake(open_flag, cred);
+	if (IS_ERR(file))
+		return file;
+
+	error = vfs_tmpfile(idmap, parentpath, file, mode);
+	if (error) {
+		fput(file);
+		file = ERR_PTR(error);
 	}
+
 	return file;
 }
 EXPORT_SYMBOL(vfs_tmpfile_open);

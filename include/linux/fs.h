@@ -180,8 +180,8 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 /* File represents mount that needs unmounting */
 #define FMODE_NEED_UNMOUNT	((__force fmode_t)0x10000000)
 
-/* File does not contribute to nr_files count */
-#define FMODE_NOACCOUNT		((__force fmode_t)0x20000000)
+/* File is embedded in file_fake and doesn't contribute to nr_files */
+#define FMODE_FAKE_PATH		((__force fmode_t)0x20000000)
 
 /* File supports async buffered reads */
 #define FMODE_BUF_RASYNC	((__force fmode_t)0x40000000)
@@ -2349,11 +2349,16 @@ static inline struct file *file_open_root_mnt(struct vfsmount *mnt,
 	return file_open_root(&(struct path){.mnt = mnt, .dentry = mnt->mnt_root},
 			      name, flags, mode);
 }
-extern struct file * dentry_open(const struct path *, int, const struct cred *);
+extern struct file *dentry_open(const struct path *path, int flags,
+				const struct cred *creds);
 extern struct file *dentry_create(const struct path *path, int flags,
 				  umode_t mode, const struct cred *cred);
-extern struct file * open_with_fake_path(const struct path *, int,
-					 struct inode*, const struct cred *);
+extern struct file *open_with_fake_path(const struct path *fake_path, int flags,
+					const struct path *real_path,
+					const struct cred *cred);
+extern const struct path *f_real_path(struct file *file);
+extern const struct path *f_fake_path(struct file *file);
+
 static inline struct file *file_clone_open(struct file *file)
 {
 	return dentry_open(&file->f_path, file->f_flags, file->f_cred);

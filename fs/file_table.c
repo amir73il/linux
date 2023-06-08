@@ -44,18 +44,60 @@ static struct kmem_cache *filp_cachep __read_mostly;
 
 static struct percpu_counter nr_files __cacheline_aligned_in_smp;
 
+/* Container for file with optional fake path */
+struct file_fake {
+	struct file file;
+	struct path real_path;
+};
+
+static inline struct file_fake *file_fake(struct file *f)
+{
+	return container_of(f, struct file_fake, file);
+}
+
+/* Returns the real_path field that could be empty */
+struct path *__f_real_path(struct file *f)
+{
+	struct file_fake *ff = file_fake(f);
+
+	if (f->f_mode & FMODE_FAKE_PATH)
+		return &ff->real_path;
+	else
+		return &f->f_path;
+}
+
+/* Returns the real_path if not empty or f_path */
+const struct path *f_real_path(struct file *f)
+{
+	const struct path *path = __f_real_path(f);
+
+	return path->dentry ? path : &f->f_path;
+}
+EXPORT_SYMBOL(f_real_path);
+
+const struct path *f_fake_path(struct file *f)
+{
+	return &f->f_path;
+}
+EXPORT_SYMBOL(f_fake_path);
+
 static void file_free_rcu(struct rcu_head *head)
 {
 	struct file *f = container_of(head, struct file, f_rcuhead);
 
 	put_cred(f->f_cred);
-	kmem_cache_free(filp_cachep, f);
+	if (f->f_mode & FMODE_FAKE_PATH)
+		kfree(file_fake(f));
+	else
+		kmem_cache_free(filp_cachep, f);
 }
 
 static inline void file_free(struct file *f)
 {
 	security_file_free(f);
-	if (!(f->f_mode & FMODE_NOACCOUNT))
+	if (f->f_mode & FMODE_FAKE_PATH)
+		path_put(__f_real_path(f));
+	else
 		percpu_counter_dec(&nr_files);
 	call_rcu(&f->f_rcuhead, file_free_rcu);
 }
@@ -131,20 +173,15 @@ static int __init init_fs_stat_sysctls(void)
 fs_initcall(init_fs_stat_sysctls);
 #endif
 
-static struct file *__alloc_file(int flags, const struct cred *cred)
+static int init_file(struct file *f, int flags, const struct cred *cred)
 {
-	struct file *f;
 	int error;
-
-	f = kmem_cache_zalloc(filp_cachep, GFP_KERNEL);
-	if (unlikely(!f))
-		return ERR_PTR(-ENOMEM);
 
 	f->f_cred = get_cred(cred);
 	error = security_file_alloc(f);
 	if (unlikely(error)) {
 		file_free_rcu(&f->f_rcuhead);
-		return ERR_PTR(error);
+		return error;
 	}
 
 	atomic_long_set(&f->f_count, 1);
@@ -154,6 +191,22 @@ static struct file *__alloc_file(int flags, const struct cred *cred)
 	f->f_flags = flags;
 	f->f_mode = OPEN_FMODE(flags);
 	/* f->f_version: 0 */
+
+	return 0;
+}
+
+static struct file *__alloc_file(int flags, const struct cred *cred)
+{
+	struct file *f;
+	int error;
+
+	f = kmem_cache_zalloc(filp_cachep, GFP_KERNEL);
+	if (unlikely(!f))
+		return ERR_PTR(-ENOMEM);
+
+	error = init_file(f, flags, cred);
+	if (unlikely(error))
+		return ERR_PTR(error);
 
 	return f;
 }
@@ -201,18 +254,26 @@ over:
 }
 
 /*
- * Variant of alloc_empty_file() that doesn't check and modify nr_files.
+ * Variant of alloc_empty_file() that allocates a file_fake container
+ * and doesn't check and modify nr_files.
  *
  * Should not be used unless there's a very good reason to do so.
  */
-struct file *alloc_empty_file_noaccount(int flags, const struct cred *cred)
+struct file *alloc_empty_file_fake(int flags, const struct cred *cred)
 {
-	struct file *f = __alloc_file(flags, cred);
+	struct file_fake *ff;
+	int error;
 
-	if (!IS_ERR(f))
-		f->f_mode |= FMODE_NOACCOUNT;
+	ff = kzalloc(sizeof(struct file_fake), GFP_KERNEL);
+	if (unlikely(!ff))
+		return ERR_PTR(-ENOMEM);
 
-	return f;
+	error = init_file(&ff->file, flags, cred);
+	if (unlikely(error))
+		return ERR_PTR(error);
+
+	ff->file.f_mode |= FMODE_FAKE_PATH;
+	return &ff->file;
 }
 
 /**
