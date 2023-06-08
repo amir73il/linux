@@ -243,7 +243,7 @@ static int fsnotify_handle_inode_event(struct fsnotify_group *group,
 				       struct inode *dir, const struct qstr *name,
 				       u32 cookie)
 {
-	const struct path *path = fsnotify_data_path(data, data_type);
+	struct dentry *dentry = fsnotify_data_dentry(data, data_type);
 	struct inode *inode = fsnotify_data_inode(data, data_type);
 	const struct fsnotify_ops *ops = group->ops;
 
@@ -254,7 +254,7 @@ static int fsnotify_handle_inode_event(struct fsnotify_group *group,
 		return 0;
 
 	if ((inode_mark->flags & FSNOTIFY_MARK_FLAG_EXCL_UNLINK) &&
-	    path && d_unlinked(path->dentry))
+	    dentry && d_unlinked(dentry))
 		return 0;
 
 	/* Check interest of this mark in case event was sent with two marks */
@@ -532,7 +532,6 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		marks_mask |= inode->i_fsnotify_mask;
 	if (inode2)
 		marks_mask |= inode2->i_fsnotify_mask;
-
 
 	/*
 	 * If this is a modify event we may need to clear some ignore masks.

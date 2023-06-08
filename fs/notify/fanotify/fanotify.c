@@ -290,23 +290,18 @@ out:
  * been included within the event mask, but have not been explicitly
  * requested by the user, will not be present in the returned mask.
  */
-static u32 fanotify_group_event_mask(struct fsnotify_group *group,
+static u32 fanotify_group_event_mask(unsigned int fid_mode,
 				     struct fsnotify_iter_info *iter_info,
 				     u32 *match_mask, u32 event_mask,
-				     const void *data, int data_type,
+				     const struct path *path,
 				     struct inode *dir)
 {
 	__u32 marks_mask = 0, marks_ignore_mask = 0;
 	__u32 test_mask, user_mask = FANOTIFY_OUTGOING_EVENTS |
 				     FANOTIFY_EVENT_FLAGS;
-	const struct path *path = fsnotify_data_path(data, data_type);
-	unsigned int fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	struct fsnotify_mark *mark;
 	bool ondir = event_mask & FAN_ONDIR;
 	int type;
-
-	pr_debug("%s: report_mask=%x mask=%x data=%p data_type=%d\n",
-		 __func__, iter_info->report_mask, event_mask, data, data_type);
 
 	if (!fid_mode) {
 		/* Do we have path to open a file descriptor? */
@@ -895,6 +890,8 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 				 const struct qstr *file_name, u32 cookie,
 				 struct fsnotify_iter_info *iter_info)
 {
+	const struct path *path = fsnotify_data_path(data, data_type);
+	unsigned int fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	int ret = 0;
 	struct fanotify_event *event;
 	struct fsnotify_event *fsn_event;
@@ -925,10 +922,25 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 
 	BUILD_BUG_ON(HWEIGHT32(ALL_FANOTIFY_EVENT_BITS) != 21);
 
-	mask = fanotify_group_event_mask(group, iter_info, &match_mask,
-					 mask, data, data_type, dir);
+	pr_debug("%s: group=%p mask=%x report_mask=%x data=%p data_type=%d\n", __func__,
+		 group, mask, iter_info->report_mask, data, data_type);
+
+	mask = fanotify_group_event_mask(fid_mode, iter_info, &match_mask,
+					 mask, path, dir);
 	if (!mask)
 		return 0;
+
+	if (path && !fid_mode) {
+		struct inode *realinode = fsnotify_data_inode(data, data_type);
+
+		/*
+		 * fake path from ovl real files cannot to used to create
+		 * event->fd, so permission events must be denied and async
+		 * events are dropped (return value is ignored in that case).
+		 */
+		if (d_inode(path->dentry) != realinode)
+			return -EPERM;
+	}
 
 	pr_debug("%s: group=%p mask=%x report_mask=%x\n", __func__,
 		 group, mask, match_mask);
@@ -942,7 +954,7 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 			return 0;
 	}
 
-	if (FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS)) {
+	if (fid_mode) {
 		fsid = fanotify_get_fsid(iter_info);
 		/* Racing with mark destruction or creation? */
 		if (!fsid.val[0] && !fsid.val[1])
