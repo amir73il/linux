@@ -3721,7 +3721,7 @@ struct file *vfs_tmpfile_open(struct mnt_idmap *idmap,
 	struct file *file;
 	int error;
 
-	file = alloc_empty_file_noaccount(open_flag, cred);
+	file = alloc_empty_file_internal(open_flag, cred);
 	if (!IS_ERR(file)) {
 		error = vfs_tmpfile(idmap, parentpath, file, mode);
 		if (error) {

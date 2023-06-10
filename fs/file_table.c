@@ -55,7 +55,7 @@ static void file_free_rcu(struct rcu_head *head)
 static inline void file_free(struct file *f)
 {
 	security_file_free(f);
-	if (!(f->f_mode & FMODE_NOACCOUNT))
+	if (!(f->f_mode & FMODE_INTERNAL))
 		percpu_counter_dec(&nr_files);
 	call_rcu(&f->f_rcuhead, file_free_rcu);
 }
@@ -205,12 +205,12 @@ over:
  *
  * Should not be used unless there's a very good reason to do so.
  */
-struct file *alloc_empty_file_noaccount(int flags, const struct cred *cred)
+struct file *alloc_empty_file_internal(int flags, const struct cred *cred)
 {
 	struct file *f = __alloc_file(flags, cred);
 
 	if (!IS_ERR(f))
-		f->f_mode |= FMODE_NOACCOUNT;
+		f->f_mode |= FMODE_INTERNAL;
 
 	return f;
 }
