@@ -216,6 +216,29 @@ struct file *alloc_empty_file_internal(int flags, const struct cred *cred)
 }
 
 /**
+ * f_real_path - return the real path of an internal file with fake path
+ *
+ * @file: The file to query
+ *
+ * If f_path is on a union/overlay and f_inode is not, then return the
+ * underlying real path of f_inode.
+ * Otherwise return f_path (by value).
+ */
+struct path f_real_path(const struct file *f)
+{
+	struct path path;
+
+	if (!(f->f_mode & FMODE_INTERNAL) ||
+	    (d_inode(f->f_path.dentry) == f->f_inode))
+		return f->f_path;
+
+	path.mnt = f->f_path.mnt;
+	path.dentry = d_real(f->f_path.dentry, f->f_inode, &path.mnt);
+	return path;
+}
+EXPORT_SYMBOL(f_real_path);
+
+/**
  * alloc_file - allocate and initialize a 'struct file'
  *
  * @path: the (dentry, vfsmount) pair for the new file

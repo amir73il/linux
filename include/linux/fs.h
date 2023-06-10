@@ -1042,7 +1042,7 @@ static inline struct inode *file_inode(const struct file *f)
 
 static inline struct dentry *file_dentry(const struct file *file)
 {
-	return d_real(file->f_path.dentry, file_inode(file));
+	return d_real(file->f_path.dentry, file_inode(file), NULL);
 }
 
 struct fasync_struct {
@@ -2354,6 +2354,8 @@ extern struct file *dentry_create(const struct path *path, int flags,
 				  umode_t mode, const struct cred *cred);
 extern struct file * open_with_fake_path(const struct path *, int,
 					 struct inode*, const struct cred *);
+extern struct path f_real_path(const struct file *f);
+
 static inline struct file *file_clone_open(struct file *file)
 {
 	return dentry_open(&file->f_path, file->f_flags, file->f_cred);

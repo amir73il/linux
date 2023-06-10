@@ -139,7 +139,8 @@ struct dentry_operations {
 	char *(*d_dname)(struct dentry *, char *, int);
 	struct vfsmount *(*d_automount)(struct path *);
 	int (*d_manage)(const struct path *, bool);
-	struct dentry *(*d_real)(struct dentry *, const struct inode *);
+	struct dentry *(*d_real)(struct dentry *, const struct inode *,
+				 struct vfsmount **);
 } ____cacheline_aligned;
 
 /*
@@ -564,6 +565,7 @@ static inline struct dentry *d_backing_dentry(struct dentry *upper)
  * d_real - Return the real dentry
  * @dentry: the dentry to query
  * @inode: inode to select the dentry from multiple layers (can be NULL)
+ * @pmnt: returns the real mnt in case @dentry is not real
  *
  * If dentry is on a union/overlay, then return the underlying, real dentry.
  * Otherwise return the dentry itself.
@@ -571,10 +573,11 @@ static inline struct dentry *d_backing_dentry(struct dentry *upper)
  * See also: Documentation/filesystems/vfs.rst
  */
 static inline struct dentry *d_real(struct dentry *dentry,
-				    const struct inode *inode)
+				    const struct inode *inode,
+				    struct vfsmount **pmnt)
 {
 	if (unlikely(dentry->d_flags & DCACHE_OP_REAL))
-		return dentry->d_op->d_real(dentry, inode);
+		return dentry->d_op->d_real(dentry, inode, pmnt);
 	else
 		return dentry;
 }
@@ -589,7 +592,7 @@ static inline struct dentry *d_real(struct dentry *dentry,
 static inline struct inode *d_real_inode(const struct dentry *dentry)
 {
 	/* This usage of d_real() results in const dentry */
-	return d_backing_inode(d_real((struct dentry *) dentry, NULL));
+	return d_inode(d_real((struct dentry *) dentry, NULL, NULL));
 }
 
 struct name_snapshot {

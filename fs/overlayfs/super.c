@@ -60,9 +60,11 @@ MODULE_PARM_DESC(metacopy,
 		 "Default to on or off for the metadata only copy up feature");
 
 static struct dentry *ovl_d_real(struct dentry *dentry,
-				 const struct inode *inode)
+				 const struct inode *inode,
+				 struct vfsmount **pmnt)
 {
 	struct dentry *real = NULL, *lower;
+	struct path realpath;
 
 	/* It's an overlay file */
 	if (inode && d_inode(dentry) == inode)
@@ -74,12 +76,13 @@ static struct dentry *ovl_d_real(struct dentry *dentry,
 		goto bug;
 	}
 
-	real = ovl_dentry_upper(dentry);
+	ovl_path_upper(dentry, &realpath);
+	real = realpath.dentry;
 	if (real && (inode == d_inode(real)))
-		return real;
+		goto found;
 
 	if (real && !inode && ovl_has_upperdata(d_inode(dentry)))
-		return real;
+		goto found;
 
 	/*
 	 * Best effort lazy lookup of lowerdata for !inode case to return
@@ -90,16 +93,22 @@ static struct dentry *ovl_d_real(struct dentry *dentry,
 	 * when setting the uprobe.
 	 */
 	ovl_maybe_lookup_lowerdata(dentry);
-	lower = ovl_dentry_lowerdata(dentry);
+	ovl_path_lowerdata(dentry, &realpath);
+	lower = realpath.dentry;
 	if (!lower)
 		goto bug;
-	real = lower;
 
 	/* Handle recursion */
-	real = d_real(real, inode);
+	real = d_real(lower, inode, &realpath.mnt);
 
-	if (!inode || inode == d_inode(real))
-		return real;
+	if (inode && inode != d_inode(real))
+		goto bug;
+
+found:
+	if (pmnt)
+		*pmnt = realpath.mnt;
+	return real;
+
 bug:
 	WARN(1, "%s(%pd4, %s:%lu): real dentry (%p/%lu) not found\n",
 	     __func__, dentry, inode ? inode->i_sb->s_id : "NULL",
