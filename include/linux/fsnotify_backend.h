@@ -56,6 +56,8 @@
 #define FS_ACCESS_PERM		0x00020000	/* access event in a permissions hook */
 #define FS_OPEN_EXEC_PERM	0x00040000	/* open/exec event in a permission hook */
 
+#define FS_PRE_ACCESS		0x00100000	/* Pre-content access hook */
+
 /*
  * Set on inode mark that cares about things that happen to its children.
  * Always set for dnotify and inotify.
@@ -77,7 +79,11 @@
  */
 #define ALL_FSNOTIFY_DIRENT_EVENTS (FS_CREATE | FS_DELETE | FS_MOVE | FS_RENAME)
 
-#define ALL_FSNOTIFY_PERM_EVENTS (FS_OPEN_PERM | FS_ACCESS_PERM | \
+/* Pre-content events can be used to fill file content */
+#define FSNOTIFY_PRE_CONTENT_EVENTS (FS_PRE_ACCESS)
+
+#define ALL_FSNOTIFY_PERM_EVENTS (FSNOTIFY_PRE_CONTENT_EVENTS | \
+				  FS_OPEN_PERM | FS_ACCESS_PERM | \
 				  FS_OPEN_EXEC_PERM)
 
 /*
@@ -205,9 +211,9 @@ struct fsnotify_group {
 	 * Valid fsnotify group priorities.  Events are send in order from highest
 	 * priority to lowest priority.  We default to the lowest priority.
 	 */
-	#define FS_PRIO_0	0 /* normal notifiers, no permissions */
-	#define FS_PRIO_1	1 /* fanotify content based access control */
-	#define FS_PRIO_2	2 /* fanotify pre-content access */
+	#define FS_PRIO_NOTIFY		0 /* normal notifiers, no permissions */
+	#define FS_PRIO_CONTENT		1 /* fanotify content based access control */
+	#define FS_PRIO_PRE_CONTENT	2 /* fanotify pre-content access */
 	unsigned int priority;
 	bool shutdown;		/* group is being shut down, don't queue more events */
 
