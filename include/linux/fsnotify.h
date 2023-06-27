@@ -121,6 +121,10 @@ static inline int fsnotify_perm(struct file *file, int mask)
 		}
 	} else if (mask & MAY_READ) {
 		fsnotify_mask = FS_ACCESS_PERM;
+		/* Content of file may be written on PRE_ACCESS event */
+		if (!(mask & MAY_NOT_START_WRITE))
+			fsnotify_mask |= FS_PRE_ACCESS;
+
 	}
 
 	return fsnotify_file(file, fsnotify_mask);
