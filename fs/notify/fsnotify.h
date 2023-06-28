@@ -70,6 +70,16 @@ static inline void fsnotify_clear_marks_by_sb(struct super_block *sb)
 	fsnotify_destroy_marks(&sb->s_fsnotify_marks);
 }
 
+static inline void fsnotify_get_sb_perm_watchers(struct super_block *sb)
+{
+	atomic_long_inc(&sb->s_fsnotify_perm_watchers);
+}
+
+static inline void fsnotify_put_sb_perm_watchers(struct super_block *sb)
+{
+	atomic_long_dec(&sb->s_fsnotify_perm_watchers);
+}
+
 /*
  * update the dentry->d_flags of all of inode's children to indicate if inode cares
  * about events that happen to its children.

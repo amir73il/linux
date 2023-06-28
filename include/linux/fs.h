@@ -1244,6 +1244,7 @@ struct super_block {
 	 * inodes objects are currently double-accounted.
 	 */
 	atomic_long_t s_fsnotify_connectors;
+	atomic_long_t s_fsnotify_perm_watchers;
 
 	/* Read-only state of the superblock is being changed */
 	int s_readonly_remount;
