@@ -609,6 +609,15 @@ static inline int fsnotify_inode_watches_children(struct inode *inode)
 	return inode->i_fsnotify_mask & FS_EVENTS_POSS_ON_CHILD;
 }
 
+/* Could the inode be watched by inode/mount/sb mark? */
+static inline bool fsnotify_inode_has_watchers(struct inode *inode, __u32 mask)
+{
+	if (mask & ALL_FSNOTIFY_PERM_EVENTS)
+		return atomic_long_read(&inode->i_sb->s_fsnotify_perm_watchers);
+
+	return atomic_long_read(&inode->i_sb->s_fsnotify_connectors);
+}
+
 /*
  * Update the dentry with a flag indicating the interest of its parent to receive
  * filesystem events when those events happens to this dentry->d_inode.
@@ -865,6 +874,12 @@ static inline void fsnotify_init_event(struct fsnotify_event *event)
 }
 
 #else
+
+static inline bool fsnotify_inode_has_watchers(struct inode *inode,
+					       __u32 mask)
+{
+	return false;
+}
 
 static inline int fsnotify(__u32 mask, const void *data, int data_type,
 			   struct inode *dir, const struct qstr *name,
