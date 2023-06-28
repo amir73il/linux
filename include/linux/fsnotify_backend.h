@@ -574,6 +574,16 @@ static inline int fsnotify_inode_watches_children(struct inode *inode)
 /* Could the inode be watched by inode/mount/sb mark? */
 static inline bool fsnotify_inode_has_watchers(struct inode *inode, __u32 mask)
 {
+	/*
+	 * For objects that are not mapped into use accessible path like
+	 * anonymous pipes/inodes, we do not need to check for watchers on
+	 * parent/mount/sb and the sb watchers optimizations below are
+	 * not as effective, so check the inode mask directly.
+	 */
+	if (inode->i_sb->s_flags & SB_NOUSER &&
+	    !(mask & inode->i_fsnotify_mask))
+		return 0;
+
 	if (mask & ALL_FSNOTIFY_PERM_EVENTS)
 		return atomic_long_read(&inode->i_sb->s_fsnotify_perm_watchers);
 
