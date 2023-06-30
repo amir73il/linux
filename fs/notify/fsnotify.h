@@ -72,12 +72,14 @@ static inline void fsnotify_clear_marks_by_sb(struct super_block *sb)
 
 static inline void fsnotify_get_sb_perm_watchers(struct super_block *sb)
 {
-	atomic_long_inc(&sb->s_fsnotify_perm_watchers);
+	if (atomic_long_inc_and_test(&sb->s_fsnotify_perm_watchers))
+		sb_write_barrier_activate(sb);
 }
 
 static inline void fsnotify_put_sb_perm_watchers(struct super_block *sb)
 {
-	atomic_long_dec(&sb->s_fsnotify_perm_watchers);
+	if (atomic_long_dec_and_test(&sb->s_fsnotify_perm_watchers))
+		sb_write_barrier_deactivate(sb);
 }
 
 /*
