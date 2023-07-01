@@ -21,6 +21,7 @@
 #include <linux/unistd.h>
 #include <linux/compat.h>
 #include <linux/uaccess.h>
+#include "internal.h"
 
 #include <asm/unaligned.h>
 
@@ -47,7 +48,7 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 	else if (!file->f_op->iterate)
 		goto out;
 
-	res = security_file_permission(file, MAY_READ);
+	res = file_access_permission(file, MAY_READ);
 	if (res)
 		goto out;
 

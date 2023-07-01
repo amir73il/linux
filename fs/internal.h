@@ -296,7 +296,12 @@ static inline ssize_t do_get_acl(struct mnt_idmap *idmap,
 }
 #endif
 
-ssize_t __kernel_write_iter(struct file *file, struct iov_iter *from, loff_t *pos);
+/*
+ * fs/read_write.c
+ */
+int file_access_permission(struct file *file, int mask);
+ssize_t __kernel_write_iter(struct file *file, struct iov_iter *from,
+			    loff_t *pos);
 
 /*
  * fs/attr.c

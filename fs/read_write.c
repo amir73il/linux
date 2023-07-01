@@ -352,7 +352,7 @@ out_putf:
 }
 #endif
 
-int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t count)
+int rw_verify_area(int rw, struct file *file, const loff_t *ppos, size_t count)
 {
 	if (unlikely((ssize_t) count < 0))
 		return -EINVAL;
@@ -371,10 +371,21 @@ int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t
 		}
 	}
 
-	return security_file_permission(file,
-				read_write == READ ? MAY_READ : MAY_WRITE);
+	return file_access_permission(file, rw == READ ? MAY_READ : MAY_WRITE);
 }
 EXPORT_SYMBOL(rw_verify_area);
+
+int file_access_permission(struct file *file, int mask)
+{
+	int ret;
+
+	ret = security_file_permission(file, mask);
+	if (ret)
+		return ret;
+
+	return fsnotify_access_perm(file, mask);
+}
+EXPORT_SYMBOL(file_access_permission);
 
 static ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
