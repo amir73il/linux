@@ -300,6 +300,7 @@ static inline ssize_t do_get_acl(struct mnt_idmap *idmap,
  * fs/read_write.c
  */
 int file_access_permission(struct file *file, int mask);
+int __rw_verify_area(struct file *file, const loff_t *ppos, size_t count);
 ssize_t __kernel_write_iter(struct file *file, struct iov_iter *from,
 			    loff_t *pos);
 

@@ -1188,7 +1188,8 @@ long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
 	if (unlikely(out->f_flags & O_APPEND))
 		return -EINVAL;
 
-	ret = rw_verify_area(WRITE, out, opos, len);
+	/* Callers already called file_access_permission() */
+	ret = __rw_verify_area(out, opos, len);
 	if (unlikely(ret < 0))
 		return ret;
 

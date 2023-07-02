@@ -261,6 +261,10 @@ static int ovl_copy_up_file(struct ovl_fs *ofs, struct dentry *dentry,
 	if (old_file->f_mode & FMODE_LSEEK)
 		skip_hole = true;
 
+	error = file_access_permission(old_file, MAY_READ);
+	if (error)
+		goto out_fput;
+
 	while (len) {
 		size_t this_len = OVL_COPY_UP_CHUNK_SIZE;
 		long bytes;

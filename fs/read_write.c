@@ -352,7 +352,7 @@ out_putf:
 }
 #endif
 
-int rw_verify_area(int rw, struct file *file, const loff_t *ppos, size_t count)
+int __rw_verify_area(struct file *file, const loff_t *ppos, size_t count)
 {
 	if (unlikely((ssize_t) count < 0))
 		return -EINVAL;
@@ -370,10 +370,9 @@ int rw_verify_area(int rw, struct file *file, const loff_t *ppos, size_t count)
 				return -EINVAL;
 		}
 	}
-
-	return file_access_permission(file, rw == READ ? MAY_READ : MAY_WRITE);
+	return 0;
 }
-EXPORT_SYMBOL(rw_verify_area);
+EXPORT_SYMBOL(__rw_verify_area);
 
 int file_access_permission(struct file *file, int mask)
 {
@@ -386,6 +385,18 @@ int file_access_permission(struct file *file, int mask)
 	return fsnotify_access_perm(file, mask);
 }
 EXPORT_SYMBOL(file_access_permission);
+
+int rw_verify_area(int rw, struct file *file, const loff_t *ppos, size_t count)
+{
+	int ret;
+
+	ret = __rw_verify_area(file, ppos, count);
+	if (ret)
+		return ret;
+
+	return file_access_permission(file, rw == READ ? MAY_READ : MAY_WRITE);
+}
+EXPORT_SYMBOL(rw_verify_area);
 
 static ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
