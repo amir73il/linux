@@ -251,6 +251,10 @@ static int ovl_copy_up_file(struct ovl_fs *ofs, struct dentry *dentry,
 	if (IS_ERR(old_file))
 		return PTR_ERR(old_file);
 
+	error = file_access_permission(old_file, MAY_READ);
+	if (error)
+		goto out_fput;
+
 	/* Try to use clone_file_range to clone up within the same fs */
 	cloned = do_clone_file_range(old_file, 0, new_file, 0, len, 0);
 	if (cloned == len)
@@ -260,10 +264,6 @@ static int ovl_copy_up_file(struct ovl_fs *ofs, struct dentry *dentry,
 	/* Check if lower fs supports seek operation */
 	if (old_file->f_mode & FMODE_LSEEK)
 		skip_hole = true;
-
-	error = file_access_permission(old_file, MAY_READ);
-	if (error)
-		goto out_fput;
 
 	while (len) {
 		size_t this_len = OVL_COPY_UP_CHUNK_SIZE;
