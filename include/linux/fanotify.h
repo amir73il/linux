@@ -89,7 +89,9 @@
 				 FAN_RENAME)
 
 /* Pre-content events can be used to fill file content */
-#define FANOTIFY_PRE_CONTENT_EVENTS (FS_PRE_ACCESS)
+#define FANOTIFY_PRE_MODIFY_EVENTS  (0)
+#define FANOTIFY_PRE_CONTENT_EVENTS (FANOTIFY_PRE_MODIFY_EVENTS | \
+				     FS_PRE_ACCESS)
 
 /* Events that require a permission response from user */
 #define FANOTIFY_PERM_EVENTS	(FANOTIFY_PRE_CONTENT_EVENTS | \

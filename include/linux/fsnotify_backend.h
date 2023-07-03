@@ -57,6 +57,7 @@
 #define FS_OPEN_EXEC_PERM	0x00040000	/* open/exec event in a permission hook */
 
 #define FS_PRE_ACCESS		0x00100000	/* Pre-content access hook */
+#define FS_PRE_MODIFY		0x00200000	/* Pre-content modify hook */
 
 /*
  * Set on inode mark that cares about things that happen to its children.
@@ -80,7 +81,9 @@
 #define ALL_FSNOTIFY_DIRENT_EVENTS (FS_CREATE | FS_DELETE | FS_MOVE | FS_RENAME)
 
 /* Pre-content events can be used to fill file content */
-#define FSNOTIFY_PRE_CONTENT_EVENTS (FS_PRE_ACCESS)
+#define FSNOTIFY_PRE_MODIFY_EVENTS  (FS_PRE_MODIFY)
+#define FSNOTIFY_PRE_CONTENT_EVENTS (FSNOTIFY_PRE_MODIFY_EVENTS | \
+				     FS_PRE_ACCESS)
 
 #define ALL_FSNOTIFY_PERM_EVENTS (FSNOTIFY_PRE_CONTENT_EVENTS | \
 				  FS_OPEN_PERM | FS_ACCESS_PERM | \
