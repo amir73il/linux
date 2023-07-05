@@ -1832,6 +1832,18 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		ret = fanotify_events_supported(group, &path, mask, flags);
 		if (ret)
 			goto path_put_and_out;
+
+		/*
+		 * To avoid the performance overhead of the memory barrier in
+		 * srcu_down_read(), activate sb write barrier conditionally on
+		 * the first time that a pre-modify event is added to mask on
+		 * any inodes or mounts of the sb or the sb itself.
+		 */
+		if (mask & FANOTIFY_PRE_MODIFY_EVENTS && !ignore) {
+			ret = activate_sb_write_barrier(path.dentry->d_sb);
+			if (ret)
+				goto path_put_and_out;
+		}
 	}
 
 	if (fid_mode) {
