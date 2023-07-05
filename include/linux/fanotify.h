@@ -93,6 +93,7 @@
 				      FAN_ACCESS_PERM)
 /* Pre-content events can be used to fill file content */
 #define FANOTIFY_PRE_CONTENT_EVENTS  (FAN_PRE_ACCESS | FAN_PRE_MODIFY)
+/* Pre-modify events activate sb write barriers */
 #define FANOTIFY_PRE_MODIFY_EVENTS   (FAN_PRE_MODIFY)
 
 /* Events that require a permission response from user */
