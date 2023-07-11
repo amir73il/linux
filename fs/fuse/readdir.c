@@ -327,7 +327,7 @@ static int parse_dirplusfile(char *buf, size_t nbytes, struct file *file,
 	return 0;
 }
 
-static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx)
+static int fuse_do_readdir(struct file *file, struct dir_context *ctx)
 {
 	int plus;
 	ssize_t res;
@@ -579,6 +579,16 @@ retry_locked:
 	 * wasn't in the cache.
 	 */
 	return res == FOUND_SOME ? 0 : UNCACHED;
+}
+
+static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx)
+{
+	struct fuse_file *ff = file->private_data;
+
+	if (ff->passthrough)
+		return fuse_passthrough_readdir(file, ctx);
+	else
+		return fuse_do_readdir(file, ctx);
 }
 
 int fuse_readdir(struct file *file, struct dir_context *ctx)

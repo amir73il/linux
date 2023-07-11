@@ -127,6 +127,25 @@ ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
 	return ret;
 }
 
+int fuse_passthrough_readdir(struct file *file, struct dir_context *ctx)
+{
+	struct fuse_file *ff = file->private_data;
+	struct inode *inode = file_inode(file);
+	struct file *backing_file = ff->passthrough->filp;
+	const struct cred *old_cred;
+	bool locked;
+	int ret;
+
+	locked = fuse_lock_inode(inode);
+	old_cred = override_creds(ff->passthrough->cred);
+	ret = iterate_dir(backing_file, ctx);
+	revert_creds(old_cred);
+	fuse_file_accessed(file, backing_file);
+	fuse_unlock_inode(inode, locked);
+
+	return ret;
+}
+
 /*
  * Returns passthrough_fh id that can be passed with FOPEN_PASSTHROUGH
  * open response and needs to be released with fuse_passthrough_close().
@@ -147,8 +166,9 @@ int fuse_passthrough_open(struct fuse_conn *fc, int backing_fd)
 		return -EBADF;
 
 	res = -EOPNOTSUPP;
-	if (!passthrough_filp->f_op->read_iter ||
-	    !passthrough_filp->f_op->write_iter)
+	if (!passthrough_filp->f_op->iterate_shared &&
+	    !(passthrough_filp->f_op->read_iter &&
+	      passthrough_filp->f_op->write_iter))
 		goto out_fput;
 
 	passthrough_inode = file_inode(passthrough_filp);
