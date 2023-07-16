@@ -739,6 +739,13 @@ static ssize_t do_iter_readv_writev(struct file *filp, struct iov_iter *iter,
 	return ret;
 }
 
+ssize_t do_iter_writev(struct file *filp, struct iov_iter *iter, loff_t *ppos,
+		       rwf_t flags)
+{
+	return do_iter_readv_writev(filp, iter, ppos, WRITE, flags);
+}
+
+
 /* Do it by hand, with file-ops */
 static ssize_t do_loop_readv_writev(struct file *filp, struct iov_iter *iter,
 		loff_t *ppos, int type, rwf_t flags)
