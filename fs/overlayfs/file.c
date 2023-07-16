@@ -395,10 +395,8 @@ static ssize_t ovl_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 
 	old_cred = ovl_override_creds(file_inode(file)->i_sb);
 	if (is_sync_kiocb(iocb)) {
-		file_start_write(real.file);
 		ret = vfs_iter_write(real.file, iter, &iocb->ki_pos,
 				     ovl_iocb_to_rwf(ifl));
-		file_end_write(real.file);
 		/* Update size */
 		ovl_copyattr(inode);
 	} else {
