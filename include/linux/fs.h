@@ -1507,9 +1507,36 @@ static inline bool __sb_start_write_trylock(struct super_block *sb, int level)
 #define __sb_writers_release(sb, lev)	\
 	percpu_rwsem_release(&(sb)->s_writers.rw_sem[(lev)-1], 1, _THIS_IP_)
 
-static inline bool sb_write_started(const struct super_block *sb)
+static inline int __sb_write_started(const struct super_block *sb)
 {
 	return lockdep_is_held_type(sb->s_writers.rw_sem + SB_FREEZE_WRITE - 1, 1);
+}
+
+/**
+ * sb_write_started - check if sb_start_write() was called
+ * @sb: the super we write to
+ *
+ * A false return value ensures that sb_write_started() was not called -
+ * it allows false positives with !CONFIG_LOCKDEP and LOCK_STATE_UNKNOWN.
+ */
+static inline bool sb_write_started(const struct super_block *sb)
+{
+	return __sb_write_started(sb);
+}
+
+/**
+ * file_write_started - check if file_start_write() was called
+ * @file: the file we write to
+ *
+ * A false return value ensures that file_write_started() was not called -
+ * it allows false positives with !CONFIG_LOCKDEP, LOCK_STATE_UNKNOWN
+ * and !S_ISREG, because file_start_write() has no effect on !S_ISREG.
+ */
+static inline bool file_write_started(const struct file *file)
+{
+	if (!S_ISREG(file_inode(file)->i_mode))
+		return true;
+	return sb_write_started(file_inode(file)->i_sb);
 }
 
 /**
