@@ -1516,6 +1516,7 @@ static inline int __sb_write_started(const struct super_block *sb)
  * sb_write_started - check if sb_start_write() was called
  * @sb: the super we write to
  *
+ * This is not the opposite of sb_write_not_started().
  * A false return value ensures that sb_write_started() was not called -
  * it allows false positives with !CONFIG_LOCKDEP and LOCK_STATE_UNKNOWN.
  */
@@ -1525,9 +1526,23 @@ static inline bool sb_write_started(const struct super_block *sb)
 }
 
 /**
+ * sb_write_not_started - check if sb_start_write() was not called
+ * @sb: the super we write to
+ *
+ * This is not the opposite of sb_write_started().
+ * A false return value ensures that sb_write_started() was called -
+ * it allows false positives with !CONFIG_LOCKDEP and LOCK_STATE_UNKNOWN.
+ */
+static inline bool sb_write_not_started(const struct super_block *sb)
+{
+	return __sb_write_started(sb) <= 0;
+}
+
+/**
  * file_write_started - check if file_start_write() was called
  * @file: the file we write to
  *
+ * This is not the opposite of file_write_not_started().
  * A false return value ensures that file_write_started() was not called -
  * it allows false positives with !CONFIG_LOCKDEP, LOCK_STATE_UNKNOWN
  * and !S_ISREG, because file_start_write() has no effect on !S_ISREG.
@@ -1537,6 +1552,22 @@ static inline bool file_write_started(const struct file *file)
 	if (!S_ISREG(file_inode(file)->i_mode))
 		return true;
 	return sb_write_started(file_inode(file)->i_sb);
+}
+
+/**
+ * file_write_not_started - check if file_start_write() was not called
+ * @file: the file we write to
+ *
+ * This is not the opposite of file_write_started().
+ * A false return value ensures that file_write_started() was called -
+ * it allows false positives with !CONFIG_LOCKDEP, LOCK_STATE_UNKNOWN
+ * and !S_ISREG, because file_start_write() has no effect on !S_ISREG.
+ */
+static inline bool file_write_not_started(const struct file *file)
+{
+	if (!S_ISREG(file_inode(file)->i_mode))
+		return true;
+	return sb_write_not_started(file_inode(file)->i_sb);
 }
 
 /**
