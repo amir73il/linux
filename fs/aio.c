@@ -1444,17 +1444,8 @@ static void aio_complete_rw(struct kiocb *kiocb, long res)
 	if (!list_empty_careful(&iocb->ki_list))
 		aio_remove_iocb(iocb);
 
-	if (kiocb->ki_flags & IOCB_WRITE) {
-		struct inode *inode = file_inode(kiocb->ki_filp);
-
-		/*
-		 * Tell lockdep we inherited freeze protection from submission
-		 * thread.
-		 */
-		if (S_ISREG(inode->i_mode))
-			__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
-		file_end_write(kiocb->ki_filp);
-	}
+	if (kiocb->ki_flags & IOCB_WRITE)
+		kiocb_end_write(kiocb);
 
 	iocb->ki_res.res = res;
 	iocb->ki_res.res2 = 0;
@@ -1581,18 +1572,7 @@ static int aio_write(struct kiocb *req, const struct iocb *iocb,
 		return ret;
 	ret = rw_verify_area(WRITE, file, &req->ki_pos, iov_iter_count(&iter));
 	if (!ret) {
-		/*
-		 * Open-code file_start_write here to grab freeze protection,
-		 * which will be released by another thread in
-		 * aio_complete_rw().  Fool lockdep by telling it the lock got
-		 * released so that it doesn't complain about the held lock when
-		 * we return to userspace.
-		 */
-		if (S_ISREG(file_inode(file)->i_mode)) {
-			sb_start_write(file_inode(file)->i_sb);
-			__sb_writers_release(file_inode(file)->i_sb, SB_FREEZE_WRITE);
-		}
-		req->ki_flags |= IOCB_WRITE;
+		kiocb_start_write(req);
 		aio_rw_done(req, call_write_iter(file, req, &iter));
 	}
 	kfree(iovec);
