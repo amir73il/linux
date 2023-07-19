@@ -2547,7 +2547,7 @@ int security_file_permission(struct file *file, int mask)
 	if (ret)
 		return ret;
 
-	return fsnotify_perm(file, mask);
+	return fsnotify_file_perm(file, mask);
 }
 
 /**
@@ -2798,7 +2798,7 @@ int security_file_open(struct file *file)
 	if (ret)
 		return ret;
 
-	return fsnotify_perm(file, MAY_OPEN);
+	return fsnotify_open_perm(file);
 }
 
 /**
