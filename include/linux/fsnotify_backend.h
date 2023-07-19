@@ -211,9 +211,9 @@ struct fsnotify_group {
 	 * Valid fsnotify group priorities.  Events are send in order from highest
 	 * priority to lowest priority.  We default to the lowest priority.
 	 */
-	#define FS_PRIO_0	0 /* normal notifiers, no permissions */
-	#define FS_PRIO_1	1 /* fanotify content based access control */
-	#define FS_PRIO_2	2 /* fanotify pre-content access */
+	#define FS_PRIO_NOTIFY		0 /* normal notifiers, no permissions */
+	#define FS_PRIO_CONTENT		1 /* fanotify content based access control */
+	#define FS_PRIO_PRE_CONTENT	2 /* fanotify pre-content access */
 	unsigned int priority;
 	bool shutdown;		/* group is being shut down, don't queue more events */
 
