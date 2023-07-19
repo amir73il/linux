@@ -104,7 +104,8 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 /*
  * fsnotify_file_perm - permission hook before file access
  */
-static inline int fsnotify_file_perm(struct file *file, int mask)
+static inline int fsnotify_file_perm(struct file *file, int mask,
+				     const loff_t *ppos, size_t count)
 {
 	__u32 fsnotify_mask = FS_ACCESS_PERM | FS_PRE_ACCESS;
 
