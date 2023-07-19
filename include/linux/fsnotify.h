@@ -106,7 +106,13 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
  */
 static inline int fsnotify_file_perm(struct file *file, int mask)
 {
-	__u32 fsnotify_mask = FS_ACCESS_PERM;
+	__u32 fsnotify_mask = FS_ACCESS_PERM | FS_PRE_ACCESS;
+
+	/*
+	 * Content of file may be written on pre content event, so sb freeze
+	 * protection must not be held.
+	 */
+	lockdep_assert_once(file_write_not_started(file));
 
 	if (!(mask & MAY_READ))
 		return 0;
