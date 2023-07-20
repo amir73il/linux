@@ -233,6 +233,7 @@ static int ovl_copy_fileattr(struct inode *inode, const struct path *old,
 static int ovl_copy_up_file(struct ovl_fs *ofs, struct dentry *dentry,
 			    struct file *new_file, loff_t len)
 {
+	struct super_block *upper_sb = ovl_upper_mnt(ofs)->mnt_sb;
 	struct path datapath;
 	struct file *old_file;
 	loff_t old_pos = 0;
@@ -247,9 +248,21 @@ static int ovl_copy_up_file(struct ovl_fs *ofs, struct dentry *dentry,
 	if (WARN_ON(datapath.dentry == NULL))
 		return -EIO;
 
+	/*
+	 * Drop upper sb_writers to avert lockdep warning with open of lower
+	 * file in nested overlay:
+	 * - upper sb_writers
+	 * -- lower ovl_inode_lock (ovl_maybe_lookup_lowerdata)
+	 *
+	 * In case lower ovl uses same upper as this ovl, lockdep will warn
+	 * about (possibly false positive) circular lock dependency because the
+	 * ordering above is reverse to the order in ovl_copy_up_start().
+	 */
+	sb_end_write(upper_sb);
 	old_file = ovl_path_open(&datapath, O_LARGEFILE | O_RDONLY);
 	if (IS_ERR(old_file))
 		return PTR_ERR(old_file);
+	sb_start_write(upper_sb);
 
 	/* Try to use clone_file_range to clone up within the same fs */
 	cloned = do_clone_file_range(old_file, 0, new_file, 0, len, 0);
@@ -287,10 +300,16 @@ static int ovl_copy_up_file(struct ovl_fs *ofs, struct dentry *dentry,
 		 * it may not recognize all kind of holes and sometimes
 		 * only skips partial of hole area. However, it will be
 		 * enough for most of the use cases.
+		 *
+		 * Drop upper sb_writers to avert lockdep warning with
+		 * llseek of lower file in nested overlay:
+		 * - upper sb_writers
+		 * -- lower ovl_inode_lock (ovl_llseek)
 		 */
-
 		if (skip_hole && data_pos < old_pos) {
+			sb_end_write(upper_sb);
 			data_pos = vfs_llseek(old_file, old_pos, SEEK_DATA);
+			sb_start_write(upper_sb);
 			if (data_pos > old_pos) {
 				hole_len = data_pos - old_pos;
 				len -= hole_len;
