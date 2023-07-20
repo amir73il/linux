@@ -1085,15 +1085,22 @@ static int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 	if (unlikely(err)) {
 		if (err > 0)
 			err = 0;
-	} else {
-		if (!ovl_dentry_upper(dentry))
-			err = ovl_do_copy_up(&ctx);
-		if (!err && parent && !ovl_dentry_has_upper_alias(dentry))
-			err = ovl_link_up(&ctx);
-		if (!err && ovl_dentry_needs_data_copy_up_locked(dentry, flags))
-			err = ovl_copy_up_meta_inode_data(&ctx);
-		ovl_copy_up_end(dentry);
+		goto out;
 	}
+
+	err = ovl_want_write(dentry);
+	if (err)
+		goto out;
+
+	if (!ovl_dentry_upper(dentry))
+		err = ovl_do_copy_up(&ctx);
+	if (!err && parent && !ovl_dentry_has_upper_alias(dentry))
+		err = ovl_link_up(&ctx);
+	if (!err && ovl_dentry_needs_data_copy_up_locked(dentry, flags))
+		err = ovl_copy_up_meta_inode_data(&ctx);
+	ovl_drop_write(dentry);
+	ovl_copy_up_end(dentry);
+out:
 	do_delayed_call(&done);
 
 	return err;
@@ -1169,17 +1176,10 @@ static bool ovl_open_need_copy_up(struct dentry *dentry, int flags)
 
 int ovl_maybe_copy_up(struct dentry *dentry, int flags)
 {
-	int err = 0;
+	if (!ovl_open_need_copy_up(dentry, flags))
+		return 0;
 
-	if (ovl_open_need_copy_up(dentry, flags)) {
-		err = ovl_want_write(dentry);
-		if (!err) {
-			err = ovl_copy_up_flags(dentry, flags);
-			ovl_drop_write(dentry);
-		}
-	}
-
-	return err;
+	return ovl_copy_up_flags(dentry, flags);
 }
 
 int ovl_copy_up_with_data(struct dentry *dentry)

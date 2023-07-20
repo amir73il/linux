@@ -1062,6 +1062,10 @@ int ovl_nlink_start(struct dentry *dentry)
 	if (err)
 		return err;
 
+	err = ovl_want_write(dentry);
+	if (err)
+		goto out;
+
 	if (d_is_dir(dentry) || !ovl_test_flag(OVL_INDEX, inode))
 		goto out;
 
@@ -1074,6 +1078,8 @@ int ovl_nlink_start(struct dentry *dentry)
 	 */
 	err = ovl_set_nlink_upper(dentry);
 	revert_creds(old_cred);
+	if (err)
+		ovl_drop_write(dentry);
 
 out:
 	if (err)
@@ -1094,6 +1100,7 @@ void ovl_nlink_end(struct dentry *dentry)
 		revert_creds(old_cred);
 	}
 
+	ovl_drop_write(dentry);
 	ovl_inode_unlock(inode);
 }
 

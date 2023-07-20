@@ -559,10 +559,6 @@ static int ovl_create_or_link(struct dentry *dentry, struct inode *inode,
 	struct cred *override_cred;
 	struct dentry *parent = dentry->d_parent;
 
-	err = ovl_copy_up(parent);
-	if (err)
-		return err;
-
 	old_cred = ovl_override_creds(dentry->d_sb);
 
 	/*
@@ -626,15 +622,11 @@ static int ovl_create_object(struct dentry *dentry, int mode, dev_t rdev,
 		.link = link,
 	};
 
-	err = ovl_want_write(dentry);
-	if (err)
-		goto out;
-
 	/* Preallocate inode to be used by ovl_get_inode() */
 	err = -ENOMEM;
 	inode = ovl_new_inode(dentry->d_sb, mode, rdev);
 	if (!inode)
-		goto out_drop_write;
+		goto out;
 
 	spin_lock(&inode->i_lock);
 	inode->i_state |= I_CREATING;
@@ -643,12 +635,19 @@ static int ovl_create_object(struct dentry *dentry, int mode, dev_t rdev,
 	inode_init_owner(&nop_mnt_idmap, inode, dentry->d_parent->d_inode, mode);
 	attr.mode = inode->i_mode;
 
+	err = ovl_copy_up(dentry->d_parent);
+	if (err)
+		return err;
+
+	err = ovl_want_write(dentry);
+	if (err)
+		goto out;
+
 	err = ovl_create_or_link(dentry, inode, &attr, false);
 	/* Did we end up using the preallocated inode? */
 	if (inode != d_inode(dentry))
 		iput(inode);
 
-out_drop_write:
 	ovl_drop_write(dentry);
 out:
 	return err;
@@ -700,27 +699,23 @@ static int ovl_link(struct dentry *old, struct inode *newdir,
 	int err;
 	struct inode *inode;
 
-	err = ovl_want_write(old);
+	err = ovl_copy_up(old);
 	if (err)
 		goto out;
 
-	err = ovl_copy_up(old);
-	if (err)
-		goto out_drop_write;
-
 	err = ovl_copy_up(new->d_parent);
 	if (err)
-		goto out_drop_write;
+		goto out;
+
+	err = ovl_nlink_start(old);
+	if (err)
+		goto out;
 
 	if (ovl_is_metacopy_dentry(old)) {
 		err = ovl_set_link_redirect(old);
 		if (err)
-			goto out_drop_write;
+			goto out_nlink_end;
 	}
-
-	err = ovl_nlink_start(old);
-	if (err)
-		goto out_drop_write;
 
 	inode = d_inode(old);
 	ihold(inode);
@@ -731,9 +726,8 @@ static int ovl_link(struct dentry *old, struct inode *newdir,
 	if (err)
 		iput(inode);
 
+out_nlink_end:
 	ovl_nlink_end(old);
-out_drop_write:
-	ovl_drop_write(old);
 out:
 	return err;
 }
@@ -891,17 +885,13 @@ static int ovl_do_remove(struct dentry *dentry, bool is_dir)
 			goto out;
 	}
 
-	err = ovl_want_write(dentry);
+	err = ovl_copy_up(dentry->d_parent);
 	if (err)
 		goto out;
 
-	err = ovl_copy_up(dentry->d_parent);
-	if (err)
-		goto out_drop_write;
-
 	err = ovl_nlink_start(dentry);
 	if (err)
-		goto out_drop_write;
+		goto out;
 
 	old_cred = ovl_override_creds(dentry->d_sb);
 	if (!lower_positive)
@@ -926,8 +916,6 @@ static int ovl_do_remove(struct dentry *dentry, bool is_dir)
 	if (ovl_dentry_upper(dentry))
 		ovl_copyattr(d_inode(dentry));
 
-out_drop_write:
-	ovl_drop_write(dentry);
 out:
 	ovl_cache_free(&list);
 	return err;
@@ -1131,27 +1119,30 @@ static int ovl_rename(struct mnt_idmap *idmap, struct inode *olddir,
 		}
 	}
 
-	err = ovl_want_write(old);
+	err = ovl_copy_up(old);
 	if (err)
 		goto out;
 
-	err = ovl_copy_up(old);
-	if (err)
-		goto out_drop_write;
-
 	err = ovl_copy_up(new->d_parent);
 	if (err)
-		goto out_drop_write;
+		goto out;
 	if (!overwrite) {
 		err = ovl_copy_up(new);
 		if (err)
-			goto out_drop_write;
+			goto out;
 	} else if (d_inode(new)) {
 		err = ovl_nlink_start(new);
 		if (err)
-			goto out_drop_write;
+			goto out;
 
 		update_nlink = true;
+	}
+
+	if (!update_nlink) {
+		/* ovl_nlink_start() took ovl_want_write() */
+		err = ovl_want_write(old);
+		if (err)
+			goto out;
 	}
 
 	old_cred = ovl_override_creds(old->d_sb);
@@ -1286,8 +1277,8 @@ out_revert_creds:
 	revert_creds(old_cred);
 	if (update_nlink)
 		ovl_nlink_end(new);
-out_drop_write:
-	ovl_drop_write(old);
+	else
+		ovl_drop_write(old);
 out:
 	dput(opaquedir);
 	ovl_cache_free(&list);
