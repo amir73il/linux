@@ -398,7 +398,11 @@ static inline bool ovl_open_flags_need_copy_up(int flags)
 }
 
 /* util.c */
+int ovl_get_mnt_write(struct dentry *dentry);
+void ovl_start_write(struct dentry *dentry);
 int ovl_want_write(struct dentry *dentry);
+void ovl_put_mnt_write(struct dentry *dentry);
+void ovl_end_write(struct dentry *dentry);
 void ovl_drop_write(struct dentry *dentry);
 struct dentry *ovl_workdir(struct dentry *dentry);
 const struct cred *ovl_override_creds(struct super_block *sb);
