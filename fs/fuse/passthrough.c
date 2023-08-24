@@ -99,6 +99,34 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb,
 	return ret;
 }
 
+ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct fuse_file *ff = file->private_data;
+	struct file *backing_file = ff->passthrough->filp;
+	const struct cred *old_cred;
+	int ret;
+
+	if (!backing_file->f_op->mmap)
+		return -ENODEV;
+
+	if (WARN_ON(file != vma->vm_file))
+		return -EIO;
+
+	vma->vm_file = get_file(backing_file);
+
+	old_cred = override_creds(ff->passthrough->cred);
+	ret = call_mmap(vma->vm_file, vma);
+	revert_creds(old_cred);
+	fuse_file_accessed(file, backing_file);
+
+	if (ret)
+		fput(backing_file);
+	else
+		fput(file);
+
+	return ret;
+}
+
 /*
  * Returns passthrough_fh id that can be passed with FOPEN_PASSTHROUGH
  * open response and needs to be released with fuse_passthrough_close().
