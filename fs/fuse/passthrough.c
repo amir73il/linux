@@ -10,6 +10,94 @@
 
 #include <linux/file.h>
 #include <linux/idr.h>
+#include <linux/backing-fs.h>
+
+static void fuse_file_start_write(struct file *file, loff_t pos, size_t count)
+{
+	struct inode *inode = file_inode(file);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	if (inode->i_size < pos + count)
+		set_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
+}
+
+static void fuse_file_end_write(struct file *file, loff_t pos, ssize_t res)
+{
+	struct inode *inode = file_inode(file);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	fuse_write_update_attr(inode, pos, res);
+	clear_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
+}
+
+static void fuse_file_accessed(struct file *file, struct file *backing_file)
+{
+	struct inode *inode = file_inode(file);
+	struct inode *backing_inode = file_inode(backing_file);
+
+	/* Mimic atime update policy of backing inode, not the actual value */
+	if (!timespec64_equal(&backing_inode->i_atime, &inode->i_atime))
+		fuse_invalidate_atime(inode);
+}
+
+/* Completion for submitted/failed sync/async rw io */
+static void fuse_rw_complete(struct kiocb *iocb, long res)
+{
+	struct file *file = iocb->ki_filp;
+	struct fuse_file *ff = file->private_data;
+
+	if (iocb->ki_flags & IOCB_WRITE) {
+		/* Update size/mtime */
+		fuse_file_end_write(file, iocb->ki_pos, res);
+	} else {
+		/* Update atime */
+		fuse_file_accessed(file, ff->passthrough->filp);
+	}
+}
+
+ssize_t fuse_passthrough_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+{
+	struct file *file = iocb->ki_filp;
+	struct fuse_file *ff = file->private_data;
+	struct file *backing_file = ff->passthrough->filp;
+	const struct cred *old_cred;
+	ssize_t ret;
+
+	if (!iov_iter_count(iter))
+		return 0;
+
+	old_cred = override_creds(ff->passthrough->cred);
+	ret = backing_file_read_iter(backing_file, iter, iocb, iocb->ki_flags,
+				     fuse_rw_complete);
+	revert_creds(old_cred);
+
+	return ret;
+}
+
+ssize_t fuse_passthrough_write_iter(struct kiocb *iocb,
+				    struct iov_iter *iter)
+{
+	struct file *file = iocb->ki_filp;
+	struct inode *inode = file_inode(file);
+	struct fuse_file *ff = file->private_data;
+	struct file *backing_file = ff->passthrough->filp;
+	size_t count = iov_iter_count(iter);
+	const struct cred *old_cred;
+	ssize_t ret;
+
+	if (!count)
+		return 0;
+
+	inode_lock(inode);
+	fuse_file_start_write(file, iocb->ki_pos, count);
+	old_cred = override_creds(ff->passthrough->cred);
+	ret = backing_file_write_iter(backing_file, iter, iocb, iocb->ki_flags,
+				      fuse_rw_complete);
+	revert_creds(old_cred);
+	inode_unlock(inode);
+
+	return ret;
+}
 
 /*
  * Returns passthrough_fh id that can be passed with FOPEN_PASSTHROUGH
