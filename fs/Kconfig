@@ -22,6 +22,10 @@ config FS_IOMAP
 config LEGACY_DIRECT_IO
 	bool
 
+# Common backing fs helpers
+config FS_BACKING
+	bool
+
 if BLOCK
 
 source "fs/ext2/Kconfig"
