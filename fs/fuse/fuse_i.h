@@ -1395,5 +1395,6 @@ static inline struct fuse_backing *fuse_file_passthrough(struct fuse_file *ff)
 ssize_t fuse_passthrough_read_iter(struct kiocb *iocb, struct iov_iter *iter);
 ssize_t fuse_passthrough_write_iter(struct kiocb *iocb, struct iov_iter *iter);
 ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
+int fuse_passthrough_readdir(struct file *file, struct dir_context *ctx);
 
 #endif /* _FS_FUSE_I_H */
