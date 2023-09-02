@@ -91,6 +91,37 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb,
 	return ret;
 }
 
+ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct fuse_file *ff = file->private_data;
+	struct fuse_backing *fb = fuse_file_passthrough(ff);
+	const struct cred *old_cred;
+	int ret;
+
+	pr_debug("%s: fb=0x%p, start=%lu, end=%lu\n", __func__,
+		 fb, vma->vm_start, vma->vm_end);
+
+	if (!fb->file->f_op->mmap)
+		return -ENODEV;
+
+	if (WARN_ON(file != vma->vm_file))
+		return -EIO;
+
+	vma->vm_file = get_file(fb->file);
+
+	old_cred = override_creds(fb->cred);
+	ret = call_mmap(vma->vm_file, vma);
+	revert_creds(old_cred);
+	fuse_file_accessed(file);
+
+	if (ret)
+		fput(fb->file);
+	else
+		fput(file);
+
+	return ret;
+}
+
 struct fuse_backing *fuse_backing_get(struct fuse_backing *fb)
 {
 	if (fb && refcount_inc_not_zero(&fb->count))
