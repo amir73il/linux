@@ -146,6 +146,9 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 		err = fuse_send_open(fm, nodeid, open_flags, opcode, &outarg);
 		if (!err) {
 			fuse_file_parse_open_args(ff, nodeid, &outarg);
+			/* Readdir cache not used for passthrough */
+			if (ff->open_flags & FOPEN_PASSTHROUGH)
+				ff->open_flags &= ~FOPEN_CACHE_DIR;
 		} else if (err != -ENOSYS) {
 			fuse_file_free(ff);
 			return ERR_PTR(err);
