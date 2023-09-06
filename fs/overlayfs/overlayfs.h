@@ -799,8 +799,6 @@ struct dentry *ovl_create_temp(struct ovl_fs *ofs, struct dentry *workdir,
 
 /* file.c */
 extern const struct file_operations ovl_file_operations;
-int __init ovl_aio_request_cache_init(void);
-void ovl_aio_request_cache_destroy(void);
 int ovl_real_fileattr_get(const struct path *realpath, struct fileattr *fa);
 int ovl_real_fileattr_set(const struct path *realpath, struct fileattr *fa);
 int ovl_fileattr_get(struct dentry *dentry, struct fileattr *fa);
