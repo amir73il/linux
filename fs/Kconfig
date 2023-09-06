@@ -26,6 +26,10 @@ config LEGACY_DIRECT_IO
 	depends on BUFFER_HEAD
 	bool
 
+# Common backing file helpers
+config FS_BACKING_FILE
+	bool
+
 if BLOCK
 
 source "fs/ext2/Kconfig"
