@@ -2283,6 +2283,42 @@ static long fuse_dev_ioctl_clone(struct file *file, __u32 __user *argp)
 	return res;
 }
 
+static long fuse_dev_ioctl_backing(struct file *file, unsigned int cmd,
+				   struct fuse_backing_map __user *argp)
+{
+	struct fuse_dev *fud = fuse_get_dev(file);
+	struct fuse_backing_map map;
+
+	if (!fud)
+		return -EINVAL;
+
+	if (copy_from_user(&map, argp, sizeof(map)))
+		return -EFAULT;
+
+	switch (cmd) {
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	case FUSE_DEV_IOC_BACKING_OPEN:
+	{
+		int ret;
+
+		ret = fuse_backing_open(fud->fc, &map);
+		if (ret)
+			return ret;
+
+		if (copy_to_user(argp, &map, sizeof(map)))
+			return -EFAULT;
+
+		return 0;
+	}
+	case FUSE_DEV_IOC_BACKING_CLOSE:
+		return fuse_backing_close(fud->fc, &map);
+#endif
+
+	default:
+		return -ENOTTY;
+	}
+}
+
 static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
@@ -2291,6 +2327,10 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 	switch (cmd) {
 	case FUSE_DEV_IOC_CLONE:
 		return fuse_dev_ioctl_clone(file, argp);
+
+	case FUSE_DEV_IOC_BACKING_OPEN:
+	case FUSE_DEV_IOC_BACKING_CLOSE:
+		return fuse_dev_ioctl_backing(file, cmd, argp);
 
 	default:
 		return -ENOTTY;

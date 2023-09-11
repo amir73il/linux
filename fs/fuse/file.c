@@ -196,15 +196,17 @@ void fuse_finish_open(struct inode *inode, struct file *file)
 {
 	struct fuse_file *ff = file->private_data;
 	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_inode *fi = get_fuse_inode(inode);
 
 	if (ff->open_flags & FOPEN_STREAM)
 		stream_open(inode, file);
 	else if (ff->open_flags & FOPEN_NONSEEKABLE)
 		nonseekable_open(inode, file);
+	else if (IS_ENABLED(CONFIG_FUSE_PASSTHROUGH) &&
+		 ff->open_flags & FOPEN_PASSTHROUGH)
+		fuse_passthrough_finish_open(ff, fi);
 
 	if (fc->atomic_o_trunc && (file->f_flags & O_TRUNC)) {
-		struct fuse_inode *fi = get_fuse_inode(inode);
-
 		spin_lock(&fi->lock);
 		fi->attr_version = atomic64_inc_return(&fc->attr_version);
 		i_size_write(inode, 0);
@@ -275,6 +277,11 @@ static void fuse_prepare_release(struct fuse_inode *fi, struct fuse_file *ff,
 {
 	struct fuse_conn *fc = ff->fm->fc;
 	struct fuse_release_args *ra = ff->release_args;
+
+	if (fuse_file_passthrough(ff)) {
+		fuse_backing_put(ff->passthrough);
+		ff->passthrough = NULL;
+	}
 
 	/* Inode is NULL on error path of fuse_create_open() */
 	if (likely(fi)) {
