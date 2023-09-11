@@ -766,7 +766,7 @@ struct fuse_create_in {
 struct fuse_open_out {
 	uint64_t	fh;
 	uint32_t	open_flags;
-	uint32_t	padding;
+	int32_t		backing_id;	/* 0 for inode bound backing file */
 };
 
 struct fuse_release_in {
@@ -1064,6 +1064,7 @@ struct fuse_backing_map {
 };
 
 #define FUSE_BACKING_MAP_INODE	(1 << 0)	/* inode bound backing file */
+#define FUSE_BACKING_MAP_ID	(1 << 1)	/* unbound backing file */
 
 /* Device ioctls: */
 #define FUSE_DEV_IOC_MAGIC		229

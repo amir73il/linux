@@ -876,6 +876,11 @@ struct fuse_conn {
 
 	/* New writepages go into this bucket */
 	struct fuse_sync_bucket __rcu *curr_bucket;
+
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	/** IDR for backing files that are not inode bound */
+	struct idr backing_files_map;
+#endif
 };
 
 /*
@@ -1369,6 +1374,9 @@ struct fuse_backing *fuse_backing_get(struct fuse_backing *fb);
 void fuse_backing_put(struct fuse_backing *fb);
 int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map);
 int fuse_backing_close(struct fuse_conn *fc, struct fuse_backing_map *map);
+void fuse_passthrough_init(struct fuse_conn *fc);
+void fuse_passthrough_free(struct fuse_conn *fc);
+void fuse_passthrough_start_open(struct fuse_file *ff, int backing_id);
 void fuse_passthrough_finish_open(struct fuse_file *ff, struct fuse_inode *fi);
 
 static inline void fuse_file_parse_open_args(struct fuse_file *ff, u64 nodeid,
@@ -1377,7 +1385,10 @@ static inline void fuse_file_parse_open_args(struct fuse_file *ff, u64 nodeid,
 	ff->nodeid = nodeid;
 	ff->fh = outarg->fh;
 	ff->open_flags = outarg->open_flags;
-	/* TODO: handle FOPEN_PASSTHROUGH */
+	/* Setup passthrough by backing id early */
+	if (IS_ENABLED(CONFIG_FUSE_PASSTHROUGH) &&
+	    ff->open_flags & FOPEN_PASSTHROUGH && outarg->backing_id)
+		fuse_passthrough_start_open(ff, outarg->backing_id);
 }
 
 static inline struct fuse_backing *fuse_file_passthrough(struct fuse_file *ff)

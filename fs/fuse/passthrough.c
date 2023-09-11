@@ -79,6 +79,54 @@ static struct fuse_backing *fuse_backing_detach(struct fuse_conn *fc,
 	return fb;
 }
 
+/* fc->backing_files_map hold the backing files that are not inode bound */
+void fuse_passthrough_init(struct fuse_conn *fc)
+{
+	idr_init(&fc->backing_files_map);
+}
+
+static int fuse_backing_id_alloc(struct fuse_conn *fc, struct fuse_backing *fb)
+{
+	int id;
+
+	idr_preload(GFP_KERNEL);
+	spin_lock(&fc->lock);
+	id = idr_alloc_cyclic(&fc->backing_files_map, fb, 1, 0,
+			       GFP_ATOMIC);
+	spin_unlock(&fc->lock);
+	idr_preload_end();
+
+	WARN_ON_ONCE(id == 0);
+	return id;
+}
+
+static struct fuse_backing *fuse_backing_id_remove(struct fuse_conn *fc,
+						   int id)
+{
+	struct fuse_backing *fb;
+
+	spin_lock(&fc->lock);
+	fb = idr_remove(&fc->backing_files_map, id);
+	spin_unlock(&fc->lock);
+
+	return fb;
+}
+
+static int fuse_backing_id_free(int id, void *p, void *data)
+{
+	struct fuse_backing *fb = p;
+
+	WARN_ON_ONCE(refcount_read(&fb->count) != 1);
+	fuse_backing_free(fb);
+	return 0;
+}
+
+void fuse_passthrough_free(struct fuse_conn *fc)
+{
+	idr_for_each(&fc->backing_files_map, fuse_backing_id_free, NULL);
+	idr_destroy(&fc->backing_files_map);
+}
+
 int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 {
 	struct file *backing_file;
@@ -98,6 +146,12 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 		if (!map->nodeid)
 			return -EINVAL;
 		break;
+
+	case FUSE_BACKING_MAP_ID:
+		if (map->nodeid)
+			return -EINVAL;
+		break;
+
 	default:
 		return -EINVAL;
 	}
@@ -125,7 +179,10 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	fb->cred = prepare_creds();
 	refcount_set(&fb->count, 1);
 
-	res = fuse_backing_attach(fc, map->nodeid, fb);
+	if (map->flags & FUSE_BACKING_MAP_ID)
+		res = fuse_backing_id_alloc(fc, fb);
+	else
+		res = fuse_backing_attach(fc, map->nodeid, fb);
 	if (res < 0) {
 		fuse_backing_free(fb);
 		return res;
@@ -156,17 +213,44 @@ int fuse_backing_close(struct fuse_conn *fc, struct fuse_backing_map *map)
 		if (!map->nodeid)
 			return -EINVAL;
 		break;
+
+	case FUSE_BACKING_MAP_ID:
+		if (map->backing_id <= 0)
+			return -EINVAL;
+		break;
+
 	default:
 		return -EINVAL;
 	}
 
-	fb = fuse_backing_detach(fc, map->nodeid);
+	if (map->flags & FUSE_BACKING_MAP_ID)
+		fb = fuse_backing_id_remove(fc, map->backing_id);
+	else
+		fb = fuse_backing_detach(fc, map->nodeid);
 	if (IS_ERR_OR_NULL(fb))
 		return fb ? PTR_ERR(fb) : -ENOENT;
 
 	fuse_backing_put(fb);
 
 	return 0;
+}
+
+/* Setup passthrough to an unbound backing file early */
+void fuse_passthrough_start_open(struct fuse_file *ff, int backing_id)
+{
+	struct fuse_conn *fc = ff->fm->fc;
+	struct fuse_backing *fb;
+
+	rcu_read_lock();
+	fb = idr_find(&fc->backing_files_map, backing_id);
+	fb = fuse_backing_get(fb);
+	rcu_read_unlock();
+
+	/* Noop if the backing file is not mapped */
+	ff->passthrough = fb;
+	ff->open_flags &= ~FOPEN_PASSTHROUGH;
+
+	pr_debug("%s: backing_id=%d, fb=0x%p\n", __func__, backing_id, fb);
 }
 
 /* Setup passthrough to an inode bound backing file */
