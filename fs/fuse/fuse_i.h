@@ -66,6 +66,7 @@ struct fuse_forget_link {
 /** Container for data related to mapping to backing file */
 struct fuse_backing {
 	struct file *file;
+	struct cred *cred;
 
 	/** refcount */
 	refcount_t count;
@@ -237,6 +238,12 @@ struct fuse_file {
 
 	/** Wait queue head for poll */
 	wait_queue_head_t poll_wait;
+
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	/** Reference to backing file in passthrough mode */
+	struct file *passthrough;
+	const struct cred *cred;
+#endif
 
 	/** Has flock been performed on this file? */
 	bool flock:1;
@@ -867,6 +874,11 @@ struct fuse_conn {
 
 	/* New writepages go into this bucket */
 	struct fuse_sync_bucket __rcu *curr_bucket;
+
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	/** IDR for backing files ids */
+	struct idr backing_files_map;
+#endif
 };
 
 /*
@@ -1360,5 +1372,27 @@ void fuse_file_release(struct inode *inode, struct fuse_file *ff,
 /* passthrough.c */
 struct fuse_backing *fuse_backing_get(struct fuse_backing *fb);
 void fuse_backing_put(struct fuse_backing *fb);
+void fuse_backing_files_init(struct fuse_conn *fc);
+void fuse_backing_files_free(struct fuse_conn *fc);
+int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map);
+int fuse_backing_close(struct fuse_conn *fc, int backing_id);
+
+void fuse_passthrough_setup(struct file *file, int backing_id);
+void fuse_passthrough_release(struct fuse_file *ff);
+
+static inline void fuse_passthrough_open(struct file *file, int backing_id)
+{
+	if (IS_ENABLED(CONFIG_FUSE_PASSTHROUGH) && backing_id)
+		fuse_passthrough_setup(file, backing_id);
+}
+
+static inline struct file *fuse_file_passthrough(struct fuse_file *ff)
+{
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	return ff->passthrough;
+#else
+	return NULL;
+#endif
+}
 
 #endif /* _FS_FUSE_I_H */

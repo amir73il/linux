@@ -205,6 +205,8 @@ void fuse_finish_open(struct inode *inode, struct file *file,
 		stream_open(inode, file);
 	else if (ff->open_flags & FOPEN_NONSEEKABLE)
 		nonseekable_open(inode, file);
+	else if (ff->open_flags & FOPEN_PASSTHROUGH)
+		fuse_passthrough_open(file, outargp->backing_id);
 
 	if (fc->atomic_o_trunc && (file->f_flags & O_TRUNC)) {
 		struct fuse_inode *fi = get_fuse_inode(inode);
@@ -280,6 +282,9 @@ static void fuse_prepare_release(struct fuse_inode *fi, struct fuse_file *ff,
 {
 	struct fuse_conn *fc = ff->fm->fc;
 	struct fuse_release_args *ra = ff->release_args;
+
+	if (fuse_file_passthrough(ff))
+		fuse_passthrough_release(ff);
 
 	/* Inode is NULL on error path of fuse_create_open() */
 	if (likely(fi)) {
