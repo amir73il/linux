@@ -56,7 +56,7 @@ config FUSE_DAX
 config FUSE_PASSTHROUGH
 	bool "FUSE passthrough operations support"
 	default y
-	select FS_BACKING
+	select FS_BACKING_FILE
 	depends on FUSE_FS
 	help
 	  This allows bypassing FUSE server by mapping specific FUSE operations
