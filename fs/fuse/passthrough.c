@@ -240,17 +240,24 @@ void fuse_passthrough_start_open(struct fuse_file *ff, int backing_id)
 {
 	struct fuse_conn *fc = ff->fm->fc;
 	struct fuse_backing *fb;
+	bool auto_close = ff->open_flags & FOPEN_CLOSE_BACKING_ID;
 
-	rcu_read_lock();
-	fb = idr_find(&fc->backing_files_map, backing_id);
-	fb = fuse_backing_get(fb);
-	rcu_read_unlock();
+	if (auto_close) {
+		/* transfer reference and unmap backing id */
+		fb = fuse_backing_id_remove(fc, backing_id);
+	} else {
+		rcu_read_lock();
+		fb = idr_find(&fc->backing_files_map, backing_id);
+		fb = fuse_backing_get(fb);
+		rcu_read_unlock();
+	}
 
 	/* Noop if the backing file is not mapped */
 	ff->passthrough = fb;
 	ff->open_flags &= ~FOPEN_PASSTHROUGH;
 
-	pr_debug("%s: backing_id=%d, fb=0x%p\n", __func__, backing_id, fb);
+	pr_debug("%s: backing_id=%d, auto_close=%d, fb=0x%p\n", __func__,
+		 backing_id, auto_close, fb);
 }
 
 /* Setup passthrough to an inode bound backing file */
