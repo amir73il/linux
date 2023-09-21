@@ -214,7 +214,7 @@
  *
  *  7.40
  *  - add max_stack_depth to fuse_init_out, add FUSE_PASSTHROUGH flag
- *  - add FOPEN_PASSTHROUGH
+ *  - add FOPEN_PASSTHROUGH, FOPEN_CLOSE_BACKING_ID
  */
 
 #ifndef _LINUX_FUSE_H
@@ -358,6 +358,7 @@ struct fuse_file_lock {
  * FOPEN_NOFLUSH: don't flush data cache on close (unless FUSE_WRITEBACK_CACHE)
  * FOPEN_PARALLEL_DIRECT_WRITES: Allow concurrent direct writes on the same inode
  * FOPEN_PASSTHROUGH: passthrough read/write operations for this open file
+ * FOPEN_CLOSE_BACKING_ID: close backing file id after enabling passthrough
  */
 #define FOPEN_DIRECT_IO		(1 << 0)
 #define FOPEN_KEEP_CACHE	(1 << 1)
@@ -367,6 +368,10 @@ struct fuse_file_lock {
 #define FOPEN_NOFLUSH		(1 << 5)
 #define FOPEN_PARALLEL_DIRECT_WRITES	(1 << 6)
 #define FOPEN_PASSTHROUGH	(1 << 7)
+#define FOPEN_CLOSE_BACKING_ID	(1 << 8)
+
+#define FOPEN_PASSTHROUGH_AUTO_CLOSE \
+	(FOPEN_PASSTHROUGH | FOPEN_CLOSE_BACKING_ID)
 
 /**
  * INIT request/reply flags
