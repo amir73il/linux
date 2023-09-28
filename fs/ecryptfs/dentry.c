@@ -42,7 +42,7 @@ static int ecryptfs_d_revalidate(struct dentry *dentry, unsigned int flags)
 	if (d_really_is_positive(dentry)) {
 		struct inode *inode = d_inode(dentry);
 
-		fsstack_copy_attr_all(inode, ecryptfs_inode_to_lower(inode));
+		ecryptfs_copy_attr_all(inode, ecryptfs_inode_to_lower(inode));
 		if (!inode->i_nlink)
 			return 0;
 	}

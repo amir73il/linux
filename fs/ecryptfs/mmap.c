@@ -480,7 +480,7 @@ static int ecryptfs_write_end(struct file *file,
 						       to);
 		if (!rc) {
 			rc = copied;
-			fsstack_copy_inode_size(ecryptfs_inode,
+			ecryptfs_copy_inode_size(ecryptfs_inode,
 				ecryptfs_inode_to_lower(ecryptfs_inode));
 		}
 		goto out;

@@ -48,9 +48,9 @@ static int ecryptfs_inode_set(struct inode *inode, void *opaque)
 	struct inode *lower_inode = opaque;
 
 	ecryptfs_set_inode_lower(inode, lower_inode);
-	fsstack_copy_attr_all(inode, lower_inode);
+	ecryptfs_copy_attr_all(inode, lower_inode);
 	/* i_size will be overwritten for encrypted regular files */
-	fsstack_copy_inode_size(inode, lower_inode);
+	ecryptfs_copy_inode_size(inode, lower_inode);
 	inode->i_ino = lower_inode->i_ino;
 	inode->i_mapping->a_ops = &ecryptfs_aops;
 
@@ -146,7 +146,7 @@ static int ecryptfs_do_unlink(struct inode *dir, struct dentry *dentry,
 		printk(KERN_ERR "Error in vfs_unlink; rc = [%d]\n", rc);
 		goto out_unlock;
 	}
-	fsstack_copy_attr_times(dir, lower_dir);
+	ecryptfs_copy_attr_times(dir, lower_dir);
 	set_nlink(inode, ecryptfs_inode_to_lower(inode)->i_nlink);
 	inode_set_ctime_to_ts(inode, inode_get_ctime(dir));
 out_unlock:
@@ -194,8 +194,8 @@ ecryptfs_do_create(struct inode *directory_inode,
 		vfs_unlink(&nop_mnt_idmap, lower_dir, lower_dentry, NULL);
 		goto out_lock;
 	}
-	fsstack_copy_attr_times(directory_inode, lower_dir);
-	fsstack_copy_inode_size(directory_inode, lower_dir);
+	ecryptfs_copy_attr_times(directory_inode, lower_dir);
+	ecryptfs_copy_inode_size(directory_inode, lower_dir);
 out_lock:
 	inode_unlock(lower_dir);
 	return inode;
@@ -330,7 +330,7 @@ static struct dentry *ecryptfs_lookup_interpose(struct dentry *dentry,
 		return ERR_PTR(-ENOMEM);
 	}
 
-	fsstack_copy_attr_atime(d_inode(dentry->d_parent),
+	ecryptfs_copy_attr_atime(d_inode(dentry->d_parent),
 				d_inode(path->dentry));
 	BUG_ON(!d_count(lower_dentry));
 
@@ -441,8 +441,8 @@ static int ecryptfs_link(struct dentry *old_dentry, struct inode *dir,
 	rc = ecryptfs_interpose(lower_new_dentry, new_dentry, dir->i_sb);
 	if (rc)
 		goto out_lock;
-	fsstack_copy_attr_times(dir, lower_dir);
-	fsstack_copy_inode_size(dir, lower_dir);
+	ecryptfs_copy_attr_times(dir, lower_dir);
+	ecryptfs_copy_inode_size(dir, lower_dir);
 	set_nlink(d_inode(old_dentry),
 		  ecryptfs_inode_to_lower(d_inode(old_dentry))->i_nlink);
 	i_size_write(d_inode(new_dentry), file_size_save);
@@ -486,8 +486,8 @@ static int ecryptfs_symlink(struct mnt_idmap *idmap,
 	rc = ecryptfs_interpose(lower_dentry, dentry, dir->i_sb);
 	if (rc)
 		goto out_lock;
-	fsstack_copy_attr_times(dir, lower_dir);
-	fsstack_copy_inode_size(dir, lower_dir);
+	ecryptfs_copy_attr_times(dir, lower_dir);
+	ecryptfs_copy_inode_size(dir, lower_dir);
 out_lock:
 	inode_unlock(lower_dir);
 	if (d_really_is_negative(dentry))
@@ -511,8 +511,8 @@ static int ecryptfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 	rc = ecryptfs_interpose(lower_dentry, dentry, dir->i_sb);
 	if (rc)
 		goto out;
-	fsstack_copy_attr_times(dir, lower_dir);
-	fsstack_copy_inode_size(dir, lower_dir);
+	ecryptfs_copy_attr_times(dir, lower_dir);
+	ecryptfs_copy_inode_size(dir, lower_dir);
 	set_nlink(dir, lower_dir->i_nlink);
 out:
 	inode_unlock(lower_dir);
@@ -537,7 +537,7 @@ static int ecryptfs_rmdir(struct inode *dir, struct dentry *dentry)
 	}
 	if (!rc) {
 		clear_nlink(d_inode(dentry));
-		fsstack_copy_attr_times(dir, lower_dir);
+		ecryptfs_copy_attr_times(dir, lower_dir);
 		set_nlink(dir, lower_dir->i_nlink);
 	}
 	dput(lower_dentry);
@@ -564,8 +564,8 @@ ecryptfs_mknod(struct mnt_idmap *idmap, struct inode *dir,
 	rc = ecryptfs_interpose(lower_dentry, dentry, dir->i_sb);
 	if (rc)
 		goto out;
-	fsstack_copy_attr_times(dir, lower_dir);
-	fsstack_copy_inode_size(dir, lower_dir);
+	ecryptfs_copy_attr_times(dir, lower_dir);
+	ecryptfs_copy_inode_size(dir, lower_dir);
 out:
 	inode_unlock(lower_dir);
 	if (d_really_is_negative(dentry))
@@ -626,11 +626,11 @@ ecryptfs_rename(struct mnt_idmap *idmap, struct inode *old_dir,
 	if (rc)
 		goto out_lock;
 	if (target_inode)
-		fsstack_copy_attr_all(target_inode,
+		ecryptfs_copy_attr_all(target_inode,
 				      ecryptfs_inode_to_lower(target_inode));
-	fsstack_copy_attr_all(new_dir, d_inode(lower_new_dir_dentry));
+	ecryptfs_copy_attr_all(new_dir, d_inode(lower_new_dir_dentry));
 	if (new_dir != old_dir)
-		fsstack_copy_attr_all(old_dir, d_inode(lower_old_dir_dentry));
+		ecryptfs_copy_attr_all(old_dir, d_inode(lower_old_dir_dentry));
 out_lock:
 	dput(lower_new_dentry);
 	unlock_rename(lower_old_dir_dentry, lower_new_dir_dentry);
@@ -671,7 +671,7 @@ static const char *ecryptfs_get_link(struct dentry *dentry,
 	buf = ecryptfs_readlink_lower(dentry, &len);
 	if (IS_ERR(buf))
 		return buf;
-	fsstack_copy_attr_atime(d_inode(dentry),
+	ecryptfs_copy_attr_atime(d_inode(dentry),
 				d_inode(ecryptfs_dentry_to_lower(dentry)));
 	buf[len] = '\0';
 	set_delayed_call(done, kfree_link, buf);
@@ -968,7 +968,7 @@ static int ecryptfs_setattr(struct mnt_idmap *idmap,
 	rc = notify_change(&nop_mnt_idmap, lower_dentry, &lower_ia, NULL);
 	inode_unlock(d_inode(lower_dentry));
 out:
-	fsstack_copy_attr_all(inode, lower_inode);
+	ecryptfs_copy_attr_all(inode, lower_inode);
 	return rc;
 }
 
@@ -1009,7 +1009,7 @@ static int ecryptfs_getattr(struct mnt_idmap *idmap,
 	rc = vfs_getattr(ecryptfs_dentry_to_lower_path(dentry), &lower_stat,
 			 request_mask, flags);
 	if (!rc) {
-		fsstack_copy_attr_all(d_inode(dentry),
+		ecryptfs_copy_attr_all(d_inode(dentry),
 				      ecryptfs_inode_to_lower(d_inode(dentry)));
 		generic_fillattr(&nop_mnt_idmap, request_mask,
 				 d_inode(dentry), stat);
@@ -1037,7 +1037,7 @@ ecryptfs_setxattr(struct dentry *dentry, struct inode *inode,
 	rc = __vfs_setxattr_locked(&nop_mnt_idmap, lower_dentry, name, value, size, flags, NULL);
 	inode_unlock(lower_inode);
 	if (!rc && inode)
-		fsstack_copy_attr_all(inode, lower_inode);
+		ecryptfs_copy_attr_all(inode, lower_inode);
 out:
 	return rc;
 }
@@ -1118,7 +1118,7 @@ static int ecryptfs_fileattr_set(struct mnt_idmap *idmap,
 	int rc;
 
 	rc = vfs_fileattr_set(&nop_mnt_idmap, lower_dentry, fa);
-	fsstack_copy_attr_all(d_inode(dentry), d_inode(lower_dentry));
+	ecryptfs_copy_attr_all(d_inode(dentry), d_inode(lower_dentry));
 
 	return rc;
 }
@@ -1141,7 +1141,7 @@ static int ecryptfs_set_acl(struct mnt_idmap *idmap,
 	rc = vfs_set_acl(&nop_mnt_idmap, lower_dentry,
 			 posix_acl_xattr_name(type), acl);
 	if (!rc)
-		fsstack_copy_attr_all(d_inode(dentry), lower_inode);
+		ecryptfs_copy_attr_all(d_inode(dentry), lower_inode);
 	return rc;
 }
 
@@ -1214,3 +1214,77 @@ const struct xattr_handler *ecryptfs_xattr_handlers[] = {
 	&ecryptfs_xattr_handler,
 	NULL
 };
+
+/*
+ * These functions were unshared from fs/stack.c
+ */
+/*
+ * does _NOT_ require i_mutex to be held.
+ *
+ * This function cannot be inlined since i_size_{read,write} is rather
+ * heavy-weight on 32-bit systems
+ */
+void ecryptfs_copy_inode_size(struct inode *dst, struct inode *src)
+{
+	loff_t i_size;
+	blkcnt_t i_blocks;
+
+	/*
+	 * i_size_read() includes its own seqlocking and protection from
+	 * preemption (see include/linux/fs.h): we need nothing extra for
+	 * that here, and prefer to avoid nesting locks than attempt to keep
+	 * i_size and i_blocks in sync together.
+	 */
+	i_size = i_size_read(src);
+
+	/*
+	 * But on 32-bit, we ought to make an effort to keep the two halves of
+	 * i_blocks in sync despite SMP or PREEMPTION - though stat's
+	 * generic_fillattr() doesn't bother, and we won't be applying quotas
+	 * (where i_blocks does become important) at the upper level.
+	 *
+	 * We don't actually know what locking is used at the lower level;
+	 * but if it's a filesystem that supports quotas, it will be using
+	 * i_lock as in inode_add_bytes().
+	 */
+	if (sizeof(i_blocks) > sizeof(long))
+		spin_lock(&src->i_lock);
+	i_blocks = src->i_blocks;
+	if (sizeof(i_blocks) > sizeof(long))
+		spin_unlock(&src->i_lock);
+
+	/*
+	 * If CONFIG_SMP or CONFIG_PREEMPTION on 32-bit, it's vital for
+	 * ecryptfs_copy_inode_size() to hold some lock around
+	 * i_size_write(), otherwise i_size_read() may spin forever (see
+	 * include/linux/fs.h).  We don't necessarily hold i_mutex when this
+	 * is called, so take i_lock for that case.
+	 *
+	 * And if on 32-bit, continue our effort to keep the two halves of
+	 * i_blocks in sync despite SMP or PREEMPTION: use i_lock for that case
+	 * too, and do both at once by combining the tests.
+	 *
+	 * There is none of this locking overhead in the 64-bit case.
+	 */
+	if (sizeof(i_size) > sizeof(long) || sizeof(i_blocks) > sizeof(long))
+		spin_lock(&dst->i_lock);
+	i_size_write(dst, i_size);
+	dst->i_blocks = i_blocks;
+	if (sizeof(i_size) > sizeof(long) || sizeof(i_blocks) > sizeof(long))
+		spin_unlock(&dst->i_lock);
+}
+
+/* copy all attributes */
+void ecryptfs_copy_attr_all(struct inode *dest, const struct inode *src)
+{
+	dest->i_mode = src->i_mode;
+	dest->i_uid = src->i_uid;
+	dest->i_gid = src->i_gid;
+	dest->i_rdev = src->i_rdev;
+	dest->i_atime = src->i_atime;
+	dest->i_mtime = src->i_mtime;
+	inode_set_ctime_to_ts(dest, inode_get_ctime(src));
+	dest->i_blkbits = src->i_blkbits;
+	dest->i_flags = src->i_flags;
+	set_nlink(dest, src->i_nlink);
+}

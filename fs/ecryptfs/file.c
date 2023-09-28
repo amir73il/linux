@@ -137,7 +137,7 @@ static int ecryptfs_readdir(struct file *file, struct dir_context *ctx)
 	rc = iterate_dir(lower_file, &buf.ctx);
 	ctx->pos = buf.ctx.pos;
 	if (rc >= 0 && (buf.entries_written || !buf.filldir_called))
-		fsstack_copy_attr_atime(inode, file_inode(lower_file));
+		ecryptfs_copy_attr_atime(inode, file_inode(lower_file));
 	return rc;
 }
 
@@ -378,7 +378,7 @@ ecryptfs_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case FS_IOC_GETVERSION:
 	case FS_IOC_SETVERSION:
 		rc = lower_file->f_op->unlocked_ioctl(lower_file, cmd, arg);
-		fsstack_copy_attr_all(file_inode(file), file_inode(lower_file));
+		ecryptfs_copy_attr_all(file_inode(file), file_inode(lower_file));
 
 		return rc;
 	default:
@@ -403,7 +403,7 @@ ecryptfs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case FS_IOC32_GETVERSION:
 	case FS_IOC32_SETVERSION:
 		rc = lower_file->f_op->compat_ioctl(lower_file, cmd, arg);
-		fsstack_copy_attr_all(file_inode(file), file_inode(lower_file));
+		ecryptfs_copy_attr_all(file_inode(file), file_inode(lower_file));
 
 		return rc;
 	default:

@@ -704,4 +704,25 @@ int ecryptfs_derive_iv(char *iv, struct ecryptfs_crypt_stat *crypt_stat,
 
 extern const struct xattr_handler *ecryptfs_xattr_handlers[];
 
+/*
+ * These functions were unshared from include/linux/fs_stack.h;
+ * none of these functions require i_mutex to be held.
+ */
+extern void ecryptfs_copy_attr_all(struct inode *dest, const struct inode *src);
+extern void ecryptfs_copy_inode_size(struct inode *dst, struct inode *src);
+
+static inline void ecryptfs_copy_attr_atime(struct inode *dest,
+					   const struct inode *src)
+{
+	dest->i_atime = src->i_atime;
+}
+
+static inline void ecryptfs_copy_attr_times(struct inode *dest,
+					   const struct inode *src)
+{
+	dest->i_atime = src->i_atime;
+	dest->i_mtime = src->i_mtime;
+	inode_set_ctime_to_ts(dest, inode_get_ctime(src));
+}
+
 #endif /* #ifndef ECRYPTFS_KERNEL_H */
