@@ -18,6 +18,10 @@ config VALIDATE_FS_PARSER
 config FS_IOMAP
 	bool
 
+# Library for stackable filesystems
+config FS_STACK
+	bool
+
 config BUFFER_HEAD
 	bool
 
