@@ -93,7 +93,8 @@ static void show_faulting_vma(unsigned long address)
 		char *nm = "?";
 
 		if (vma->vm_file) {
-			nm = file_path(vma->vm_file, buf, ARC_PATH_MAX-1);
+			nm = d_path(file_user_path(vma->vm_file), buf,
+				    ARC_PATH_MAX-1);
 			if (IS_ERR(nm))
 				nm = "?";
 		}
