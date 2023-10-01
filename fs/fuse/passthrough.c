@@ -9,6 +9,7 @@
 
 #include <linux/file.h>
 #include <linux/backing-file.h>
+#include <linux/splice.h>
 
 static void fuse_file_start_write(struct file *file, loff_t pos, size_t count)
 {
@@ -86,6 +87,60 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb,
 	ret = backing_file_write_iter(fb->file, iter, iocb, iocb->ki_flags,
 				      fuse_file_end_write);
 	revert_creds(old_cred);
+	inode_unlock(inode);
+
+	return ret;
+}
+
+ssize_t fuse_passthrough_splice_read(struct file *in, loff_t *ppos,
+				     struct pipe_inode_info *pipe,
+				     size_t len, unsigned int flags)
+{
+	struct fuse_file *ff = in->private_data;
+	struct fuse_backing *fb = fuse_file_passthrough(ff);
+	const struct cred *old_cred;
+	ssize_t ret;
+
+	pr_debug("%s: fb=0x%p, pos=%lld, len=%zu, flags=0x%x\n", __func__,
+		 fb, ppos ? *ppos : 0, len, flags);
+
+	old_cred = override_creds(fb->cred);
+	ret = vfs_splice_read(fb->file, ppos, pipe, len, flags);
+	revert_creds(old_cred);
+	fuse_file_accessed(in);
+
+	return ret;
+}
+
+ssize_t fuse_passthrough_splice_write(struct pipe_inode_info *pipe,
+				      struct file *out, loff_t *ppos,
+				      size_t len, unsigned int flags)
+{
+	struct fuse_file *ff = out->private_data;
+	struct fuse_backing *fb = fuse_file_passthrough(ff);
+	const struct cred *old_cred;
+	struct inode *inode = file_inode(out);
+	ssize_t ret;
+
+	pr_debug("%s: fb=0x%p, pos=%lld, len=%zu, flags=0x%x\n", __func__,
+		 fb, ppos ? *ppos : 0, len, flags);
+
+	inode_lock(inode);
+	fuse_file_start_write(out, ppos ? *ppos : 0, len);
+	ret = file_remove_privs(out);
+	if (ret)
+		goto out_unlock;
+
+	old_cred = override_creds(fb->cred);
+	file_start_write(fb->file);
+
+	ret = iter_file_splice_write(pipe, fb->file, ppos, len, flags);
+
+	file_end_write(fb->file);
+	revert_creds(old_cred);
+	fuse_file_end_write(out, ppos ? *ppos : 0, ret);
+
+out_unlock:
 	inode_unlock(inode);
 
 	return ret;
