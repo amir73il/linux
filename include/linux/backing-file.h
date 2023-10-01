@@ -20,6 +20,6 @@ ssize_t backing_file_read_iter(struct file *file, struct iov_iter *iter,
 			       void (*accessed)(struct file *));
 ssize_t backing_file_write_iter(struct file *file, struct iov_iter *iter,
 				struct kiocb *iocb, int flags,
-				void (*modified)(struct file *));
+				void (*end_io)(struct file *, loff_t, ssize_t));
 
 #endif /* _LINUX_BACKING_FILE_H */

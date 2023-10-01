@@ -54,7 +54,7 @@ struct backing_aio {
 	refcount_t ref;
 	struct kiocb *orig_iocb;
 	/* used for aio completion */
-	void (*end_io)(struct file *);
+	void (*end_io)(struct file *, loff_t, ssize_t);
 	struct work_struct work;
 	long res;
 };
@@ -88,7 +88,7 @@ static void backing_aio_cleanup(struct backing_aio *aio, long res)
 
 	orig_iocb->ki_pos = iocb->ki_pos;
 	if (aio->end_io)
-		aio->end_io(orig_iocb->ki_filp);
+		aio->end_io(orig_iocb->ki_filp, iocb->ki_pos, res);
 
 	backing_aio_put(aio);
 }
@@ -175,7 +175,7 @@ EXPORT_SYMBOL_GPL(backing_file_read_iter);
 
 ssize_t backing_file_write_iter(struct file *file, struct iov_iter *iter,
 				struct kiocb *iocb, int flags,
-				void (*modified)(struct file *))
+				void (*end_io)(struct file *, loff_t, ssize_t))
 {
 	ssize_t ret;
 
@@ -198,8 +198,8 @@ ssize_t backing_file_write_iter(struct file *file, struct iov_iter *iter,
 		file_start_write(file);
 		ret = vfs_iter_write(file, iter, &iocb->ki_pos, rwf);
 		file_end_write(file);
-		if (modified)
-			modified(iocb->ki_filp);
+		if (end_io)
+			end_io(iocb->ki_filp, iocb->ki_pos, ret);
 	} else {
 		struct backing_aio *aio;
 
@@ -212,7 +212,7 @@ ssize_t backing_file_write_iter(struct file *file, struct iov_iter *iter,
 			return -ENOMEM;
 
 		aio->orig_iocb = iocb;
-		aio->end_io = modified;
+		aio->end_io = end_io;
 		kiocb_clone(&aio->iocb, iocb, get_file(file));
 		aio->iocb.ki_flags = flags;
 		aio->iocb.ki_complete = backing_aio_queue_completion;

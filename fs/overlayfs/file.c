@@ -234,6 +234,11 @@ static void ovl_file_modified(struct file *file)
 	ovl_copyattr(file_inode(file));
 }
 
+static void ovl_end_write(struct file *file, loff_t pos, ssize_t res)
+{
+	ovl_file_modified(file);
+}
+
 static void ovl_file_accessed(struct file *file)
 {
 	struct inode *inode, *upperinode;
@@ -310,7 +315,7 @@ static ssize_t ovl_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 
 	old_cred = ovl_override_creds(inode->i_sb);
 	ret = backing_file_write_iter(real.file, iter, iocb, ifl,
-				      ovl_file_modified);
+				      ovl_end_write);
 	revert_creds(old_cred);
 	fdput(real);
 
