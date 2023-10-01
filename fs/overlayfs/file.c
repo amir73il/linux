@@ -16,19 +16,6 @@
 #include <linux/backing-file.h>
 #include "overlayfs.h"
 
-#include "../internal.h"	/* for sb_init_dio_done_wq */
-
-struct ovl_aio_req {
-	struct kiocb iocb;
-	refcount_t ref;
-	struct kiocb *orig_iocb;
-	/* used for aio completion */
-	struct work_struct work;
-	long res;
-};
-
-static struct kmem_cache *ovl_aio_request_cachep;
-
 static char ovl_whatisit(struct inode *inode, struct inode *realinode)
 {
 	if (realinode != ovl_inode_upper(inode))
@@ -272,77 +259,6 @@ static void ovl_file_accessed(struct file *file)
 	touch_atime(&file->f_path);
 }
 
-#define OVL_IOCB_MASK \
-	(IOCB_NOWAIT | IOCB_HIPRI | IOCB_DSYNC | IOCB_SYNC | IOCB_APPEND)
-
-static rwf_t iocb_to_rw_flags(int flags)
-{
-	return (__force rwf_t)(flags & OVL_IOCB_MASK);
-}
-
-static inline void ovl_aio_put(struct ovl_aio_req *aio_req)
-{
-	if (refcount_dec_and_test(&aio_req->ref)) {
-		fput(aio_req->iocb.ki_filp);
-		kmem_cache_free(ovl_aio_request_cachep, aio_req);
-	}
-}
-
-static void ovl_aio_cleanup_handler(struct ovl_aio_req *aio_req)
-{
-	struct kiocb *iocb = &aio_req->iocb;
-	struct kiocb *orig_iocb = aio_req->orig_iocb;
-
-	if (iocb->ki_flags & IOCB_WRITE) {
-		kiocb_end_write(iocb);
-		ovl_file_modified(orig_iocb->ki_filp);
-	}
-
-	orig_iocb->ki_pos = iocb->ki_pos;
-	ovl_aio_put(aio_req);
-}
-
-static void ovl_aio_rw_complete(struct kiocb *iocb, long res)
-{
-	struct ovl_aio_req *aio_req = container_of(iocb,
-						   struct ovl_aio_req, iocb);
-	struct kiocb *orig_iocb = aio_req->orig_iocb;
-
-	ovl_aio_cleanup_handler(aio_req);
-	orig_iocb->ki_complete(orig_iocb, res);
-}
-
-static void ovl_aio_complete_work(struct work_struct *work)
-{
-	struct ovl_aio_req *aio_req = container_of(work,
-						   struct ovl_aio_req, work);
-
-	ovl_aio_rw_complete(&aio_req->iocb, aio_req->res);
-}
-
-static void ovl_aio_queue_completion(struct kiocb *iocb, long res)
-{
-	struct ovl_aio_req *aio_req = container_of(iocb,
-						   struct ovl_aio_req, iocb);
-	struct kiocb *orig_iocb = aio_req->orig_iocb;
-
-	/*
-	 * Punt to a work queue to serialize updates of mtime/size.
-	 */
-	aio_req->res = res;
-	INIT_WORK(&aio_req->work, ovl_aio_complete_work);
-	queue_work(file_inode(orig_iocb->ki_filp)->i_sb->s_dio_done_wq,
-		   &aio_req->work);
-}
-
-static int ovl_init_aio_done_wq(struct super_block *sb)
-{
-	if (sb->s_dio_done_wq)
-		return 0;
-
-	return sb_init_dio_done_wq(sb);
-}
-
 static ssize_t ovl_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 {
 	struct file *file = iocb->ki_filp;
@@ -357,38 +273,10 @@ static ssize_t ovl_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 	if (ret)
 		return ret;
 
-	ret = -EINVAL;
-	if (iocb->ki_flags & IOCB_DIRECT &&
-	    !(real.file->f_mode & FMODE_CAN_ODIRECT))
-		goto out_fdput;
-
 	old_cred = ovl_override_creds(file_inode(file)->i_sb);
-	if (is_sync_kiocb(iocb)) {
-		rwf_t rwf = iocb_to_rw_flags(iocb->ki_flags);
-
-		ret = vfs_iter_read(real.file, iter, &iocb->ki_pos, rwf);
-	} else {
-		struct ovl_aio_req *aio_req;
-
-		ret = -ENOMEM;
-		aio_req = kmem_cache_zalloc(ovl_aio_request_cachep, GFP_KERNEL);
-		if (!aio_req)
-			goto out;
-
-		real.flags = 0;
-		aio_req->orig_iocb = iocb;
-		kiocb_clone(&aio_req->iocb, iocb, get_file(real.file));
-		aio_req->iocb.ki_complete = ovl_aio_rw_complete;
-		refcount_set(&aio_req->ref, 2);
-		ret = vfs_iocb_iter_read(real.file, &aio_req->iocb, iter);
-		ovl_aio_put(aio_req);
-		if (ret != -EIOCBQUEUED)
-			ovl_aio_cleanup_handler(aio_req);
-	}
-out:
+	ret = backing_file_read_iter(real.file, iter, iocb, iocb->ki_flags,
+				     ovl_file_accessed);
 	revert_creds(old_cred);
-	ovl_file_accessed(file);
-out_fdput:
 	fdput(real);
 
 	return ret;
@@ -417,56 +305,13 @@ static ssize_t ovl_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 	if (ret)
 		goto out_unlock;
 
-	ret = -EINVAL;
-	if (iocb->ki_flags & IOCB_DIRECT &&
-	    !(real.file->f_mode & FMODE_CAN_ODIRECT))
-		goto out_fdput;
-
 	if (!ovl_should_sync(OVL_FS(inode->i_sb)))
 		ifl &= ~(IOCB_DSYNC | IOCB_SYNC);
 
-	/*
-	 * Overlayfs doesn't support deferred completions, don't copy
-	 * this property in case it is set by the issuer.
-	 */
-	ifl &= ~IOCB_DIO_CALLER_COMP;
-
-	old_cred = ovl_override_creds(file_inode(file)->i_sb);
-	if (is_sync_kiocb(iocb)) {
-		rwf_t rwf = iocb_to_rw_flags(ifl);
-
-		file_start_write(real.file);
-		ret = vfs_iter_write(real.file, iter, &iocb->ki_pos, rwf);
-		file_end_write(real.file);
-		/* Update size */
-		ovl_file_modified(file);
-	} else {
-		struct ovl_aio_req *aio_req;
-
-		ret = ovl_init_aio_done_wq(inode->i_sb);
-		if (ret)
-			goto out;
-
-		ret = -ENOMEM;
-		aio_req = kmem_cache_zalloc(ovl_aio_request_cachep, GFP_KERNEL);
-		if (!aio_req)
-			goto out;
-
-		real.flags = 0;
-		aio_req->orig_iocb = iocb;
-		kiocb_clone(&aio_req->iocb, iocb, get_file(real.file));
-		aio_req->iocb.ki_flags = ifl;
-		aio_req->iocb.ki_complete = ovl_aio_queue_completion;
-		refcount_set(&aio_req->ref, 2);
-		kiocb_start_write(&aio_req->iocb);
-		ret = vfs_iocb_iter_write(real.file, &aio_req->iocb, iter);
-		ovl_aio_put(aio_req);
-		if (ret != -EIOCBQUEUED)
-			ovl_aio_cleanup_handler(aio_req);
-	}
-out:
+	old_cred = ovl_override_creds(inode->i_sb);
+	ret = backing_file_write_iter(real.file, iter, iocb, ifl,
+				      ovl_file_modified);
 	revert_creds(old_cred);
-out_fdput:
 	fdput(real);
 
 out_unlock:
@@ -778,19 +623,3 @@ const struct file_operations ovl_file_operations = {
 	.copy_file_range	= ovl_copy_file_range,
 	.remap_file_range	= ovl_remap_file_range,
 };
-
-int __init ovl_aio_request_cache_init(void)
-{
-	ovl_aio_request_cachep = kmem_cache_create("ovl_aio_req",
-						   sizeof(struct ovl_aio_req),
-						   0, SLAB_HWCACHE_ALIGN, NULL);
-	if (!ovl_aio_request_cachep)
-		return -ENOMEM;
-
-	return 0;
-}
-
-void ovl_aio_request_cache_destroy(void)
-{
-	kmem_cache_destroy(ovl_aio_request_cachep);
-}
