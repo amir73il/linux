@@ -101,10 +101,10 @@ static inline void file_put_write_access(struct file *file)
 	put_write_access(file->f_inode);
 	mnt_put_write_access(file->f_path.mnt);
 	if (unlikely(file->f_mode & FMODE_BACKING)) {
-		struct path *real_path = backing_file_real_path(file);
+		struct path *user_path = backing_file_user_path(file);
 
-		if (real_path->mnt)
-			mnt_put_write_access(real_path->mnt);
+		if (user_path->mnt)
+			mnt_put_write_access(user_path->mnt);
 	}
 }
 

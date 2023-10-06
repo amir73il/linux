@@ -96,8 +96,7 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 	if (file->f_mode & FMODE_NONOTIFY)
 		return 0;
 
-	/* Overlayfs internal files have fake f_path */
-	path = file_real_path(file);
+	path = f_path(file);
 	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
 }
 
