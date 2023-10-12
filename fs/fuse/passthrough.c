@@ -164,6 +164,28 @@ ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
 	return backing_file_mmap(backing_file, vma, &ctx);
 }
 
+int fuse_passthrough_readdir(struct file *file, struct dir_context *ctx)
+{
+	struct fuse_file *ff = file->private_data;
+	struct inode *inode = file_inode(file);
+	struct file *backing_file = fuse_file_passthrough(ff);
+	const struct cred *old_cred;
+	bool locked;
+	int ret;
+
+	pr_debug("%s: backing_file=0x%p, pos=%lld\n", __func__,
+		 backing_file, ctx->pos);
+
+	locked = fuse_lock_inode(inode);
+	old_cred = override_creds(ff->cred);
+	ret = iterate_dir(backing_file, ctx);
+	revert_creds(old_cred);
+	fuse_file_accessed(file);
+	fuse_unlock_inode(inode, locked);
+
+	return ret;
+}
+
 struct fuse_backing *fuse_backing_get(struct fuse_backing *fb)
 {
 	if (fb && refcount_inc_not_zero(&fb->count))
@@ -257,7 +279,8 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 		goto out;
 
 	res = -EOPNOTSUPP;
-	if (!file->f_op->read_iter || !file->f_op->write_iter)
+	if (!file->f_op->iterate_shared &&
+	    !(file->f_op->read_iter && file->f_op->write_iter))
 		goto out_fput;
 
 	backing_sb = file_inode(file)->i_sb;

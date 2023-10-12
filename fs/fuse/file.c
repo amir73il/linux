@@ -148,6 +148,9 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 			ff->fh = outargp->fh;
 			ff->open_flags = outargp->open_flags;
 
+			/* Readdir cache not used for passthrough */
+			if (ff->open_flags & FOPEN_PASSTHROUGH)
+				ff->open_flags &= ~FOPEN_CACHE_DIR;
 		} else if (err != -ENOSYS) {
 			fuse_file_free(ff);
 			return ERR_PTR(err);
