@@ -57,7 +57,7 @@ struct backing_aio {
 	refcount_t ref;
 	struct kiocb *orig_iocb;
 	/* used for aio completion */
-	void (*end_write)(struct file *);
+	void (*end_write)(struct file *, loff_t, ssize_t);
 	struct work_struct work;
 	long res;
 };
@@ -88,7 +88,7 @@ static void backing_aio_cleanup(struct backing_aio *aio, long res)
 	if (iocb->ki_flags & IOCB_WRITE) {
 		kiocb_end_write(iocb);
 		if (aio->end_write)
-			aio->end_write(orig_iocb->ki_filp);
+			aio->end_write(orig_iocb->ki_filp, iocb->ki_pos, res);
 	}
 
 	orig_iocb->ki_pos = iocb->ki_pos;
@@ -208,7 +208,7 @@ ssize_t backing_file_write_iter(struct file *file, struct iov_iter *iter,
 		ret = vfs_iter_write(file, iter, &iocb->ki_pos, rwf);
 		file_end_write(file);
 		if (ctx->end_write)
-			ctx->end_write(ctx->user_file);
+			ctx->end_write(iocb->ki_filp, iocb->ki_pos, ret);
 	} else {
 		struct backing_aio *aio;
 
@@ -274,7 +274,7 @@ ssize_t backing_file_splice_write(struct pipe_inode_info *pipe,
 	revert_creds(old_cred);
 
 	if (ctx->end_write)
-		ctx->end_write(ctx->user_file);
+		ctx->end_write(ctx->user_file, ppos ? *ppos : 0, ret);
 
 	return ret;
 }
