@@ -423,6 +423,7 @@ static struct fuse_file *fuse_priv_ioctl_prepare(struct inode *inode)
 {
 	struct fuse_mount *fm = get_fuse_mount(inode);
 	bool isdir = S_ISDIR(inode->i_mode);
+	struct fuse_open_out outarg;
 
 	if (!fuse_allow_current_process(fm->fc))
 		return ERR_PTR(-EACCES);
@@ -433,7 +434,7 @@ static struct fuse_file *fuse_priv_ioctl_prepare(struct inode *inode)
 	if (!S_ISREG(inode->i_mode) && !isdir)
 		return ERR_PTR(-ENOTTY);
 
-	return fuse_file_open(fm, get_node_id(inode), O_RDONLY, isdir);
+	return fuse_file_open(fm, get_node_id(inode), O_RDONLY, isdir, &outarg);
 }
 
 static void fuse_priv_ioctl_cleanup(struct inode *inode, struct fuse_file *ff)

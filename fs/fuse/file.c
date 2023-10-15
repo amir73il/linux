@@ -126,7 +126,8 @@ static void fuse_file_put(struct fuse_file *ff, bool sync, bool isdir)
 }
 
 struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
-				 unsigned int open_flags, bool isdir)
+				 unsigned int open_flags, bool isdir,
+				 struct fuse_open_out *outargp)
 {
 	struct fuse_conn *fc = fm->fc;
 	struct fuse_file *ff;
@@ -140,13 +141,12 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 	/* Default for no-open */
 	ff->open_flags = FOPEN_KEEP_CACHE | (isdir ? FOPEN_CACHE_DIR : 0);
 	if (isdir ? !fc->no_opendir : !fc->no_open) {
-		struct fuse_open_out outarg;
 		int err;
 
-		err = fuse_send_open(fm, nodeid, open_flags, opcode, &outarg);
+		err = fuse_send_open(fm, nodeid, open_flags, opcode, outargp);
 		if (!err) {
-			ff->fh = outarg.fh;
-			ff->open_flags = outarg.open_flags;
+			ff->fh = outargp->fh;
+			ff->open_flags = outargp->open_flags;
 
 		} else if (err != -ENOSYS) {
 			fuse_file_free(ff);
@@ -168,9 +168,10 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 }
 
 int fuse_do_open(struct fuse_mount *fm, u64 nodeid, struct file *file,
-		 bool isdir)
+		 bool isdir, struct fuse_open_out *outargp)
 {
-	struct fuse_file *ff = fuse_file_open(fm, nodeid, file->f_flags, isdir);
+	struct fuse_file *ff = fuse_file_open(fm, nodeid, file->f_flags, isdir,
+					      outargp);
 
 	if (!IS_ERR(ff))
 		file->private_data = ff;
@@ -194,7 +195,8 @@ static void fuse_link_write_file(struct file *file)
 	spin_unlock(&fi->lock);
 }
 
-void fuse_finish_open(struct inode *inode, struct file *file)
+void fuse_finish_open(struct inode *inode, struct file *file,
+		      struct fuse_open_out *outargp)
 {
 	struct fuse_file *ff = file->private_data;
 	struct fuse_conn *fc = get_fuse_conn(inode);
@@ -222,6 +224,7 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 {
 	struct fuse_mount *fm = get_fuse_mount(inode);
 	struct fuse_conn *fc = fm->fc;
+	struct fuse_open_out outarg;
 	int err;
 	bool is_wb_truncate = (file->f_flags & O_TRUNC) &&
 			  fc->atomic_o_trunc &&
@@ -249,9 +252,9 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 	if (is_wb_truncate || dax_truncate)
 		fuse_set_nowrite(inode);
 
-	err = fuse_do_open(fm, get_node_id(inode), file, isdir);
+	err = fuse_do_open(fm, get_node_id(inode), file, isdir, &outarg);
 	if (!err)
-		fuse_finish_open(inode, file);
+		fuse_finish_open(inode, file, &outarg);
 
 	if (is_wb_truncate || dax_truncate)
 		fuse_release_nowrite(inode);

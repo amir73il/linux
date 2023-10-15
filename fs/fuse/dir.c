@@ -698,7 +698,7 @@ static int fuse_create_open(struct inode *dir, struct dentry *entry,
 		fuse_sync_release(fi, ff, flags);
 	} else {
 		file->private_data = ff;
-		fuse_finish_open(inode, file);
+		fuse_finish_open(inode, file, &outopen);
 		if (fm->fc->atomic_o_trunc && trunc)
 			truncate_pagecache(inode, 0);
 		else if (!(ff->open_flags & FOPEN_KEEP_CACHE))

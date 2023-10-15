@@ -115,6 +115,7 @@ static int cuse_open(struct inode *inode, struct file *file)
 {
 	dev_t devt = inode->i_cdev->dev;
 	struct cuse_conn *cc = NULL, *pos;
+	struct fuse_open_out outarg;
 	int rc;
 
 	/* look up and get the connection */
@@ -135,7 +136,7 @@ static int cuse_open(struct inode *inode, struct file *file)
 	 * Generic permission check is already done against the chrdev
 	 * file, proceed to open.
 	 */
-	rc = fuse_do_open(&cc->fm, 0, file, 0);
+	rc = fuse_do_open(&cc->fm, 0, file, 0, &outarg);
 	if (rc)
 		fuse_conn_put(&cc->fc);
 	return rc;
