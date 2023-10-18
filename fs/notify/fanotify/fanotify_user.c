@@ -1566,7 +1566,6 @@ out_destroy_group:
 
 static int fanotify_test_fsid(struct dentry *dentry, __kernel_fsid_t *fsid)
 {
-	__kernel_fsid_t root_fsid;
 	int err;
 
 	/*
@@ -1578,18 +1577,6 @@ static int fanotify_test_fsid(struct dentry *dentry, __kernel_fsid_t *fsid)
 
 	if (!fsid->val[0] && !fsid->val[1])
 		return -ENODEV;
-
-	/*
-	 * Make sure dentry is not of a filesystem subvolume (e.g. btrfs)
-	 * which uses a different fsid than sb root.
-	 */
-	err = vfs_get_fsid(dentry->d_sb->s_root, &root_fsid);
-	if (err)
-		return err;
-
-	if (root_fsid.val[0] != fsid->val[0] ||
-	    root_fsid.val[1] != fsid->val[1])
-		return -EXDEV;
 
 	return 0;
 }
