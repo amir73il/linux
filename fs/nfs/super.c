@@ -295,6 +295,15 @@ int nfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_ffree = res.afiles;
 
 	buf->f_namelen = server->namelen;
+	/*
+	 * Using the anon bdev number to avoid local f_fsid collisions.
+	 * Server's fsid could be zero for NFSv4 root export and is not unique
+	 * across different servers, but we use it as best effort to try to
+	 * avoid the recycling of same local f_fsid for different remote fs.
+	 */
+	buf->f_fsid.val[0] = new_encode_dev(server->s_dev);
+	buf->f_fsid.val[1] = hash_64(server->fsid.major, 32) ^
+			     hash_64(server->fsid.minor, 32);
 
 	return 0;
 
