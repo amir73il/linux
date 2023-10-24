@@ -815,6 +815,9 @@ struct fuse_conn {
 	/** Device ID from the root super block */
 	dev_t dev;
 
+	/** Connection start time in jiffies */
+	u64 start_time;
+
 	/** Dentries in the control filesystem */
 	struct dentry *ctl_dentry[FUSE_CTL_NUM_DENTRIES];
 

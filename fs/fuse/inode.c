@@ -533,7 +533,6 @@ static void fuse_send_destroy(struct fuse_mount *fm)
 
 static void convert_fuse_statfs(struct kstatfs *stbuf, struct fuse_kstatfs *attr)
 {
-	stbuf->f_type    = FUSE_SUPER_MAGIC;
 	stbuf->f_bsize   = attr->bsize;
 	stbuf->f_frsize  = attr->frsize;
 	stbuf->f_blocks  = attr->blocks;
@@ -542,7 +541,22 @@ static void convert_fuse_statfs(struct kstatfs *stbuf, struct fuse_kstatfs *attr
 	stbuf->f_files   = attr->files;
 	stbuf->f_ffree   = attr->ffree;
 	stbuf->f_namelen = attr->namelen;
-	/* fsid is left zero */
+}
+
+static void fuse_get_fsid(struct super_block *sb, __kernel_fsid_t *fsid)
+{
+	struct fuse_mount *fm = get_fuse_mount_super(sb);
+
+	/* fsid is left zero when server does not support NFS export */
+	if (!fm->fc->export_support)
+		return;
+
+	/*
+	 * Using the anon bdev number to avoid local f_fsid collisions with
+	 * lowers bit of connection start time to avoid recycling of f_fsid.
+	 */
+	fsid->val[0] = new_encode_dev(sb->s_dev);
+	fsid->val[1] = (u32) fm->fc->start_time;
 }
 
 static int fuse_statfs(struct dentry *dentry, struct kstatfs *buf)
@@ -553,10 +567,11 @@ static int fuse_statfs(struct dentry *dentry, struct kstatfs *buf)
 	struct fuse_statfs_out outarg;
 	int err;
 
-	if (!fuse_allow_current_process(fm->fc)) {
-		buf->f_type = FUSE_SUPER_MAGIC;
+	buf->f_type = FUSE_SUPER_MAGIC;
+	fuse_get_fsid(sb, &buf->f_fsid);
+
+	if (!fuse_allow_current_process(fm->fc))
 		return 0;
-	}
 
 	memset(&outarg, 0, sizeof(outarg));
 	args.in_numargs = 0;
@@ -874,6 +889,7 @@ void fuse_conn_init(struct fuse_conn *fc, struct fuse_mount *fm,
 	fc->user_ns = get_user_ns(user_ns);
 	fc->max_pages = FUSE_DEFAULT_MAX_PAGES_PER_REQ;
 	fc->max_pages_limit = FUSE_MAX_MAX_PAGES;
+	fc->start_time = get_jiffies_64();
 
 	INIT_LIST_HEAD(&fc->mounts);
 	list_add(&fm->fc_entry, &fc->mounts);
