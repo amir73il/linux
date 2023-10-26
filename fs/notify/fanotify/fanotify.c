@@ -840,6 +840,8 @@ out:
 /*
  * Get cached fsid of the filesystem containing the object from any mark.
  * All marks are supposed to have the same fsid, but we do not verify that here.
+ * With btrfs, a marked inode and marked sb may have a different fsid.
+ * In this case, we will return the more specific fsid (i.e. of the inode).
  */
 static __kernel_fsid_t fanotify_get_fsid(struct fsnotify_iter_info *iter_info)
 {

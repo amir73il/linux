@@ -372,13 +372,14 @@ static inline struct fs_error_report *fsnotify_data_error_report(
  * the other way around, because an event can match different watched objects
  * of the same object type.
  * For example, both parent and child are watching an object of type inode.
+ * The order of iteration is from most specific (inode) to most general (sb).
  */
 enum fsnotify_iter_type {
 	FSNOTIFY_ITER_TYPE_INODE,
+	FSNOTIFY_ITER_TYPE_INODE2,
+	FSNOTIFY_ITER_TYPE_PARENT,
 	FSNOTIFY_ITER_TYPE_VFSMOUNT,
 	FSNOTIFY_ITER_TYPE_SB,
-	FSNOTIFY_ITER_TYPE_PARENT,
-	FSNOTIFY_ITER_TYPE_INODE2,
 	FSNOTIFY_ITER_TYPE_COUNT
 };
 
