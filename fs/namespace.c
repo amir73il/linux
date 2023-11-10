@@ -415,6 +415,28 @@ int mnt_want_write(struct vfsmount *m)
 EXPORT_SYMBOL_GPL(mnt_want_write);
 
 /**
+ * mnt_want_write_srcu - get write access to a mount
+ * @m: the mount on which to take a write
+ * @pidx: output value to pass to mnt_drop_write_srcu()
+ *
+ * This tells the low-level filesystem that a write is about to be performed to
+ * it, and makes sure that writes are allowed (mount is read-write, filesystem
+ * is not frozen) before returning success.  When the write operation is
+ * finished, mnt_drop_write_srcu() must be called.
+ */
+int mnt_want_write_srcu(struct vfsmount *m, int *pidx)
+{
+	int idx, ret;
+
+	idx = sb_start_write_srcu(m->mnt_sb);
+	ret = mnt_get_write_access(m);
+	if (ret)
+		sb_end_write_srcu(m->mnt_sb, idx);
+	*pidx = idx;
+	return ret;
+}
+
+/**
  * mnt_get_write_access_file - get write access to a file's mount
  * @file: the file who's mount on which to take a write
  *
@@ -459,6 +481,28 @@ int mnt_want_write_file(struct file *file)
 EXPORT_SYMBOL_GPL(mnt_want_write_file);
 
 /**
+ * mnt_want_write_file_srcu - get write access to a file's mount
+ * @file: the file who's mount on which to take a write
+ * @pidx: output value to pass to mnt_drop_write_file_srcu()
+ *
+ * This is like mnt_want_write, but if the file is already open for writing it
+ * skips incrementing mnt_writers (since the open file already has a reference)
+ * and instead only does the freeze protection and the check for emergency r/o
+ * remounts.  This must be paired with mnt_drop_write_file_srcu().
+ */
+int mnt_want_write_file_srcu(struct file *file, int *pidx)
+{
+	int idx, ret;
+
+	idx = sb_start_write_srcu(file_inode(file)->i_sb);
+	ret = mnt_get_write_access_file(file);
+	if (ret)
+		sb_end_write_srcu(file_inode(file)->i_sb, idx);
+	*pidx = idx;
+	return ret;
+}
+
+/**
  * mnt_put_write_access - give up write access to a mount
  * @mnt: the mount on which to give up write access
  *
@@ -489,18 +533,58 @@ void mnt_drop_write(struct vfsmount *mnt)
 }
 EXPORT_SYMBOL_GPL(mnt_drop_write);
 
+/**
+ * mnt_drop_write_srcu - give up write access to a mount
+ * @mnt: the mount on which to give up write access
+ * @idx: return value from corresponding mnt_want_write_srcu()
+ *
+ * Tells the low-level filesystem that we are done performing writes to it and
+ * also allows filesystem to be frozen again.  Must be matched with
+ * mnt_want_write_srcu() call above.
+ */
+void mnt_drop_write_srcu(struct vfsmount *mnt, int idx)
+{
+	mnt_put_write_access(mnt);
+	sb_end_write_srcu(mnt->mnt_sb, idx);
+}
+EXPORT_SYMBOL_GPL(mnt_drop_write_srcu);
+
 void mnt_put_write_access_file(struct file *file)
 {
 	if (!(file->f_mode & FMODE_WRITER))
 		mnt_put_write_access(file->f_path.mnt);
 }
 
+/**
+ * mnt_drop_write_file - give up write access to a file's mount
+ * @file: the file who's mount on which to give up write access
+ *
+ * Tells the low-level filesystem that we are done performing writes to it and
+ * also allows filesystem to be frozen again.  Must be matched with
+ * mnt_want_write_file() call above.
+ */
 void mnt_drop_write_file(struct file *file)
 {
 	mnt_put_write_access_file(file);
 	sb_end_write(file_inode(file)->i_sb);
 }
 EXPORT_SYMBOL(mnt_drop_write_file);
+
+/**
+ * mnt_drop_write_file_srcu - give up write access to a file's mount
+ * @file: the file who's mount on which to give up write access
+ * @idx: return value from corresponding mnt_want_write_file_srcu()
+ *
+ * Tells the low-level filesystem that we are done performing writes to it and
+ * also allows filesystem to be frozen again.  Must be matched with
+ * mnt_want_write_file_srcu() call above.
+ */
+void mnt_drop_write_file_srcu(struct file *file, int idx)
+{
+	mnt_put_write_access_file(file);
+	sb_end_write_srcu(file_inode(file)->i_sb, idx);
+}
+EXPORT_SYMBOL_GPL(mnt_drop_write_file_srcu);
 
 /**
  * mnt_hold_writers - prevent write access to the given mount
