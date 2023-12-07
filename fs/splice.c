@@ -673,10 +673,13 @@ iter_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 		.u.file = out,
 	};
 	int nbufs = pipe->max_usage;
-	struct bio_vec *array = kcalloc(nbufs, sizeof(struct bio_vec),
-					GFP_KERNEL);
+	struct bio_vec *array;
 	ssize_t ret;
 
+	if (!out->f_op->write_iter)
+		return -EINVAL;
+
+	array = kcalloc(nbufs, sizeof(struct bio_vec), GFP_KERNEL);
 	if (unlikely(!array))
 		return -ENOMEM;
 
@@ -684,6 +687,7 @@ iter_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 
 	splice_from_pipe_begin(&sd);
 	while (sd.total_len) {
+		struct kiocb kiocb;
 		struct iov_iter from;
 		unsigned int head, tail, mask;
 		size_t left;
@@ -733,7 +737,10 @@ iter_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 		}
 
 		iov_iter_bvec(&from, ITER_SOURCE, array, n, sd.total_len - left);
-		ret = vfs_iter_write(out, &from, &sd.pos, 0);
+		init_sync_kiocb(&kiocb, out);
+		kiocb.ki_pos = sd.pos;
+		ret = call_write_iter(out, &kiocb, &from);
+		sd.pos = kiocb.ki_pos;
 		if (ret <= 0)
 			break;
 
@@ -944,6 +951,39 @@ static void do_splice_eof(struct splice_desc *sd)
 		sd->splice_eof(sd);
 }
 
+/*
+ * Callers already called rw_verify_area() on the entire range.
+ * No need to call it for sub ranges.
+ */
+static long do_splice_read(struct file *in, loff_t *ppos,
+			   struct pipe_inode_info *pipe, size_t len,
+			   unsigned int flags)
+{
+	unsigned int p_space;
+
+	if (unlikely(!(in->f_mode & FMODE_READ)))
+		return -EBADF;
+	if (!len)
+		return 0;
+
+	/* Don't try to read more the pipe has space for. */
+	p_space = pipe->max_usage - pipe_occupancy(pipe->head, pipe->tail);
+	len = min_t(size_t, len, p_space << PAGE_SHIFT);
+
+	if (unlikely(len > MAX_RW_COUNT))
+		len = MAX_RW_COUNT;
+
+	if (unlikely(!in->f_op->splice_read))
+		return warn_unsupported(in, "read");
+	/*
+	 * O_DIRECT and DAX don't deal with the pagecache, so we allocate a
+	 * buffer, copy into it and splice that into the pipe.
+	 */
+	if ((in->f_flags & O_DIRECT) || IS_DAX(in->f_mapping->host))
+		return copy_splice_read(in, ppos, pipe, len, flags);
+	return in->f_op->splice_read(in, ppos, pipe, len, flags);
+}
+
 /**
  * vfs_splice_read - Read data from a file and splice it into a pipe
  * @in:		File to splice from
@@ -963,34 +1003,13 @@ long vfs_splice_read(struct file *in, loff_t *ppos,
 		     struct pipe_inode_info *pipe, size_t len,
 		     unsigned int flags)
 {
-	unsigned int p_space;
 	int ret;
-
-	if (unlikely(!(in->f_mode & FMODE_READ)))
-		return -EBADF;
-	if (!len)
-		return 0;
-
-	/* Don't try to read more the pipe has space for. */
-	p_space = pipe->max_usage - pipe_occupancy(pipe->head, pipe->tail);
-	len = min_t(size_t, len, p_space << PAGE_SHIFT);
 
 	ret = rw_verify_area(READ, in, ppos, len);
 	if (unlikely(ret < 0))
 		return ret;
 
-	if (unlikely(len > MAX_RW_COUNT))
-		len = MAX_RW_COUNT;
-
-	if (unlikely(!in->f_op->splice_read))
-		return warn_unsupported(in, "read");
-	/*
-	 * O_DIRECT and DAX don't deal with the pagecache, so we allocate a
-	 * buffer, copy into it and splice that into the pipe.
-	 */
-	if ((in->f_flags & O_DIRECT) || IS_DAX(in->f_mapping->host))
-		return copy_splice_read(in, ppos, pipe, len, flags);
-	return in->f_op->splice_read(in, ppos, pipe, len, flags);
+	return do_splice_read(in, ppos, pipe, len, flags);
 }
 EXPORT_SYMBOL_GPL(vfs_splice_read);
 
@@ -1066,7 +1085,7 @@ ssize_t splice_direct_to_actor(struct file *in, struct splice_desc *sd,
 		size_t read_len;
 		loff_t pos = sd->pos, prev_pos = pos;
 
-		ret = vfs_splice_read(in, &pos, pipe, len, flags);
+		ret = do_splice_read(in, &pos, pipe, len, flags);
 		if (unlikely(ret <= 0))
 			goto read_failure;
 
@@ -1138,9 +1157,20 @@ static int direct_splice_actor(struct pipe_inode_info *pipe,
 			       struct splice_desc *sd)
 {
 	struct file *file = sd->u.file;
+	long ret;
 
-	return do_splice_from(pipe, file, sd->opos, sd->total_len,
-			      sd->flags);
+	file_start_write(file);
+	ret = do_splice_from(pipe, file, sd->opos, sd->total_len, sd->flags);
+	file_end_write(file);
+	return ret;
+}
+
+static int splice_file_range_actor(struct pipe_inode_info *pipe,
+					struct splice_desc *sd)
+{
+	struct file *file = sd->u.file;
+
+	return do_splice_from(pipe, file, sd->opos, sd->total_len, sd->flags);
 }
 
 static void direct_file_splice_eof(struct splice_desc *sd)
@@ -1151,24 +1181,10 @@ static void direct_file_splice_eof(struct splice_desc *sd)
 		file->f_op->splice_eof(file);
 }
 
-/**
- * do_splice_direct - splices data directly between two files
- * @in:		file to splice from
- * @ppos:	input file offset
- * @out:	file to splice to
- * @opos:	output file offset
- * @len:	number of bytes to splice
- * @flags:	splice modifier flags
- *
- * Description:
- *    For use by do_sendfile(). splice can easily emulate sendfile, but
- *    doing it in the application would incur an extra system call
- *    (splice in + splice out, as compared to just sendfile()). So this helper
- *    can splice directly through a process-private pipe.
- *
- */
-long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
-		      loff_t *opos, size_t len, unsigned int flags)
+static long do_splice_direct_actor(struct file *in, loff_t *ppos,
+				   struct file *out, loff_t *opos,
+				   size_t len, unsigned int flags,
+				   splice_direct_actor *actor)
 {
 	struct splice_desc sd = {
 		.len		= len,
@@ -1187,17 +1203,61 @@ long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
 	if (unlikely(out->f_flags & O_APPEND))
 		return -EINVAL;
 
-	ret = rw_verify_area(WRITE, out, opos, len);
-	if (unlikely(ret < 0))
-		return ret;
-
-	ret = splice_direct_to_actor(in, &sd, direct_splice_actor);
+	ret = splice_direct_to_actor(in, &sd, actor);
 	if (ret > 0)
 		*ppos = sd.pos;
 
 	return ret;
 }
+/**
+ * do_splice_direct - splices data directly between two files
+ * @in:		file to splice from
+ * @ppos:	input file offset
+ * @out:	file to splice to
+ * @opos:	output file offset
+ * @len:	number of bytes to splice
+ * @flags:	splice modifier flags
+ *
+ * Description:
+ *    For use by do_sendfile(). splice can easily emulate sendfile, but
+ *    doing it in the application would incur an extra system call
+ *    (splice in + splice out, as compared to just sendfile()). So this helper
+ *    can splice directly through a process-private pipe.
+ *
+ * Callers already called rw_verify_area() on the entire range.
+ */
+long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
+		      loff_t *opos, size_t len, unsigned int flags)
+{
+	return do_splice_direct_actor(in, ppos, out, opos, len, flags,
+				      direct_splice_actor);
+}
 EXPORT_SYMBOL(do_splice_direct);
+
+/**
+ * splice_file_range - splices data between two files for copy_file_range()
+ * @in:		file to splice from
+ * @ppos:	input file offset
+ * @out:	file to splice to
+ * @opos:	output file offset
+ * @len:	number of bytes to splice
+ *
+ * Description:
+ *    For use by generic_copy_file_range() and ->copy_file_range() methods.
+ *    Like do_splice_direct(), but vfs_copy_file_range() already holds
+ *    start_file_write() on @out file.
+ *
+ * Callers already called rw_verify_area() on the entire range.
+ */
+long splice_file_range(struct file *in, loff_t *ppos, struct file *out,
+		       loff_t *opos, size_t len)
+{
+	lockdep_assert(file_write_started(out));
+
+	return do_splice_direct_actor(in, ppos, out, opos, len, 0,
+				      splice_file_range_actor);
+}
+EXPORT_SYMBOL(splice_file_range);
 
 static int wait_for_space(struct pipe_inode_info *pipe, unsigned flags)
 {
@@ -1230,7 +1290,7 @@ long splice_file_to_pipe(struct file *in,
 	pipe_lock(opipe);
 	ret = wait_for_space(opipe, flags);
 	if (!ret)
-		ret = vfs_splice_read(in, offset, opipe, len, flags);
+		ret = do_splice_read(in, offset, opipe, len, flags);
 	pipe_unlock(opipe);
 	if (ret > 0)
 		wakeup_pipe_readers(opipe);
@@ -1306,6 +1366,10 @@ long do_splice(struct file *in, loff_t *off_in, struct file *out,
 		} else {
 			offset = in->f_pos;
 		}
+
+		ret = rw_verify_area(READ, in, &offset, len);
+		if (unlikely(ret < 0))
+			return ret;
 
 		if (out->f_flags & O_NONBLOCK)
 			flags |= SPLICE_F_NONBLOCK;
