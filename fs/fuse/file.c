@@ -113,6 +113,9 @@ static void fuse_file_put(struct fuse_file *ff, bool sync)
 		struct fuse_release_args *ra = ff->release_args;
 		struct fuse_args *args = (ra ? &ra->args : NULL);
 
+		if (ra && ra->inode)
+			fuse_file_io_release(ff, ra->inode);
+
 		if (!args) {
 			/* Do nothing when server does not implement 'open' */
 		} else if (sync) {
@@ -204,6 +207,11 @@ int fuse_finish_open(struct inode *inode, struct file *file)
 {
 	struct fuse_file *ff = file->private_data;
 	struct fuse_conn *fc = get_fuse_conn(inode);
+	int err;
+
+	err = fuse_file_io_open(file, inode);
+	if (err)
+		return err;
 
 	if (ff->open_flags & FOPEN_STREAM)
 		stream_open(inode, file);
@@ -2507,6 +2515,7 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct fuse_file *ff = file->private_data;
 	struct fuse_conn *fc = ff->fm->fc;
+	int rc;
 
 	/* DAX mmap is superior to direct_io mmap */
 	if (FUSE_IS_DAX(file_inode(file)))
@@ -2521,6 +2530,13 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 			return -ENODEV;
 
 		invalidate_inode_pages2(file->f_mapping);
+
+		/*
+		 * First mmap of direct_io file enters caching inode io mode.
+		 */
+		rc = fuse_file_io_mmap(ff, file_inode(file));
+		if (rc)
+			return rc;
 
 		if (!(vma->vm_flags & VM_MAYSHARE)) {
 			/* MAP_PRIVATE */
@@ -3294,6 +3310,7 @@ void fuse_init_file_inode(struct inode *inode, unsigned int flags)
 	INIT_LIST_HEAD(&fi->write_files);
 	INIT_LIST_HEAD(&fi->queued_writes);
 	fi->writectr = 0;
+	fi->iocachectr = 0;
 	init_waitqueue_head(&fi->page_waitq);
 	fi->writepages = RB_ROOT;
 
