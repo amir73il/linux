@@ -111,7 +111,7 @@ struct fuse_inode {
 	u64 attr_version;
 
 	union {
-		/* Write related fields (regular file only) */
+		/* read/write io cache (regular file only) */
 		struct {
 			/* Files usable in writepage.  Protected by fi->lock */
 			struct list_head write_files;
@@ -122,6 +122,9 @@ struct fuse_inode {
 			/* Number of sent writes, a negative bias
 			 * (FUSE_NOWRITE) means more writes are blocked */
 			int writectr;
+
+			/** Number of files/maps using page cache */
+			int iocachectr;
 
 			/* Waitq for writepage completion */
 			wait_queue_head_t page_waitq;
@@ -187,6 +190,8 @@ enum {
 	FUSE_I_BAD,
 	/* Has btime */
 	FUSE_I_BTIME,
+	/* Wants or already has page cache IO */
+	FUSE_I_CACHE_IO_MODE,
 };
 
 struct fuse_conn;
@@ -246,6 +251,9 @@ struct fuse_file {
 
 	/** Has flock been performed on this file? */
 	bool flock:1;
+
+	/** Does file hold a fi->iocachectr refcount? */
+	bool io_opened:1;
 };
 
 /** One input argument of a request */
@@ -1343,8 +1351,17 @@ int fuse_fileattr_get(struct dentry *dentry, struct fileattr *fa);
 int fuse_fileattr_set(struct mnt_idmap *idmap,
 		      struct dentry *dentry, struct fileattr *fa);
 
-/* file.c */
+/* iomode.c */
+int fuse_file_cached_io_start(struct inode *inode);
+void fuse_file_cached_io_end(struct inode *inode);
+int fuse_file_uncached_io_start(struct inode *inode);
+void fuse_file_uncached_io_end(struct inode *inode);
 
+int fuse_file_io_open(struct file *file, struct inode *inode);
+int fuse_file_io_mmap(struct fuse_file *ff, struct inode *inode);
+void fuse_file_io_release(struct fuse_file *ff, struct inode *inode);
+
+/* file.c */
 struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 				 unsigned int open_flags, bool isdir);
 void fuse_file_release(struct inode *inode, struct fuse_file *ff,
