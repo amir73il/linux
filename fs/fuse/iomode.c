@@ -157,8 +157,11 @@ void fuse_file_uncached_io_end(struct inode *inode)
 	spin_unlock(&fi->lock);
 	if (!uncached_io)
 		wake_up(&fi->direct_io_waitq);
-	if (oldfb)
+	if (oldfb) {
+		/* Maybe update attributes after detaching backing inode */
+		fuse_backing_update_attr(inode, oldfb);
 		fuse_backing_put(oldfb);
+	}
 }
 
 /*
