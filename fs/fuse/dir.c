@@ -2118,6 +2118,10 @@ static int fuse_getattr(struct mnt_idmap *idmap,
 		return -EACCES;
 	}
 
+	/* Maybe update/invalidate attributes from backing inode */
+	if (fuse_inode_backing(get_fuse_inode(inode)))
+		fuse_backing_update_attr_mask(inode, request_mask);
+
 	return fuse_update_get_attr(inode, NULL, stat, request_mask, flags);
 }
 

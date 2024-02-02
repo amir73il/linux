@@ -1453,6 +1453,8 @@ void fuse_backing_files_init(struct fuse_conn *fc);
 void fuse_backing_files_free(struct fuse_conn *fc);
 int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map);
 int fuse_backing_close(struct fuse_conn *fc, int backing_id);
+void fuse_backing_update_attr(struct inode *inode, struct fuse_backing *fb);
+void fuse_backing_update_attr_mask(struct inode *inode, u32 request_mask);
 
 struct fuse_backing *fuse_passthrough_open(struct file *file,
 					   struct inode *inode,

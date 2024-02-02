@@ -11,11 +11,8 @@
 #include <linux/backing-file.h>
 #include <linux/splice.h>
 
-static void fuse_file_accessed(struct file *file)
+static void fuse_backing_accessed(struct inode *inode, struct fuse_backing *fb)
 {
-	struct inode *inode = file_inode(file);
-	struct fuse_inode *fi = get_fuse_inode(inode);
-	struct fuse_backing *fb = fuse_inode_backing(fi);
 	struct inode *backing_inode = file_inode(fb->file);
 	struct timespec64 atime = inode_get_atime(inode);
 	struct timespec64 batime = inode_get_atime(backing_inode);
@@ -25,11 +22,8 @@ static void fuse_file_accessed(struct file *file)
 		fuse_invalidate_atime(inode);
 }
 
-static void fuse_file_modified(struct file *file)
+static void fuse_backing_modified(struct inode *inode, struct fuse_backing *fb)
 {
-	struct inode *inode = file_inode(file);
-	struct fuse_inode *fi = get_fuse_inode(inode);
-	struct fuse_backing *fb = fuse_inode_backing(fi);
 	struct inode *backing_inode = file_inode(fb->file);
 	struct timespec64 ctime = inode_get_ctime(inode);
 	struct timespec64 mtime = inode_get_mtime(inode);
@@ -40,6 +34,51 @@ static void fuse_file_modified(struct file *file)
 	    !timespec64_equal(&bmtime, &mtime) ||
 	    i_size_read(backing_inode) != i_size_read(inode))
 		fuse_invalidate_attr_mask(inode, FUSE_STATX_MODSIZE);
+}
+
+/* Called from fuse_file_uncached_io_end() after detach of backing inode */
+void fuse_backing_update_attr(struct inode *inode, struct fuse_backing *fb)
+{
+	fuse_backing_modified(inode, fb);
+	fuse_backing_accessed(inode, fb);
+}
+
+/* Called from fuse_getattr() - may race with detach of backing inode */
+void fuse_backing_update_attr_mask(struct inode *inode, u32 request_mask)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_backing *fb;
+
+	rcu_read_lock();
+	fb = fuse_backing_get(fuse_inode_backing(fi));
+	rcu_read_unlock();
+	if (!fb)
+		return;
+
+	if (request_mask & FUSE_STATX_MODSIZE)
+		fuse_backing_modified(inode, fb);
+	if (request_mask & STATX_ATIME)
+		fuse_backing_accessed(inode, fb);
+
+	fuse_backing_put(fb);
+}
+
+static void fuse_file_accessed(struct file *file)
+{
+	struct inode *inode = file_inode(file);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_backing *fb = fuse_inode_backing(fi);
+
+	fuse_backing_accessed(inode, fb);
+}
+
+static void fuse_file_modified(struct file *file)
+{
+	struct inode *inode = file_inode(file);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_backing *fb = fuse_inode_backing(fi);
+
+	fuse_backing_modified(inode, fb);
 }
 
 ssize_t fuse_passthrough_read_iter(struct kiocb *iocb, struct iov_iter *iter)
