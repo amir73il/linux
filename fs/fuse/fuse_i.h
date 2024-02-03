@@ -266,6 +266,12 @@ struct fuse_file {
 	/** Wait queue head for poll */
 	wait_queue_head_t poll_wait;
 
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	/** Reference to backing file in passthrough mode */
+	struct file *passthrough;
+	const struct cred *cred;
+#endif
+
 	/** Has flock been performed on this file? */
 	bool flock:1;
 
@@ -1398,7 +1404,7 @@ int fuse_fileattr_set(struct mnt_idmap *idmap,
 /* iomode.c */
 int fuse_file_cached_io_start(struct inode *inode);
 void fuse_file_cached_io_end(struct inode *inode);
-int fuse_file_uncached_io_start(struct inode *inode);
+int fuse_file_uncached_io_start(struct inode *inode, struct fuse_backing *fb);
 void fuse_file_uncached_io_end(struct inode *inode);
 
 int fuse_file_io_open(struct file *file, struct inode *inode);
@@ -1431,11 +1437,38 @@ static inline struct fuse_backing *fuse_inode_backing_set(struct fuse_inode *fi,
 #endif
 }
 
+#ifdef CONFIG_FUSE_PASSTHROUGH
 struct fuse_backing *fuse_backing_get(struct fuse_backing *fb);
 void fuse_backing_put(struct fuse_backing *fb);
+#else
+
+static inline struct fuse_backing *fuse_backing_get(struct fuse_backing *fb)
+{
+	return NULL;
+}
+
+static inline void fuse_backing_put(struct fuse_backing *fb)
+{
+}
+#endif
+
 void fuse_backing_files_init(struct fuse_conn *fc);
 void fuse_backing_files_free(struct fuse_conn *fc);
 int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map);
 int fuse_backing_close(struct fuse_conn *fc, int backing_id);
+
+struct fuse_backing *fuse_passthrough_open(struct file *file,
+					   struct inode *inode,
+					   int backing_id);
+void fuse_passthrough_release(struct fuse_file *ff, struct fuse_backing *fb);
+
+static inline struct file *fuse_file_passthrough(struct fuse_file *ff)
+{
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	return ff->passthrough;
+#else
+	return NULL;
+#endif
+}
 
 #endif /* _FS_FUSE_I_H */
