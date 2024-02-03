@@ -17,7 +17,7 @@
  */
 static inline bool fuse_is_io_cache_wait(struct fuse_inode *fi)
 {
-	return READ_ONCE(fi->iocachectr) < 0;
+	return READ_ONCE(fi->iocachectr) < 0 && !fuse_inode_backing(fi);
 }
 
 /*
@@ -42,6 +42,13 @@ static int fuse_inode_get_io_cache(struct fuse_inode *fi)
 					  !fuse_is_io_cache_wait(fi));
 		spin_lock(&fi->lock);
 	}
+	/*
+	 * Check if inode entered passthrough io mode while waiting for parallel
+	 * dio write completion.
+	 */
+	if (fuse_inode_backing(fi))
+		err = -ETXTBSY;
+
 	/*
 	 * Enter caching mode or clear the FUSE_I_CACHE_IO_MODE bit if we
 	 * failed to enter caching mode and no other caching open exists.
