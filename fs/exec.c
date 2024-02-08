@@ -154,6 +154,15 @@ SYSCALL_DEFINE1(uselib, const char __user *, library)
 			 path_noexec(&file->f_path)))
 		goto exit;
 
+	/*
+	 * This permission hook is different than fsnotify_open_perm() hook.
+	 * This is a pre-content hook to match a similar call in do_open().
+	 * It is used for filling file content before loading lib.
+	 */
+	error = fsnotify_file_perm(file, MAY_EXEC);
+	if (error)
+		goto exit;
+
 	error = -ENOEXEC;
 
 	read_lock(&binfmt_lock);
@@ -950,6 +959,16 @@ static struct file *do_open_execat(int fd, struct filename *name, int flags)
 	err = -EACCES;
 	if (WARN_ON_ONCE(!S_ISREG(file_inode(file)->i_mode) ||
 			 path_noexec(&file->f_path)))
+		goto exit;
+
+	/*
+	 * This permission hook is different than fsnotify_open_perm() hook.
+	 * This is a pre-content hook to match a similar call in do_open().
+	 * It needs to be called before denying write access, so file content
+	 * could be filled before exec.
+	 */
+	err = fsnotify_file_perm(file, MAY_EXEC);
+	if (err)
 		goto exit;
 
 	err = deny_write_access(file);
