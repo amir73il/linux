@@ -167,7 +167,7 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 		fsnotify_mask = FS_PRE_ACCESS;
 	else if (perm_mask & MAY_OPEN && file->f_mode & FMODE_WRITER)
 		fsnotify_mask = FS_PRE_MODIFY;
-	else if (perm_mask & MAY_OPEN)
+	else if (perm_mask & (MAY_OPEN | MAY_EXEC))
 		fsnotify_mask = FS_PRE_ACCESS;
 	else
 		return 0;
@@ -181,10 +181,21 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
  * Called from read()/write() with perm_mas MAY_READ/MAY_WRITE.
  * Called from open() with MAY_OPEN in addition to fsnotify_open_perm(),
  * but without sb_writers held and after the file was truncated.
+ * Called from execve() with MAY_EXEC in addition to fsnotify_open_perm()
+ * without holding deny_write_access() to inode.
  */
 static inline int fsnotify_file_perm(struct file *file, int perm_mask)
 {
-	return fsnotify_file_area_perm(file, perm_mask, &file->f_pos, 0);
+	size_t count = 0;
+
+	/*
+	 * Pass entire file range from exec as a hint that this is the last
+	 * opportunity to fill file content before deny_write_access().
+	 */
+	if (perm_mask & MAY_EXEC)
+		count = i_size_read(file_inode(file));
+
+	return fsnotify_file_area_perm(file, perm_mask, &file->f_pos, count);
 }
 
 /*
