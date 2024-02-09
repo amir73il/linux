@@ -13,14 +13,32 @@
 #include <linux/fs.h>
 
 /*
+ * Return true if need to wait for new opens in caching mode.
+ */
+static inline bool fuse_is_io_cache_wait(struct fuse_inode *fi)
+{
+	return READ_ONCE(fi->iocachectr) < 0;
+}
+
+/*
  * Request an open in caching mode.
+ * Blocks new parallel dio writes and waits for the in-progress parallel dio
+ * writes to complete.
  * Return 0 if in caching mode.
  */
 static int fuse_inode_get_io_cache(struct fuse_inode *fi)
 {
 	assert_spin_locked(&fi->lock);
-	if (fi->iocachectr < 0)
-		return -ETXTBSY;
+	/*
+	 * Setting the bit advises new direct-io writes to use an exclusive
+	 * lock - without it the wait below might be forever.
+	 */
+	while (fuse_is_io_cache_wait(fi)) {
+		set_bit(FUSE_I_CACHE_IO_MODE, &fi->state);
+		spin_unlock(&fi->lock);
+		wait_event(fi->direct_io_waitq, !fuse_is_io_cache_wait(fi));
+		spin_lock(&fi->lock);
+	}
 	if (fi->iocachectr++ == 0)
 		set_bit(FUSE_I_CACHE_IO_MODE, &fi->state);
 	return 0;
@@ -102,10 +120,13 @@ int fuse_file_uncached_io_start(struct inode *inode)
 void fuse_file_uncached_io_end(struct inode *inode)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
+	int uncached_io;
 
 	spin_lock(&fi->lock);
-	fuse_inode_allow_io_cache(fi);
+	uncached_io = fuse_inode_allow_io_cache(fi);
 	spin_unlock(&fi->lock);
+	if (!uncached_io)
+		wake_up(&fi->direct_io_waitq);
 }
 
 /* Open flags to determine regular file io mode */
@@ -143,20 +164,17 @@ int fuse_file_io_open(struct file *file, struct inode *inode)
 	if (!(ff->open_flags & FOPEN_DIRECT_IO))
 		ff->open_flags &= ~FOPEN_PARALLEL_DIRECT_WRITES;
 
+	if (ff->open_flags & FOPEN_DIRECT_IO)
+		return 0;
+
 	/*
-	 * First parallel dio open denies caching inode io mode.
 	 * First caching file open enters caching inode io mode.
 	 *
 	 * Note that if user opens a file open with O_DIRECT, but server did
 	 * not specify FOPEN_DIRECT_IO, a later fcntl() could remove O_DIRECT,
 	 * so we put the inode in caching mode to prevent parallel dio.
 	 */
-	if (ff->open_flags & FOPEN_PARALLEL_DIRECT_WRITES)
-		err = fuse_file_uncached_io_start(inode);
-	else if (ff->open_flags & FOPEN_DIRECT_IO)
-		return 0;
-	else
-		err = fuse_file_cached_io_start(inode);
+	err = fuse_file_cached_io_start(inode);
 	if (err)
 		goto fail;
 
@@ -204,13 +222,9 @@ void fuse_file_io_release(struct fuse_file *ff, struct inode *inode)
 		return;
 
 	/*
-	 * Last parallel dio close allows caching inode io mode.
 	 * Last caching file close exits caching inode io mode.
 	 */
-	if (ff->open_flags & FOPEN_PARALLEL_DIRECT_WRITES)
-		fuse_file_uncached_io_end(inode);
-	else
-		fuse_file_cached_io_end(inode);
+	fuse_file_cached_io_end(inode);
 
 	ff->io_opened = false;
 }
