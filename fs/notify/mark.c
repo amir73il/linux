@@ -139,20 +139,23 @@ static void fsnotify_put_inode_ref(struct inode *inode)
 	fsnotify_put_sb_watched_objects(inode->i_sb);
 }
 
-static void fsnotify_get_sb_watchers(struct fsnotify_mark_connector *conn)
+/*
+ * Grab or drop watched objects reference depending on whether the connector
+ * is attached and has any marks attached.
+ */
+static void fsnotify_update_sb_watchers(struct super_block *sb,
+					struct fsnotify_mark_connector *conn)
 {
-	struct super_block *sb = fsnotify_connector_sb(conn);
+	bool is_watched = conn->flags & FSNOTIFY_CONN_FLAG_IS_WATCHED;
+	bool has_marks = conn->obj && !hlist_empty(&conn->list);
 
-	if (sb)
+	if (has_marks && !is_watched) {
+		conn->flags |= FSNOTIFY_CONN_FLAG_IS_WATCHED;
 		fsnotify_get_sb_watched_objects(sb);
-}
-
-static void fsnotify_put_sb_watchers(struct fsnotify_mark_connector *conn)
-{
-	struct super_block *sb = fsnotify_connector_sb(conn);
-
-	if (sb)
+	} else if (!has_marks && is_watched) {
+		conn->flags &= ~FSNOTIFY_CONN_FLAG_IS_WATCHED;
 		fsnotify_put_sb_watched_objects(sb);
+	}
 }
 
 /*
@@ -250,6 +253,7 @@ static void *fsnotify_detach_connector_from_object(
 					struct fsnotify_mark_connector *conn,
 					unsigned int *type)
 {
+	struct super_block *sb = fsnotify_connector_sb(conn);
 	struct inode *inode = NULL;
 
 	*type = conn->type;
@@ -269,10 +273,10 @@ static void *fsnotify_detach_connector_from_object(
 		fsnotify_conn_sb(conn)->s_fsnotify_mask = 0;
 	}
 
-	fsnotify_put_sb_watchers(conn);
 	rcu_assign_pointer(*(conn->obj), NULL);
 	conn->obj = NULL;
 	conn->type = FSNOTIFY_OBJ_TYPE_DETACHED;
+	fsnotify_update_sb_watchers(sb, conn);
 
 	return inode;
 }
@@ -565,10 +569,7 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 	if (cmpxchg(connp, NULL, conn)) {
 		/* Someone else created list structure for us */
 		kmem_cache_free(fsnotify_mark_connector_cachep, conn);
-		return 0;
 	}
-
-	fsnotify_get_sb_watchers(conn);
 	return 0;
 }
 
@@ -611,6 +612,7 @@ static int fsnotify_add_mark_list(struct fsnotify_mark *mark,
 {
 	struct fsnotify_mark *lmark, *last = NULL;
 	struct fsnotify_mark_connector *conn;
+	struct super_block *sb = fsnotify_object_sb(connp, obj_type);
 	int cmp;
 	int err = 0;
 
@@ -656,6 +658,7 @@ restart:
 	/* mark should be the last entry.  last is the current last entry */
 	hlist_add_behind_rcu(&mark->obj_list, &last->obj_list);
 added:
+	fsnotify_update_sb_watchers(sb, conn);
 	/*
 	 * Since connector is attached to object using cmpxchg() we are
 	 * guaranteed that connector initialization is fully visible by anyone
