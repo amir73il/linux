@@ -484,6 +484,28 @@ struct fsnotify_mark_connector {
 	struct hlist_head list;
 };
 
+/*
+ * Container for per-sb fsnotify state (beyond sb marks).
+ * Attached lazily on first marked object on the sb and freed when killing sb.
+ */
+struct fsnotify_sb_connector {
+	struct fsnotify_mark_connector fsn_conn;
+};
+
+static inline struct fsnotify_sb_connector *FSNOTIFY_SB_CONN(
+					struct fsnotify_mark_connector *conn)
+{
+	return container_of(conn, struct fsnotify_sb_connector, fsn_conn);
+}
+
+static inline struct fsnotify_sb_connector *fsnotify_sb_connector(
+							struct super_block *sb)
+{
+	struct fsnotify_mark_connector *conn = READ_ONCE(sb->s_fsnotify_marks);
+
+	return conn ? FSNOTIFY_SB_CONN(conn) : NULL;
+}
+
 static inline atomic_long_t *fsnotify_sb_watched_objects(struct super_block *sb)
 {
 	return &sb->s_fsnotify_connectors;

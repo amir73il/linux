@@ -324,10 +324,16 @@ void fsnotify_put_mark(struct fsnotify_mark *mark)
 		return;
 
 	hlist_del_init_rcu(&mark->obj_list);
-	if (hlist_empty(&conn->list)) {
+	/* Keep sb connector attached even without marks */
+	if (hlist_empty(&conn->list) && conn->type != FSNOTIFY_OBJ_TYPE_SB) {
 		objp = fsnotify_detach_connector_from_object(conn, &type);
 		free_conn = true;
 	} else {
+		struct super_block *sb = fsnotify_connector_sb(conn);
+
+		/* Update an attached connector with removed marks */
+		if (sb)
+			fsnotify_update_sb_watchers(sb, conn);
 		objp = __fsnotify_recalc_mask(conn);
 		type = conn->type;
 	}
@@ -548,12 +554,37 @@ int fsnotify_compare_groups(struct fsnotify_group *a, struct fsnotify_group *b)
 	return -1;
 }
 
+static struct fsnotify_mark_connector *fsnotify_alloc_connector(
+							unsigned int obj_type)
+{
+	if (obj_type == FSNOTIFY_OBJ_TYPE_SB) {
+		struct fsnotify_sb_connector *sbconn;
+
+		/* sb connector is freed at fsnotify_sb_delete() */
+		sbconn = kzalloc(sizeof(*sbconn), GFP_KERNEL);
+		if (!sbconn)
+			return NULL;
+
+		return &sbconn->fsn_conn;
+	}
+
+	return kmem_cache_alloc(fsnotify_mark_connector_cachep, GFP_KERNEL);
+}
+
+static void fsnotify_free_connector(struct fsnotify_mark_connector *conn)
+{
+	if (conn->type == FSNOTIFY_OBJ_TYPE_SB)
+		kfree(FSNOTIFY_SB_CONN(conn));
+	else
+		return kmem_cache_free(fsnotify_mark_connector_cachep, conn);
+}
+
 static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 					       unsigned int obj_type)
 {
 	struct fsnotify_mark_connector *conn;
 
-	conn = kmem_cache_alloc(fsnotify_mark_connector_cachep, GFP_KERNEL);
+	conn = fsnotify_alloc_connector(obj_type);
 	if (!conn)
 		return -ENOMEM;
 	spin_lock_init(&conn->lock);
@@ -568,9 +599,15 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 	 */
 	if (cmpxchg(connp, NULL, conn)) {
 		/* Someone else created list structure for us */
-		kmem_cache_free(fsnotify_mark_connector_cachep, conn);
+		fsnotify_free_connector(conn);
 	}
 	return 0;
+}
+
+static int fsnotify_attach_connector_to_sb(struct super_block *sb)
+{
+	return fsnotify_attach_connector_to_object(&sb->s_fsnotify_marks,
+						   FSNOTIFY_OBJ_TYPE_SB);
 }
 
 /*
@@ -611,6 +648,7 @@ static int fsnotify_add_mark_list(struct fsnotify_mark *mark,
 				  unsigned int obj_type, int add_flags)
 {
 	struct fsnotify_mark *lmark, *last = NULL;
+	struct fsnotify_sb_connector *sbconn;
 	struct fsnotify_mark_connector *conn;
 	struct super_block *sb = fsnotify_object_sb(connp, obj_type);
 	int cmp;
@@ -618,6 +656,17 @@ static int fsnotify_add_mark_list(struct fsnotify_mark *mark,
 
 	if (WARN_ON(!fsnotify_valid_obj_type(obj_type)))
 		return -EINVAL;
+
+	/*
+	 * Attach the sb connector before attaching a connector to any object
+	 * on the sb. The sb connector will remain alive as long as sb lives.
+	 */
+	sbconn = fsnotify_sb_connector(sb);
+	if (!sbconn) {
+		err = fsnotify_attach_connector_to_sb(sb);
+		if (err)
+			return err;
+	}
 
 restart:
 	spin_lock(&mark->lock);
