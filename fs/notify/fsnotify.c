@@ -96,10 +96,11 @@ void fsnotify_sb_delete(struct super_block *sb)
 		return;
 
 	fsnotify_unmount_inodes(sb);
+	/* Careful! this detaches sbconn from sb */
 	fsnotify_clear_marks_by_sb(sb);
 	/* Wait for outstanding object references from connectors */
-	wait_var_event(fsnotify_sb_watched_objects(sb),
-		       !atomic_long_read(fsnotify_sb_watched_objects(sb)));
+	wait_var_event(&sbconn->watched_objects,
+		       !atomic_long_read(&sbconn->watched_objects));
 	kfree(sbconn);
 }
 
