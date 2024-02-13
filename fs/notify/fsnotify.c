@@ -99,8 +99,8 @@ void fsnotify_sb_delete(struct super_block *sb)
 	/* Careful! this detaches sbconn from sb */
 	fsnotify_clear_marks_by_sb(sb);
 	/* Wait for outstanding object references from connectors */
-	wait_var_event(&sbconn->watched_objects,
-		       !atomic_long_read(&sbconn->watched_objects));
+	wait_var_event(&sbconn->watched_objects[0],
+		       !atomic_long_read(&sbconn->watched_objects[0]));
 	kfree(sbconn);
 }
 
