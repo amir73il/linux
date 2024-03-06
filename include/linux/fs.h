@@ -71,6 +71,8 @@ struct fscrypt_inode_info;
 struct fscrypt_operations;
 struct fsverity_info;
 struct fsverity_operations;
+struct fsnotify_mark_connector;
+struct fsnotify_sb_info;
 struct fs_context;
 struct fs_parameter_spec;
 struct fileattr;
@@ -630,8 +632,6 @@ is_uncached_acl(struct posix_acl *acl)
 #define IOP_NOFOLLOW	0x0004
 #define IOP_XATTR	0x0008
 #define IOP_DEFAULT_READLINK	0x0010
-
-struct fsnotify_mark_connector;
 
 /*
  * Keep mostly read-only and often accessed (especially for
@@ -1242,7 +1242,7 @@ struct super_block {
 
 	/*
 	 * Keep s_fs_info, s_time_gran, s_fsnotify_mask, and
-	 * s_fsnotify_marks together for cache efficiency. They are frequently
+	 * s_fsnotify_info together for cache efficiency. They are frequently
 	 * accessed and rarely modified.
 	 */
 	void			*s_fs_info;	/* Filesystem private info */
@@ -1254,7 +1254,7 @@ struct super_block {
 	time64_t		   s_time_max;
 #ifdef CONFIG_FSNOTIFY
 	__u32			s_fsnotify_mask;
-	struct fsnotify_mark_connector __rcu	*s_fsnotify_marks;
+	struct fsnotify_sb_info	*s_fsnotify_info;
 #endif
 
 	char			s_id[32];	/* Informational name */
