@@ -81,8 +81,15 @@ static void fuse_file_cached_io_release(struct fuse_file *ff,
 	spin_unlock(&fi->lock);
 }
 
-/* Start strictly uncached io mode where cache access is not allowed */
-int fuse_inode_uncached_io_start(struct fuse_inode *fi, struct fuse_backing *fb)
+/*
+ * Start strictly uncached io mode where cache access is not allowed.
+ *
+ * With @pinned true, take the single "pinned" backing file reference
+ * to be dropped only on inode evict. If the "pinned" backing file reference
+ * is already taken, do nothing.
+ */
+int fuse_inode_uncached_io_start(struct fuse_inode *fi, struct fuse_backing *fb,
+				 bool pinned)
 {
 	struct fuse_backing *oldfb;
 	int err = 0;
@@ -92,12 +99,21 @@ int fuse_inode_uncached_io_start(struct fuse_inode *fi, struct fuse_backing *fb)
 	oldfb = fuse_inode_backing(fi);
 	if (fb && oldfb && oldfb != fb) {
 		err = -EBUSY;
-		goto unlock;
+		goto out_unlock;
 	}
 	if (fi->iocachectr > 0) {
 		err = -ETXTBSY;
-		goto unlock;
+		goto out_unlock;
 	}
+	if (pinned) {
+		/* Do nothing if a backing file is already pinned */
+		if (WARN_ON(!fb) ||
+		    test_bit(FUSE_I_BACKING_PINNED, &fi->state))
+			goto out_put;
+
+		set_bit(FUSE_I_BACKING_PINNED, &fi->state);
+	}
+
 	fi->iocachectr--;
 
 	/* fuse inode holds a single refcount of backing file */
@@ -105,9 +121,10 @@ int fuse_inode_uncached_io_start(struct fuse_inode *fi, struct fuse_backing *fb)
 		oldfb = fuse_inode_backing_set(fi, fb);
 		WARN_ON_ONCE(oldfb != NULL);
 	} else {
+out_put:
 		fuse_backing_put(fb);
 	}
-unlock:
+out_unlock:
 	spin_unlock(&fi->lock);
 	return err;
 }
@@ -120,7 +137,7 @@ static int fuse_file_uncached_io_open(struct inode *inode,
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	int err;
 
-	err = fuse_inode_uncached_io_start(fi, fb);
+	err = fuse_inode_uncached_io_start(fi, fb, false);
 	if (err)
 		return err;
 
@@ -129,17 +146,30 @@ static int fuse_file_uncached_io_open(struct inode *inode,
 	return 0;
 }
 
-void fuse_inode_uncached_io_end(struct fuse_inode *fi)
+/*
+ * Drop an uncached_io reference.
+ *
+ * With @pinned true, drop the single "pinned" backing file reference.
+ * If the "pinned" backing file reference is not taken, do nothing.
+ */
+void fuse_inode_uncached_io_end(struct fuse_inode *fi, bool pinned)
 {
 	struct fuse_backing *oldfb = NULL;
 
 	spin_lock(&fi->lock);
 	WARN_ON(fi->iocachectr >= 0);
+	if (pinned) {
+		if (!test_bit(FUSE_I_BACKING_PINNED, &fi->state))
+			goto out_unlock;
+
+		clear_bit(FUSE_I_BACKING_PINNED, &fi->state);
+	}
 	fi->iocachectr++;
 	if (!fi->iocachectr) {
 		wake_up(&fi->direct_io_waitq);
 		oldfb = fuse_inode_backing_set(fi, NULL);
 	}
+out_unlock:
 	spin_unlock(&fi->lock);
 	if (oldfb)
 		fuse_backing_put(oldfb);
@@ -151,7 +181,7 @@ static void fuse_file_uncached_io_release(struct fuse_file *ff,
 {
 	WARN_ON(ff->iomode != IOM_UNCACHED);
 	ff->iomode = IOM_NONE;
-	fuse_inode_uncached_io_end(fi);
+	fuse_inode_uncached_io_end(fi, false);
 }
 
 /*

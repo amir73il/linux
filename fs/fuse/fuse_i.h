@@ -209,6 +209,8 @@ enum {
 	FUSE_I_BTIME,
 	/* Wants or already has page cache IO */
 	FUSE_I_CACHE_IO_MODE,
+	/* Long lived backing file */
+	FUSE_I_BACKING_PINNED,
 };
 
 struct fuse_conn;
@@ -1396,8 +1398,8 @@ int fuse_fileattr_set(struct mnt_idmap *idmap,
 /* iomode.c */
 int fuse_file_cached_io_open(struct inode *inode, struct fuse_file *ff);
 int fuse_inode_uncached_io_start(struct fuse_inode *fi,
-				 struct fuse_backing *fb);
-void fuse_inode_uncached_io_end(struct fuse_inode *fi);
+				 struct fuse_backing *fb, bool pinned);
+void fuse_inode_uncached_io_end(struct fuse_inode *fi, bool pinned);
 
 int fuse_file_io_open(struct file *file, struct inode *inode);
 void fuse_file_io_release(struct fuse_file *ff, struct inode *inode);
