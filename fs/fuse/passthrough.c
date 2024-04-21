@@ -210,14 +210,47 @@ void fuse_backing_files_free(struct fuse_conn *fc)
 	idr_destroy(&fc->backing_files_map);
 }
 
-int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
+static int fuse_backing_attach(struct fuse_conn *fc, u64 nodeid,
+			       struct fuse_backing *fb)
+{
+	struct inode *inode;
+	int err = -ENODEV;
+
+	down_read(&fc->killsb);
+
+	inode = fuse_ilookup(fc, nodeid, NULL);
+	if (inode) {
+		struct fuse_inode *fi = get_fuse_inode(inode);
+
+		if (fb) {
+			err = fuse_inode_uncached_io_start(fi, fb, true);
+		} else {
+			fuse_inode_uncached_io_end(fi, true);
+			err = 0;
+		}
+		iput(inode);
+	}
+
+	up_read(&fc->killsb);
+
+	return err;
+}
+
+int fuse_backing_detach(struct fuse_conn *fc, u64 nodeid)
+{
+	return fuse_backing_attach(fc, nodeid, NULL);
+}
+
+int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map,
+		      bool attach)
 {
 	struct file *file;
 	struct super_block *backing_sb;
 	struct fuse_backing *fb = NULL;
 	int res;
 
-	pr_debug("%s: fd=%d flags=0x%x\n", __func__, map->fd, map->flags);
+	pr_debug("%s: fd=%d flags=0x%x, nodeid=%llu\n", __func__,
+		 map->fd, map->flags, map->nodeid);
 
 	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
 	res = -EPERM;
@@ -225,7 +258,10 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 		goto out;
 
 	res = -EINVAL;
-	if (map->flags || map->padding)
+	if (map->flags)
+		goto out;
+
+	if (!attach != !map->nodeid)
 		goto out;
 
 	file = fget(map->fd);
@@ -251,7 +287,10 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	fb->cred = prepare_creds();
 	refcount_set(&fb->count, 1);
 
-	res = fuse_backing_id_alloc(fc, fb);
+	if (attach)
+		res = fuse_backing_attach(fc, map->nodeid, fb);
+	else
+		res = fuse_backing_id_alloc(fc, fb);
 	if (res < 0) {
 		fuse_backing_free(fb);
 		fb = NULL;

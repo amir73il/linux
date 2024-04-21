@@ -2342,7 +2342,8 @@ static long fuse_dev_ioctl_clone(struct file *file, __u32 __user *argp)
 }
 
 static long fuse_dev_ioctl_backing_open(struct file *file,
-					struct fuse_backing_map __user *argp)
+					struct fuse_backing_map __user *argp,
+					bool attach)
 {
 	struct fuse_dev *fud = fuse_get_dev(file);
 	struct fuse_backing_map map;
@@ -2356,7 +2357,7 @@ static long fuse_dev_ioctl_backing_open(struct file *file,
 	if (copy_from_user(&map, argp, sizeof(map)))
 		return -EFAULT;
 
-	return fuse_backing_open(fud->fc, &map);
+	return fuse_backing_open(fud->fc, &map, attach);
 }
 
 static long fuse_dev_ioctl_backing_close(struct file *file, __u32 __user *argp)
@@ -2376,20 +2377,44 @@ static long fuse_dev_ioctl_backing_close(struct file *file, __u32 __user *argp)
 	return fuse_backing_close(fud->fc, backing_id);
 }
 
+static long fuse_dev_ioctl_backing_detach(struct file *file, __u64 __user *argp)
+{
+	struct fuse_dev *fud = fuse_get_dev(file);
+	u64 nodeid;
+
+	if (!fud)
+		return -EPERM;
+
+	if (!IS_ENABLED(CONFIG_FUSE_PASSTHROUGH))
+		return -EOPNOTSUPP;
+
+	if (copy_from_user(&nodeid, argp, sizeof(nodeid)))
+		return -EFAULT;
+
+	return fuse_backing_detach(fud->fc, nodeid);
+}
+
 static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
+	bool attach = false;
 
 	switch (cmd) {
 	case FUSE_DEV_IOC_CLONE:
 		return fuse_dev_ioctl_clone(file, argp);
 
+	case FUSE_DEV_IOC_BACKING_ATTACH:
+		attach = true;
+		fallthrough;
 	case FUSE_DEV_IOC_BACKING_OPEN:
-		return fuse_dev_ioctl_backing_open(file, argp);
+		return fuse_dev_ioctl_backing_open(file, argp, attach);
 
 	case FUSE_DEV_IOC_BACKING_CLOSE:
 		return fuse_dev_ioctl_backing_close(file, argp);
+
+	case FUSE_DEV_IOC_BACKING_DETACH:
+		return fuse_dev_ioctl_backing_detach(file, argp);
 
 	default:
 		return -ENOTTY;

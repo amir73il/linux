@@ -1076,7 +1076,7 @@ struct fuse_notify_retrieve_in {
 struct fuse_backing_map {
 	int32_t		fd;
 	uint32_t	flags;
-	uint64_t	padding;
+	uint64_t	nodeid;
 };
 
 /* Device ioctls: */
@@ -1085,6 +1085,9 @@ struct fuse_backing_map {
 #define FUSE_DEV_IOC_BACKING_OPEN	_IOW(FUSE_DEV_IOC_MAGIC, 1, \
 					     struct fuse_backing_map)
 #define FUSE_DEV_IOC_BACKING_CLOSE	_IOW(FUSE_DEV_IOC_MAGIC, 2, uint32_t)
+#define FUSE_DEV_IOC_BACKING_ATTACH	_IOW(FUSE_DEV_IOC_MAGIC, 3, \
+					     struct fuse_backing_map)
+#define FUSE_DEV_IOC_BACKING_DETACH	_IOW(FUSE_DEV_IOC_MAGIC, 4, uint64_t)
 
 struct fuse_lseek_in {
 	uint64_t	fh;
