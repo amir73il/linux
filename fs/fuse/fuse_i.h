@@ -80,6 +80,7 @@ struct fuse_submount_lookup {
 struct fuse_backing {
 	struct file *file;
 	struct cred *cred;
+	u64 ops_mask;
 
 	/** refcount */
 	refcount_t count;
@@ -1481,6 +1482,15 @@ static inline struct fuse_backing *fuse_inode_passthrough(struct fuse_inode *fi)
 		return fuse_inode_backing(fi);
 #endif
 	return NULL;
+}
+
+static inline bool fuse_inode_passthrough_op(struct inode *inode,
+					     enum fuse_opcode op)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_backing *fb = fuse_inode_passthrough(fi);
+
+	return fb && fb->ops_mask & FUSE_PASSTHROUGH_OP(op);
 }
 
 #endif /* _FS_FUSE_I_H */
