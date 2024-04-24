@@ -217,7 +217,8 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	struct fuse_backing *fb = NULL;
 	int res;
 
-	pr_debug("%s: fd=%d flags=0x%x\n", __func__, map->fd, map->flags);
+	pr_debug("%s: fd=%d flags=0x%x ops_mask=0x%llx\n", __func__,
+		 map->fd, map->flags, map->ops_mask);
 
 	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
 	res = -EPERM;
@@ -225,7 +226,7 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 		goto out;
 
 	res = -EINVAL;
-	if (map->flags || map->padding)
+	if (map->flags || map->ops_mask & ~FUSE_BACKING_VALID_OPS)
 		goto out;
 
 	file = fget(map->fd);
@@ -234,7 +235,15 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 		goto out;
 
 	res = -EOPNOTSUPP;
-	if (!file->f_op->read_iter || !file->f_op->write_iter)
+	/*
+	 * It is not a problem to use an O_PATH fd as a backing file, because
+	 * fuse_passthrough_open() will anyway open a new backing file per fuse
+	 * file from the backing file path, but if server explicitly declares
+	 * using ops_mask that this fd is expected to be used for read/write
+	 * check for sanity that the file implements the read/write iter ops.
+	 */
+	if ((map->ops_mask & FUSE_BACKING_OP(READ) && !file->f_op->read_iter) ||
+	    (map->ops_mask & FUSE_BACKING_OP(WRITE) && !file->f_op->write_iter))
 		goto out_fput;
 
 	backing_sb = file_inode(file)->i_sb;
@@ -249,6 +258,7 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 
 	fb->file = file;
 	fb->cred = prepare_creds();
+	fb->ops_mask = map->ops_mask;
 	refcount_set(&fb->count, 1);
 
 	res = fuse_backing_id_alloc(fc, fb);

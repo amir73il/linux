@@ -80,6 +80,7 @@ struct fuse_submount_lookup {
 struct fuse_backing {
 	struct file *file;
 	struct cred *cred;
+	u64 ops_mask;
 
 	/** refcount */
 	refcount_t count;

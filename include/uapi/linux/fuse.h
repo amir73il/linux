@@ -1076,8 +1076,16 @@ struct fuse_notify_retrieve_in {
 struct fuse_backing_map {
 	int32_t		fd;
 	uint32_t	flags;
-	uint64_t	padding;
+	uint64_t	ops_mask;
 };
+
+#define FUSE_BACKING_OP(op)	(1ULL << ((FUSE_ ## op) - 1))
+
+#define FUSE_BACKING_RW_OPS \
+	(FUSE_BACKING_OP(READ) | FUSE_BACKING_OP(WRITE))
+
+#define FUSE_BACKING_VALID_OPS \
+	(FUSE_BACKING_RW_OPS)
 
 /* Device ioctls: */
 #define FUSE_DEV_IOC_MAGIC		229
