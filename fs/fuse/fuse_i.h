@@ -1194,6 +1194,9 @@ void fuse_init_symlink(struct inode *inode);
 /**
  * Change attributes of an inode
  */
+void fuse_kstat_to_attr(struct mnt_idmap *idmap, struct inode *inode,
+			const struct kstat *stat, struct fuse_attr *attr,
+			struct fuse_statx *sx);
 void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 			    struct fuse_statx *sx,
 			    u64 attr_valid, u64 attr_version);
@@ -1579,6 +1582,9 @@ static inline bool fuse_inode_passthrough_op(struct inode *inode,
 	return fb && fb->ops_mask & FUSE_PASSTHROUGH_OP(op);
 }
 
+int fuse_passthrough_getattr(struct mnt_idmap *idmap, struct inode *inode,
+			     struct kstat *stat, u32 request_mask,
+			     unsigned int flags);
 ssize_t fuse_passthrough_getxattr(struct inode *inode, const char *name,
 				  void *value, size_t size);
 ssize_t fuse_passthrough_listxattr(struct dentry *entry, char *list,

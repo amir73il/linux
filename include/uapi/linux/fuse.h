@@ -1125,8 +1125,10 @@ struct fuse_backing_map {
 
 /* Inode passthrough operations for backing file attached to inode */
 #define FUSE_PASSTHROUGH_INODE_OPS \
-	(FUSE_PASSTHROUGH_OP(FUSE_GETXATTR) | \
-	 FUSE_PASSTHROUGH_OP(FUSE_LISTXATTR))
+	(FUSE_PASSTHROUGH_OP(FUSE_GETATTR) | \
+	 FUSE_PASSTHROUGH_OP(FUSE_GETXATTR) | \
+	 FUSE_PASSTHROUGH_OP(FUSE_LISTXATTR) | \
+	 FUSE_PASSTHROUGH_OP(FUSE_STATX))
 
 #define FUSE_BACKING_MAP_OP(map, op) \
 	((map)->ops_mask & FUSE_PASSTHROUGH_OP(op))
