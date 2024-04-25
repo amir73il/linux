@@ -1314,6 +1314,13 @@ retry:
 	else
 		sync = time_before64(fi->i_time, get_jiffies_64());
 
+	if (stat && fuse_inode_passthrough_op(inode, FUSE_STATX)) {
+		err = fuse_passthrough_getattr(inode, stat, request_mask,
+						flags);
+		stat->mode = fi->orig_i_mode;
+		stat->ino = fi->orig_ino;
+	}
+
 	if (sync) {
 		forget_all_cached_acls(inode);
 		/* Try statx if BTIME is requested */
