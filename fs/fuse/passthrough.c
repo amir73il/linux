@@ -250,6 +250,10 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	    (FUSE_BACKING_MAP_OP(map, FUSE_WRITE) && !file->f_op->write_iter))
 		goto out_fput;
 
+	/* FUSE_STATX passthrough implies FUSE_GETATTR passthrough */
+	if (FUSE_BACKING_MAP_OP(map, FUSE_STATX))
+		map->ops_mask |= FUSE_PASSTHROUGH_OP(FUSE_GETATTR);
+
 	backing_sb = file_inode(file)->i_sb;
 	res = -ELOOP;
 	if (backing_sb->s_stack_depth >= fc->max_stack_depth)
@@ -371,6 +375,25 @@ void fuse_passthrough_release(struct fuse_file *ff, struct fuse_backing *fb)
 /*
  * Inode passthrough operations for backing file attached on lookup.
  */
+
+int fuse_passthrough_getattr(struct inode *inode, struct kstat *stat,
+			     u32 request_mask, unsigned int flags)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_backing *fb = fuse_inode_passthrough(fi);
+	struct path *fb_path = &fb->file->f_path;
+	const struct cred *old_cred;
+	int err;
+
+	old_cred = override_creds(fb->cred);
+	err = vfs_getattr(fb_path, stat, request_mask, flags);
+	revert_creds(old_cred);
+	/* Always override st_dev with FUSE dev */
+	stat->dev = inode->i_sb->s_dev;
+	/* TODO: fill inode attrs from stat */
+
+	return err;
+}
 
 ssize_t fuse_passthrough_getxattr(struct inode *inode, const char *name,
 				  void *value, size_t size)

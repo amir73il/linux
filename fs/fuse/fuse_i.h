@@ -1577,6 +1577,8 @@ static inline bool fuse_inode_passthrough_op(struct inode *inode,
 	return fb && fb->ops_mask & FUSE_PASSTHROUGH_OP(op);
 }
 
+int fuse_passthrough_getattr(struct inode *inode, struct kstat *stat,
+			     u32 request_mask, unsigned int flags);
 ssize_t fuse_passthrough_getxattr(struct inode *inode, const char *name,
 				  void *value, size_t size);
 ssize_t fuse_passthrough_listxattr(struct dentry *entry, char *list,

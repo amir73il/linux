@@ -1319,6 +1319,15 @@ retry:
 	if (fc->no_statx)
 		request_mask &= STATX_BASIC_STATS;
 
+	if (stat && fuse_inode_passthrough_op(inode, FUSE_STATX)) {
+		forget_all_cached_acls(inode);
+		err = fuse_passthrough_getattr(inode, stat, request_mask,
+					       flags);
+		stat->mode = fi->orig_i_mode;
+		stat->ino = fi->orig_ino;
+		return err;
+	}
+
 	if (!request_mask)
 		sync = false;
 	else if (flags & AT_STATX_FORCE_SYNC)
