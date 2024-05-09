@@ -274,10 +274,16 @@ static void destroy_super_work(struct work_struct *work)
 {
 	struct super_block *s = container_of(work, struct super_block,
 							destroy_work);
+	struct srcu_struct *write_srcu = sb_write_srcu(s);
+
 	fsnotify_sb_free(s);
 	security_sb_free(s);
 	put_user_ns(s->s_user_ns);
 	kfree(s->s_subtype);
+	if (write_srcu) {
+		cleanup_srcu_struct(write_srcu);
+		kfree(write_srcu);
+	}
 	for (int i = 0; i < SB_FREEZE_LEVELS; i++)
 		percpu_free_rwsem(&s->s_writers.rw_sem[i]);
 	kfree(s);
@@ -394,6 +400,38 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags,
 fail:
 	destroy_unused_super(s);
 	return NULL;
+}
+
+/**
+ * activate_sb_write_barrier -	activate write barries on superblock
+ * @s: superblock to activate write barriers on
+ *
+ * sb_write_barrier() calls will have no effect before this is called.
+ * After this is called, sb_write_barrier() will wait for all the tasks
+ * that called __sb_start_write_srcu() after write barrier was activated.
+ * For now, there is no deactivate_sb_write_barrier().
+ */
+int activate_sb_write_barrier(struct super_block *s)
+{
+	struct srcu_struct *write_srcu = sb_write_srcu(s);
+
+	if (!write_srcu) {
+		write_srcu = kzalloc(sizeof(struct srcu_struct),  GFP_USER);
+		if (write_srcu) {
+			init_srcu_struct(write_srcu);
+			/*
+			 * cmpxchg() provides the barrier so that callers of
+			 * sb_write_srcu() can see only initialized structure.
+			 */
+			if (cmpxchg(&s->s_write_srcu, NULL, write_srcu)) {
+				WARN_ON_ONCE(1);
+				cleanup_srcu_struct(write_srcu);
+				kfree(write_srcu);
+			}
+		}
+	}
+
+	return write_srcu ? 0 : -ENOMEM;
 }
 
 /* Superblock refcounting  */
