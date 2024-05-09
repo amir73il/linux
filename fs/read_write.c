@@ -378,6 +378,10 @@ int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t
 	if (ret)
 		return ret;
 
+	/* fsnotify_file_area_perm() is called in file_start_write_area() */
+	if (mask & MAY_WRITE)
+		return 0;
+
 	return fsnotify_file_area_perm(file, mask, ppos, count);
 }
 EXPORT_SYMBOL(rw_verify_area);
@@ -555,14 +559,18 @@ ssize_t kernel_write(struct file *file, const void *buf, size_t count,
 			    loff_t *pos)
 {
 	ssize_t ret;
+	int idx;
 
 	ret = rw_verify_area(WRITE, file, pos, count);
 	if (ret)
 		return ret;
 
-	file_start_write(file);
+	ret = file_start_write_area(file, pos, count, &idx);
+	if (ret)
+		return ret;
+
 	ret =  __kernel_write(file, buf, count, pos);
-	file_end_write(file);
+	file_end_write_srcu(file, idx);
 	return ret;
 }
 EXPORT_SYMBOL(kernel_write);
@@ -570,6 +578,7 @@ EXPORT_SYMBOL(kernel_write);
 ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
+	int idx;
 
 	if (!(file->f_mode & FMODE_WRITE))
 		return -EBADF;
@@ -583,7 +592,9 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 		return ret;
 	if (count > MAX_RW_COUNT)
 		count =  MAX_RW_COUNT;
-	file_start_write(file);
+	ret = file_start_write_area(file, pos, count, &idx);
+	if (ret)
+		return ret;
 	if (file->f_op->write)
 		ret = file->f_op->write(file, buf, count, pos);
 	else if (file->f_op->write_iter)
@@ -595,7 +606,7 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 		add_wchar(current, ret);
 	}
 	inc_syscw(current);
-	file_end_write(file);
+	file_end_write_srcu(file, idx);
 	return ret;
 }
 
@@ -875,6 +886,7 @@ ssize_t vfs_iter_write(struct file *file, struct iov_iter *iter, loff_t *ppos,
 {
 	size_t tot_len;
 	ssize_t ret;
+	int idx;
 
 	if (!(file->f_mode & FMODE_WRITE))
 		return -EBADF;
@@ -891,11 +903,14 @@ ssize_t vfs_iter_write(struct file *file, struct iov_iter *iter, loff_t *ppos,
 	if (ret < 0)
 		return ret;
 
-	file_start_write(file);
+	ret = file_start_write_area(file, ppos, tot_len, &idx);
+	if (ret)
+		return ret;
+
 	ret = do_iter_readv_writev(file, iter, ppos, WRITE, flags);
 	if (ret > 0)
 		fsnotify_modify(file);
-	file_end_write(file);
+	file_end_write_srcu(file, idx);
 
 	return ret;
 }
@@ -947,6 +962,7 @@ static ssize_t vfs_writev(struct file *file, const struct iovec __user *vec,
 	struct iov_iter iter;
 	size_t tot_len;
 	ssize_t ret = 0;
+	int idx;
 
 	if (!(file->f_mode & FMODE_WRITE))
 		return -EBADF;
@@ -966,14 +982,17 @@ static ssize_t vfs_writev(struct file *file, const struct iovec __user *vec,
 	if (ret < 0)
 		goto out;
 
-	file_start_write(file);
+	ret = file_start_write_area(file, pos, tot_len, &idx);
+	if (ret)
+		goto out;
+
 	if (file->f_op->write_iter)
 		ret = do_iter_readv_writev(file, &iter, pos, WRITE, flags);
 	else
 		ret = do_loop_readv_writev(file, &iter, pos, WRITE, flags);
 	if (ret > 0)
 		fsnotify_modify(file);
-	file_end_write(file);
+	file_end_write_srcu(file, idx);
 out:
 	kfree(iov);
 	return ret;
@@ -1487,6 +1506,7 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	ssize_t ret;
 	bool splice = flags & COPY_FILE_SPLICE;
 	bool samesb = file_inode(file_in)->i_sb == file_inode(file_out)->i_sb;
+	int idx;
 
 	if (flags & ~COPY_FILE_SPLICE)
 		return -EINVAL;
@@ -1507,7 +1527,9 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	if (len == 0)
 		return 0;
 
-	file_start_write(file_out);
+	ret = file_start_write_area(file_out, &pos_out, len, &idx);
+	if (ret)
+		return ret;
 
 	/*
 	 * Cloning is supported by more file systems, so we implement copy on
@@ -1531,7 +1553,7 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 		splice = true;
 	}
 
-	file_end_write(file_out);
+	file_end_write_srcu(file_out, idx);
 
 	if (!splice)
 		goto done;

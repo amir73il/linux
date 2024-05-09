@@ -299,6 +299,7 @@ ssize_t backing_file_splice_write(struct pipe_inode_info *pipe,
 {
 	const struct cred *old_cred;
 	ssize_t ret;
+	int idx;
 
 	if (WARN_ON_ONCE(!(out->f_mode & FMODE_BACKING)))
 		return -EIO;
@@ -308,9 +309,11 @@ ssize_t backing_file_splice_write(struct pipe_inode_info *pipe,
 		return ret;
 
 	old_cred = override_creds(ctx->cred);
-	file_start_write(out);
-	ret = iter_file_splice_write(pipe, out, ppos, len, flags);
-	file_end_write(out);
+	ret = file_start_write_area(out, ppos, len, &idx);
+	if (!ret) {
+		ret = iter_file_splice_write(pipe, out, ppos, len, flags);
+		file_end_write_srcu(out, idx);
+	}
 	revert_creds(old_cred);
 
 	if (ctx->end_write)

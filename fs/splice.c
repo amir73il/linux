@@ -1159,10 +1159,14 @@ static int direct_splice_actor(struct pipe_inode_info *pipe,
 {
 	struct file *file = sd->u.file;
 	long ret;
+	int idx;
 
-	file_start_write(file);
+	ret = file_start_write_area(file, sd->opos, sd->total_len, &idx);
+	if (ret)
+		return ret;
+
 	ret = do_splice_from(pipe, file, sd->opos, sd->total_len, sd->flags);
-	file_end_write(file);
+	file_end_write_srcu(file, idx);
 	return ret;
 }
 
@@ -1309,6 +1313,7 @@ ssize_t do_splice(struct file *in, loff_t *off_in, struct file *out,
 	struct pipe_inode_info *opipe;
 	loff_t offset;
 	ssize_t ret;
+	int idx;
 
 	if (unlikely(!(in->f_mode & FMODE_READ) ||
 		     !(out->f_mode & FMODE_WRITE)))
@@ -1350,9 +1355,12 @@ ssize_t do_splice(struct file *in, loff_t *off_in, struct file *out,
 		if (in->f_flags & O_NONBLOCK)
 			flags |= SPLICE_F_NONBLOCK;
 
-		file_start_write(out);
+		ret = file_start_write_area(out, &offset, len, &idx);
+		if (ret)
+			return ret;
+
 		ret = do_splice_from(ipipe, out, &offset, len, flags);
-		file_end_write(out);
+		file_end_write_srcu(out, idx);
 
 		if (!off_out)
 			out->f_pos = offset;

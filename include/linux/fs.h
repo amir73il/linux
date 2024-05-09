@@ -2987,6 +2987,9 @@ static inline void file_end_write_srcu(struct file *file, int idx)
 	file_end_write(file);
 }
 
+int file_start_write_area(struct file *file, const loff_t *ppos, size_t count,
+			  int *pidx);
+
 /**
  * kiocb_start_write - get write access to a superblock for async file io
  * @iocb: the io context we want to submit the write with
