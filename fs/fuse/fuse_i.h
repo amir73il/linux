@@ -1493,4 +1493,9 @@ static inline bool fuse_inode_passthrough_op(struct inode *inode,
 	return fb && fb->ops_mask & FUSE_PASSTHROUGH_OP(op);
 }
 
+ssize_t fuse_passthrough_getxattr(struct inode *inode, const char *name,
+				  void *value, size_t size);
+ssize_t fuse_passthrough_listxattr(struct dentry *entry, char *list,
+				   size_t size);
+
 #endif /* _FS_FUSE_I_H */
