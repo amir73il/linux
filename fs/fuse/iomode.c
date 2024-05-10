@@ -100,9 +100,14 @@ int fuse_inode_uncached_io_start(struct fuse_inode *fi, struct fuse_backing *fb)
 	}
 	fi->iocachectr--;
 
-	/* fuse inode holds a single refcount of backing file */
+	/* fuse inode holds a single refcount of backing file... */
 	if (fb && !oldfb) {
 		oldfb = fuse_inode_backing_set(fi, fb);
+		/* ...and an optional extra refcount for inode ops */
+		if (fb->ops_mask & FUSE_PASSTHROUGH_INODE_OPS) {
+			set_bit(FUSE_I_PASSTHROUGH, &fi->state);
+			fi->iocachectr--;
+		}
 		WARN_ON_ONCE(oldfb != NULL);
 	} else {
 		fuse_backing_put(fb);
