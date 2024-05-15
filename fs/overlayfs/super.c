@@ -80,14 +80,15 @@ bug:
 	return dentry;
 }
 
-static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak)
+static int ovl_revalidate_real(struct dentry *d, unsigned int flags,
+			       struct dentry *parent, const struct qstr *name)
 {
 	int ret = 1;
 
 	if (!d)
 		return 1;
 
-	if (weak) {
+	if (!name) {
 		if (d->d_flags & DCACHE_OP_WEAK_REVALIDATE)
 			ret =  d->d_op->d_weak_revalidate(d, flags);
 	} else if (d->d_flags & DCACHE_OP_REVALIDATE) {
@@ -107,9 +108,9 @@ static int ovl_dentry_revalidate_common(struct dentry *dentry,
 					const struct qstr *name)
 {
 	struct ovl_entry *oe;
-	struct ovl_path *lowerstack;
+	struct ovl_path *lowerstack, *parentstack;
 	struct inode *inode = d_inode_rcu(dentry);
-	struct dentry *upper, *real;
+	struct dentry *upper, *real, *realparent = NULL;
 
 	/* Careful in RCU mode */
 	if (!inode)
@@ -128,17 +129,38 @@ static int ovl_dentry_revalidate_common(struct dentry *dentry,
 	if (!d_is_dir(real) && d_inode(real)->i_nlink != 1)
 		return 1;
 
-	return ovl_revalidate_real(real, flags, weak);
+	if (parent) {
+		inode = d_inode_rcu(parent);
+		oe = OVL_I_E(inode);
+		parentstack = ovl_lowerstack(oe);
+		/*
+		 * Parent and child could be from different layers.
+		 * TODO: use the real parent from the lower layer of the child.
+		 * For now, we only revalidate when the real parent is from the
+		 * same lower layer of the child.
+		 */
+		if (upper) {
+			realparent = ovl_dentry_upper(parent);
+		} else {
+			realparent = parentstack->dentry;
+			if (lowerstack->layer->idx != parentstack->layer->idx)
+				return 1;
+		}
+	}
+
+	return ovl_revalidate_real(real, flags, realparent, name);
 }
 
 static int ovl_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 {
-	return ovl_dentry_revalidate_common(dentry, flags, false);
+	/* XXX: d_name is not stable!!! get it from caller */
+	return ovl_dentry_revalidate_common(dentry, flags, dentry->d_parent,
+					    &dentry->d_name);
 }
 
 static int ovl_dentry_weak_revalidate(struct dentry *dentry, unsigned int flags)
 {
-	return ovl_dentry_revalidate_common(dentry, flags, true);
+	return ovl_dentry_revalidate_common(dentry, flags, NULL, NULL);
 }
 
 static const struct dentry_operations ovl_dentry_operations = {
