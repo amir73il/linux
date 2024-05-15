@@ -162,14 +162,9 @@ bool ovl_dentry_remote(struct dentry *dentry)
 	return dentry->d_flags & OVL_D_REVALIDATE;
 }
 
-void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *realdentry)
+void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry)
 {
-	if (!ovl_dentry_remote(realdentry))
-		return;
-
-	spin_lock(&dentry->d_lock);
-	dentry->d_flags |= realdentry->d_flags & OVL_D_REVALIDATE;
-	spin_unlock(&dentry->d_lock);
+	ovl_dentry_init_reval(dentry, upperdentry, NULL);
 }
 
 void ovl_dentry_init_reval(struct dentry *dentry, struct dentry *upperdentry,
@@ -181,13 +176,18 @@ void ovl_dentry_init_reval(struct dentry *dentry, struct dentry *upperdentry,
 void ovl_dentry_init_flags(struct dentry *dentry, struct dentry *upperdentry,
 			   struct ovl_entry *oe, unsigned int mask)
 {
-	struct ovl_path *lowerstack = ovl_lowerstack(oe);
-	unsigned int i, flags = 0;
+	struct ovl_path *lowerpath = ovl_lowerstack(oe);
+	struct dentry *real = upperdentry ?: (oe ? lowerpath->dentry : NULL);
+	unsigned int flags = 0;
 
-	if (upperdentry)
-		flags |= upperdentry->d_flags;
-	for (i = 0; i < ovl_numlower(oe) && lowerstack[i].dentry; i++)
-		flags |= lowerstack[i].dentry->d_flags;
+	/*
+	 * We only revalidate the upper most parent/name are still the same
+	 * as the overlay parent/name when this can be verified.
+	 * We do not revalidate hardlinks because overlay dentry stack may
+	 * have stored a real dentry with different parent/name.
+	 */
+	if (real && (d_is_dir(real) || d_inode(real)->i_nlink == 1))
+		flags = real->d_flags;
 
 	spin_lock(&dentry->d_lock);
 	dentry->d_flags &= ~mask;
@@ -342,8 +342,6 @@ int ovl_dentry_set_lowerdata(struct dentry *dentry, struct ovl_path *datapath)
 	 */
 	smp_wmb();
 	WRITE_ONCE(lowerdata->dentry, dget(datadentry));
-
-	ovl_dentry_update_reval(dentry, datadentry);
 
 	return 0;
 }

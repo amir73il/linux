@@ -102,14 +102,14 @@ static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak)
 }
 
 static int ovl_dentry_revalidate_common(struct dentry *dentry,
-					unsigned int flags, bool weak)
+					unsigned int flags,
+					struct dentry *parent,
+					const struct qstr *name)
 {
 	struct ovl_entry *oe;
 	struct ovl_path *lowerstack;
 	struct inode *inode = d_inode_rcu(dentry);
-	struct dentry *upper;
-	unsigned int i;
-	int ret = 1;
+	struct dentry *upper, *real;
 
 	/* Careful in RCU mode */
 	if (!inode)
@@ -118,13 +118,17 @@ static int ovl_dentry_revalidate_common(struct dentry *dentry,
 	oe = OVL_I_E(inode);
 	lowerstack = ovl_lowerstack(oe);
 	upper = ovl_i_dentry_upper(inode);
-	if (upper)
-		ret = ovl_revalidate_real(upper, flags, weak);
+	/*
+	 * We only revalidate the upper most parent/name are still the same
+	 * as the overlay parent/name when this can be verified.
+	 * We do not revalidate hardlinks because overlay dentry stack may
+	 * have been composed from and stored a different parent/name.
+	 */
+	real = upper ?: lowerstack->dentry;
+	if (!d_is_dir(real) && d_inode(real)->i_nlink != 1)
+		return 1;
 
-	for (i = 0; ret > 0 && i < ovl_numlower(oe); i++)
-		ret = ovl_revalidate_real(lowerstack[i].dentry, flags, weak);
-
-	return ret;
+	return ovl_revalidate_real(real, flags, weak);
 }
 
 static int ovl_dentry_revalidate(struct dentry *dentry, unsigned int flags)
