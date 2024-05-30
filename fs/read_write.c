@@ -870,7 +870,10 @@ ssize_t vfs_iocb_iter_write(struct file *file, struct kiocb *iocb,
 	if (ret < 0)
 		return ret;
 
-	kiocb_start_write(iocb);
+	ret = kiocb_start_write_area(iocb, &iocb->ki_pos, tot_len);
+	if (ret)
+		return ret;
+
 	ret = file->f_op->write_iter(iocb, iter);
 	if (ret != -EIOCBQUEUED)
 		kiocb_end_write(iocb);

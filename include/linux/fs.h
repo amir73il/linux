@@ -366,6 +366,7 @@ struct kiocb {
 	void (*ki_complete)(struct kiocb *iocb, long ret);
 	void			*private;
 	int			ki_flags;
+	short			ki_idx;
 	u16			ki_ioprio; /* See linux/ioprio.h */
 	union {
 		/*
@@ -1666,7 +1667,7 @@ static inline bool __sb_start_write_trylock(struct super_block *sb, int level)
 	return percpu_down_read_trylock(sb->s_writers.rw_sem + level - 1);
 }
 
-#define __sb_writers_acquired(sb, lev)	\
+#define __sb_writers_acquire(sb, lev)	\
 	percpu_rwsem_acquire(&(sb)->s_writers.rw_sem[(lev)-1], 1, _THIS_IP_)
 #define __sb_writers_release(sb, lev)	\
 	percpu_rwsem_release(&(sb)->s_writers.rw_sem[(lev)-1], 1, _THIS_IP_)
@@ -1740,6 +1741,24 @@ static inline bool file_write_not_started(const struct file *file)
 static inline struct srcu_struct *sb_write_srcu(const struct super_block *sb)
 {
 	return READ_ONCE(sb->s_write_srcu);
+}
+
+static inline void __sb_write_srcu_acquire(struct super_block *sb)
+{
+	struct srcu_struct *write_srcu = sb_write_srcu(sb);
+
+	/* We do not support deactivating write barrier */
+	if (!WARN_ON_ONCE(!write_srcu))
+		rcu_lock_acquire(&write_srcu->dep_map);
+}
+
+static inline void __sb_write_srcu_release(struct super_block *sb)
+{
+	struct srcu_struct *write_srcu = sb_write_srcu(sb);
+
+	/* We do not support deactivating write barrier */
+	if (!WARN_ON_ONCE(!write_srcu))
+		rcu_lock_release(&write_srcu->dep_map);
 }
 
 static inline int __sb_start_write_srcu(struct super_block *sb)
@@ -2991,29 +3010,39 @@ int file_start_write_area(struct file *file, const loff_t *ppos, size_t count,
 			  int *pidx);
 
 /**
- * kiocb_start_write - get write access to a superblock for async file io
+ * kiocb_start_write_area - get write access to a superblock for async file io
  * @iocb: the io context we want to submit the write with
+ * @ppos: optional offset of the intended write (may be NULL)
+ * @count: optional size of the intended write (may be 0)
  *
  * This is a variant of sb_start_write() for async io submission.
  * Should be matched with a call to kiocb_end_write().
  */
-static inline void kiocb_start_write(struct kiocb *iocb)
+static inline int kiocb_start_write_area(struct kiocb *iocb, const loff_t *ppos,
+					 size_t count)
 {
 	struct inode *inode = file_inode(iocb->ki_filp);
+	int ret, idx;
 
-	sb_start_write(inode->i_sb);
+	ret = file_start_write_area(iocb->ki_filp, ppos, count, &idx);
+	if (ret)
+		return ret;
 	/*
 	 * Fool lockdep by telling it the lock got released so that it
 	 * doesn't complain about the held lock when we return to userspace.
 	 */
 	__sb_writers_release(inode->i_sb, SB_FREEZE_WRITE);
+	if (idx >= 0)
+		__sb_write_srcu_release(inode->i_sb);
+	iocb->ki_idx = idx;
+	return 0;
 }
 
 /**
  * kiocb_end_write - drop write access to a superblock after async file io
  * @iocb: the io context we sumbitted the write with
  *
- * Should be matched with a call to kiocb_start_write().
+ * Should be matched with a call to kiocb_start_write_area().
  */
 static inline void kiocb_end_write(struct kiocb *iocb)
 {
@@ -3022,7 +3051,9 @@ static inline void kiocb_end_write(struct kiocb *iocb)
 	/*
 	 * Tell lockdep we inherited freeze protection from submission thread.
 	 */
-	__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
+	__sb_writers_acquire(inode->i_sb, SB_FREEZE_WRITE);
+	if (iocb->ki_idx >= 0)
+		__sb_write_srcu_acquire(inode->i_sb);
 	sb_end_write(inode->i_sb);
 }
 

@@ -1619,6 +1619,7 @@ static int aio_write(struct kiocb *req, const struct iocb *iocb,
 	struct iovec inline_vecs[UIO_FASTIOV], *iovec = inline_vecs;
 	struct iov_iter iter;
 	struct file *file;
+	size_t tot_len;
 	int ret;
 
 	ret = aio_prep_rw(req, iocb);
@@ -1634,13 +1635,20 @@ static int aio_write(struct kiocb *req, const struct iocb *iocb,
 	ret = aio_setup_rw(ITER_SOURCE, iocb, &iovec, vectored, compat, &iter);
 	if (ret < 0)
 		return ret;
-	ret = rw_verify_area(WRITE, file, &req->ki_pos, iov_iter_count(&iter));
-	if (!ret) {
-		if (S_ISREG(file_inode(file)->i_mode))
-			kiocb_start_write(req);
-		req->ki_flags |= IOCB_WRITE;
-		aio_rw_done(req, file->f_op->write_iter(req, &iter));
+	tot_len = iov_iter_count(&iter);
+	ret = rw_verify_area(WRITE, file, &req->ki_pos, tot_len);
+	if (ret)
+		goto free_iov;
+
+	if (S_ISREG(file_inode(file)->i_mode)) {
+		ret = kiocb_start_write_area(req, &req->ki_pos, tot_len);
+		if (ret)
+			goto free_iov;
 	}
+	req->ki_flags |= IOCB_WRITE;
+	aio_rw_done(req, file->f_op->write_iter(req, &iter));
+
+free_iov:
 	kfree(iovec);
 	return ret;
 }

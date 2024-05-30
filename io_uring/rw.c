@@ -1041,8 +1041,11 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
 	if (unlikely(ret))
 		return ret;
 
-	if (req->flags & REQ_F_ISREG)
-		kiocb_start_write(kiocb);
+	if (req->flags & REQ_F_ISREG) {
+		ret = kiocb_start_write_area(kiocb, ppos, req->cqe.res);
+		if (unlikely(ret))
+			return ret;
+	}
 	kiocb->ki_flags |= IOCB_WRITE;
 
 	if (likely(req->file->f_op->write_iter))
