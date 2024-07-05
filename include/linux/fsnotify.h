@@ -18,11 +18,9 @@
 #include <linux/bug.h>
 
 /* Are there any inode/mount/sb objects watched with priority prio or above? */
-static inline bool fsnotify_sb_has_priority_watchers(struct super_block *sb,
-						     int prio)
+static inline bool fsnotify_sbinfo_has_watchers(struct fsnotify_sb_info *sbinfo,
+						int prio)
 {
-	struct fsnotify_sb_info *sbinfo = fsnotify_sb_info(sb);
-
 	/* Were any marks ever added to any object on this sb? */
 	if (!sbinfo)
 		return false;
@@ -33,7 +31,9 @@ static inline bool fsnotify_sb_has_priority_watchers(struct super_block *sb,
 /* Are there any inode/mount/sb objects that are being watched at all? */
 static inline bool fsnotify_sb_has_watchers(struct super_block *sb)
 {
-	return fsnotify_sb_has_priority_watchers(sb, 0);
+	struct fsnotify_sb_info *sbinfo = fsnotify_sb_info(sb);
+
+	return fsnotify_sbinfo_has_watchers(sbinfo, 0);
 }
 
 /*
@@ -73,12 +73,13 @@ static inline void fsnotify_inode(struct inode *inode, __u32 mask)
 }
 
 /* Notify this dentry's parent about a child's events. */
-static inline int fsnotify_parent(struct dentry *dentry, __u32 mask,
+static inline int fsnotify_parent(struct fsnotify_sb_info *sbinfo,
+				  struct dentry *dentry, __u32 mask,
 				  const void *data, int data_type)
 {
 	struct inode *inode = d_inode(dentry);
 
-	if (!fsnotify_sb_has_watchers(inode->i_sb))
+	if (!fsnotify_sbinfo_has_watchers(sbinfo, 0))
 		return 0;
 
 	if (S_ISDIR(inode->i_mode)) {
@@ -105,33 +106,46 @@ notify_child:
  */
 static inline void fsnotify_dentry(struct dentry *dentry, __u32 mask)
 {
-	fsnotify_parent(dentry, mask, dentry, FSNOTIFY_EVENT_DENTRY);
+	struct fsnotify_sb_info *sbinfo = fsnotify_sb_info(dentry->d_sb);
+
+	fsnotify_parent(sbinfo, dentry, mask, dentry, FSNOTIFY_EVENT_DENTRY);
 }
 
-static inline int fsnotify_file(struct file *file, __u32 mask)
+static inline struct fsnotify_sb_info *fsnotify_file_sbinfo(struct file *f)
 {
-	const struct path *path;
+	if (f->f_mode & FMODE_NONOTIFY)
+		return NULL;
 
-	if (file->f_mode & FMODE_NONOTIFY)
-		return 0;
+	return fsnotify_sb_info(f->f_path.dentry->d_sb);
+}
 
-	path = &file->f_path;
-	/* Permission events require group prio >= FSNOTIFY_PRIO_CONTENT */
-	if (mask & ALL_FSNOTIFY_PERM_EVENTS &&
-	    !fsnotify_sb_has_priority_watchers(path->dentry->d_sb,
-					       FSNOTIFY_PRIO_CONTENT))
-		return 0;
+static inline int fsnotify_file(struct file *f, __u32 mask)
+{
+	struct fsnotify_sb_info *sbinfo = fsnotify_file_sbinfo(f);
 
-	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
+	return fsnotify_parent(sbinfo, f->f_path.dentry, mask, &f->f_path,
+			       FSNOTIFY_EVENT_PATH);
 }
 
 #ifdef CONFIG_FANOTIFY_ACCESS_PERMISSIONS
+static inline int fsnotify_perm(struct fsnotify_sb_info *sbinfo,
+				struct file *f, __u32 mask)
+{
+	/* Permission events require group prio >= FSNOTIFY_PRIO_CONTENT */
+	if (!fsnotify_sbinfo_has_watchers(sbinfo, FSNOTIFY_PRIO_CONTENT))
+		return 0;
+
+	return fsnotify_parent(sbinfo, f->f_path.dentry, mask, &f->f_path,
+			       FSNOTIFY_EVENT_PATH);
+}
+
 /*
  * fsnotify_file_area_perm - permission hook before access to file range
  */
 static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 					  const loff_t *ppos, size_t count)
 {
+	struct fsnotify_sb_info *sbinfo = fsnotify_file_sbinfo(file);
 	__u32 fsnotify_mask = FS_ACCESS_PERM;
 
 	/*
@@ -144,7 +158,7 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 	if (!(perm_mask & MAY_READ))
 		return 0;
 
-	return fsnotify_file(file, fsnotify_mask);
+	return fsnotify_perm(sbinfo, file, fsnotify_mask);
 }
 
 /*
@@ -160,15 +174,16 @@ static inline int fsnotify_file_perm(struct file *file, int perm_mask)
  */
 static inline int fsnotify_open_perm(struct file *file)
 {
+	struct fsnotify_sb_info *sbinfo = fsnotify_file_sbinfo(file);
 	int ret;
 
 	if (file->f_flags & __FMODE_EXEC) {
-		ret = fsnotify_file(file, FS_OPEN_EXEC_PERM);
+		ret = fsnotify_perm(sbinfo, file, FS_OPEN_EXEC_PERM);
 		if (ret)
 			return ret;
 	}
 
-	return fsnotify_file(file, FS_OPEN_PERM);
+	return fsnotify_perm(sbinfo, file, FS_OPEN_PERM);
 }
 
 #else
