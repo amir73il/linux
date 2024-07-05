@@ -139,6 +139,19 @@ static inline int fsnotify_perm(struct fsnotify_sb_info *sbinfo,
 			       FSNOTIFY_EVENT_PATH);
 }
 
+static inline int fsnotify_file_range(struct fsnotify_sb_info *sbinfo,
+				      struct file *file, __u32 mask,
+				      const loff_t *ppos, size_t count)
+{
+	struct file_range range;
+
+	range.path = &file->f_path;
+	range.ppos = ppos;
+	range.count = count;
+	return fsnotify_parent(sbinfo, range.path->dentry, mask, &range,
+			       FSNOTIFY_EVENT_FILE_RANGE);
+}
+
 /*
  * fsnotify_file_area_perm - permission hook before access/modify of file range
  */
@@ -185,7 +198,7 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 	else
 		return 0;
 
-	return fsnotify_perm(sbinfo, file, fsnotify_mask);
+	return fsnotify_file_range(sbinfo, file, fsnotify_mask, ppos, count);
 }
 
 /*
