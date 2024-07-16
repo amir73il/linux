@@ -360,7 +360,11 @@ static int ovl_dir_read_merged(struct dentry *dentry, struct list_head *list,
 	const struct ovl_layer *layer;
 
 	for (idx = 0; idx != -1; idx = next) {
+		realpath.dentry = NULL;
 		next = ovl_path_next(idx, dentry, &realpath, &layer);
+		if (!realpath.dentry)
+			return -EIO;
+
 		rdd.is_upper = ovl_dentry_upper(dentry) == realpath.dentry;
 		rdd.in_xwhiteouts_dir = layer->has_xwhiteouts &&
 					ovl_dentry_has_xwhiteouts(dentry);
@@ -402,6 +406,9 @@ static struct ovl_dir_cache *ovl_cache_get(struct dentry *dentry)
 	int res;
 	struct ovl_dir_cache *cache;
 	struct inode *inode = d_inode(dentry);
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+	struct ovl_entry *oe = OVL_E(dentry);
+	struct dentry *upper = ovl_dentry_upper(dentry);
 
 	cache = ovl_dir_cache(inode);
 	if (cache && ovl_inode_version_get(inode) == cache->version) {
@@ -426,6 +433,31 @@ static struct ovl_dir_cache *ovl_cache_get(struct dentry *dentry)
 		return ERR_PTR(res);
 	}
 
+	/* Check if there are any merged lower entries at all */
+	if (upper && ovl_lastmerged(oe)) {
+		struct ovl_cache_entry *p;
+
+		list_for_each_entry(p, &cache->entries, l_node) {
+			if (!p->is_upper)
+				goto out;
+		}
+		/*
+		 * A good opportunity to "finalize" the merged dir content,
+		 * so we won't need to iterate lower dirs next time.
+		 * If lower offline changed are not expected, we also mark the
+		 * upper dir permanently "finalized" with the special xattr
+		 * value overlay.opaque="z".
+		 */
+		oe->__lastmerged = 0;
+		if (!ovl_allow_offline_changes(ofs) &&
+		    !ovl_want_write(dentry)) {
+			ovl_check_setxattr(ofs, upper, OVL_XATTR_OPAQUE, "z",
+					   1, 0);
+			ovl_drop_write(dentry);
+		}
+	}
+
+out:
 	cache->version = ovl_inode_version_get(inode);
 	ovl_set_dir_cache(inode, cache);
 

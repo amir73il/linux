@@ -25,6 +25,7 @@ struct ovl_lookup_data {
 	bool xwhiteouts;
 	bool stop;
 	bool last;
+	bool finalized;
 	char *redirect;
 	int metacopy;
 	/* Referring to last redirect xattr */
@@ -302,6 +303,8 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 			if (last_element)
 				d->opaque = true;
 			goto out;
+		} else if (last_element && val == 'z') {
+			d->finalized = true;
 		}
 	}
 	err = ovl_check_redirect(&path, d, prelen, post);
@@ -873,22 +876,28 @@ int ovl_path_next(int idx, struct dentry *dentry, struct path *path,
 {
 	struct ovl_entry *oe = OVL_E(dentry);
 	struct ovl_path *lowerstack = ovl_lowerstack(oe);
+	unsigned int lastmerged = ovl_lastmerged(oe);
 
-	BUG_ON(idx < 0);
+	if (WARN_ON(idx < 0))
+		return -1;
+
 	if (idx == 0) {
 		ovl_path_upper(dentry, path);
 		if (path->dentry) {
 			*layer = &OVL_FS(dentry->d_sb)->layers[0];
-			return ovl_numlower(oe) ? 1 : -1;
+			return lastmerged ? 1 : -1;
 		}
 		idx++;
 	}
-	BUG_ON(idx > ovl_numlower(oe));
+
+	if (WARN_ON(idx > lastmerged))
+		return -1;
+
 	path->dentry = lowerstack[idx - 1].dentry;
 	*layer = lowerstack[idx - 1].layer;
 	path->mnt = (*layer)->mnt;
 
-	return (idx < ovl_numlower(oe)) ? idx + 1 : -1;
+	return (idx < lastmerged) ? idx + 1 : -1;
 }
 
 /* Fix missing 'origin' xattr */
@@ -1039,8 +1048,10 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	struct dentry *origin = NULL;
 	struct dentry *index = NULL;
 	unsigned int ctr = 0;
+	unsigned int lastmerged = 0;
 	struct inode *inode = NULL;
 	bool upperopaque = false;
+	bool upperfinalized = false;
 	char *upperredirect = NULL;
 	struct dentry *this;
 	unsigned int i;
@@ -1054,6 +1065,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		.opaque = false,
 		.stop = false,
 		.last = ovl_redirect_follow(ofs) ? false : !ovl_numlower(poe),
+		.finalized = false,
 		.redirect = NULL,
 		.metacopy = 0,
 	};
@@ -1103,6 +1115,15 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 				poe = roe;
 		}
 		upperopaque = d.opaque;
+		upperfinalized = d.finalized;
+		/*
+		 * If the upper parent dir is finalized, then all the entries in
+		 * parent lowerdirs are covered by entries in parent upper dir,
+		 * so if we did not find name in parent upper dir, we are not
+		 * going to find it in the parent lower dirs either.
+		 */
+		if (!upperdentry && !ovl_lastmerged(poe))
+			d.stop = true;;
 	}
 
 	if (!d.stop && ovl_numlower(poe)) {
@@ -1125,8 +1146,17 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		if (err)
 			goto out_put;
 
-		if (!this)
+		if (!this) {
+			/*
+			 * All the entries in lowerdir under lastmerged index
+			 * are covered by entries in layers above them, so if
+			 * we did not find name in any of the layers above, we
+			 * are not going to find it in the layers below either.
+			 */
+			if (!upperdentry && !ctr && i >= ovl_lastmerged(poe))
+				break;
 			continue;
+		}
 
 		if ((uppermetacopy || d.metacopy) && !ofs->config.metacopy) {
 			dput(this);
@@ -1185,6 +1215,8 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			stack[ctr].dentry = this;
 			stack[ctr].layer = lower.layer;
 			ctr++;
+			if (d.is_dir && !d.finalized)
+				lastmerged++;
 		}
 
 		/*
@@ -1283,6 +1315,10 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			goto out_put;
 
 		ovl_stack_cpy(ovl_lowerstack(oe), stack, ctr);
+		/* Readdir merges up to and including the finalized directory */
+		oe->__lastmerged = lastmerged;
+		if (d.finalized && !upperfinalized)
+			oe->__lastmerged++;
 	}
 
 	if (upperopaque)

@@ -144,7 +144,7 @@ struct ovl_entry *ovl_alloc_entry(unsigned int numlower)
 	struct ovl_entry *oe = kzalloc(size, GFP_KERNEL);
 
 	if (oe)
-		oe->__numlower = numlower;
+		oe->__lastmerged = oe->__numlower = numlower;
 
 	return oe;
 }

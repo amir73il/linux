@@ -51,6 +51,8 @@ struct ovl_path {
 
 struct ovl_entry {
 	unsigned int __numlower;
+	/* Index of last stack entry for merged readdir (0 for pure upper) */
+	unsigned int __lastmerged;
 	struct ovl_path __lowerstack[];
 };
 
@@ -126,6 +128,11 @@ static inline bool ovl_should_sync(struct ovl_fs *ofs)
 static inline unsigned int ovl_numlower(struct ovl_entry *oe)
 {
 	return oe ? oe->__numlower : 0;
+}
+
+static inline unsigned int ovl_lastmerged(struct ovl_entry *oe)
+{
+	return oe ? oe->__lastmerged : 0;
 }
 
 static inline struct ovl_path *ovl_lowerstack(struct ovl_entry *oe)
