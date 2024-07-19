@@ -645,6 +645,11 @@ static inline int fsnotify_inode_watches_children(struct inode *inode)
 	return parent_mask & FS_EVENTS_POSS_ON_CHILD;
 }
 
+static inline bool fsnotify_inode_has_content_watches(struct inode *inode)
+{
+	return !!(inode->i_fsnotify_mask & FSNOTIFY_PRE_CONTENT_EVENTS);
+}
+
 /*
  * Update the dentry with a flag indicating the interest of its parent to receive
  * filesystem events when those events happens to this dentry->d_inode.
