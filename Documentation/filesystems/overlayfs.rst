@@ -742,6 +742,45 @@ controlled by the "uuid" mount option, which supports these values:
     mounted with "uuid=on".
 
 
+Durability and copy up
+----------------------
+
+The fsync(2) and fdatasync(2) system calls ensure that the metadata and
+data of a file, respectively, are safely written to the backing
+storage, which is expected to guarantee the existence of the information post
+system crash.
+
+Without the fdatasync(2) call, there is no guarantee that the observed
+data after a system crash will be either the old or the new data, but
+in practice, the observed data after crash is often the old or new data or a
+mix of both.
+
+When overlayfs file is modified for the first time, copy up will create
+a copy of the lower file and its parent directories in the upper layer.
+In case of a system crash, if fdatasync(2) was not called after the
+modification, the upper file could end up with no data at all (i.e.
+zeros), which would be an unusual outcome.  To avoid this experience,
+overlayfs calls fsync(2) on the upper file before completing the copy up with
+rename(2) to make the copy up "atomic".
+
+Depending on the backing filesystem (e.g. ubifs), fsync(2) before
+rename(2) may not be enough to provide the "atomic" copy up behavior
+and fsync(2) on the copied up parent directories is required as well.
+
+Overlayfs can be tuned to prefer performance or durability when storing
+to the underlying upper layer.  This is controlled by the "fsync" mount
+option, which supports these values:
+
+- "ordered": (default)
+    Call fsync(2) on upper file before completion of copy up.
+- "strict":
+    Call fsync(2) on upper file and directories before completion of copy up.
+- "volatile": [*]
+    Prefer performance over durability (see `Volatile mount`_)
+
+[*] The mount option "volatile" is an alias to "fsync=volatile".
+
+
 Volatile mount
 --------------
 
