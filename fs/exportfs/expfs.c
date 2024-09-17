@@ -382,14 +382,21 @@ int exportfs_encode_inode_fh(struct inode *inode, struct fid *fid,
 			     int *max_len, struct inode *parent, int flags)
 {
 	const struct export_operations *nop = inode->i_sb->s_export_op;
+	enum fid_type type;
 
 	if (!exportfs_can_encode_fh(nop, flags))
 		return -EOPNOTSUPP;
 
 	if (!nop && (flags & EXPORT_FH_FID))
-		return exportfs_encode_ino64_fid(inode, fid, max_len);
+		type = exportfs_encode_ino64_fid(inode, fid, max_len);
+	else
+		type = nop->encode_fh(inode, fid->raw, max_len, parent);
 
-	return nop->encode_fh(inode, fid->raw, max_len, parent);
+	if (WARN_ON_ONCE(FILEID_USER_FLAGS(type)))
+		return -EINVAL;
+
+	return type;
+
 }
 EXPORT_SYMBOL_GPL(exportfs_encode_inode_fh);
 
@@ -435,6 +442,9 @@ exportfs_decode_fh_raw(struct vfsmount *mnt, struct fid *fid, int fh_len,
 	struct dentry *result, *alias;
 	char nbuf[NAME_MAX+1];
 	int err;
+
+	if (WARN_ON_ONCE(FILEID_USER_FLAGS(fileid_type)))
+		return -EINVAL;
 
 	/*
 	 * Try to get any dentry for the given file handle from the filesystem.

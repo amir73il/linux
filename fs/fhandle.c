@@ -307,6 +307,10 @@ static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
 		retval = -EINVAL;
 		goto out_path;
 	}
+	if (!FILEID_USER_TYPE_IS_VALID(f_handle.handle_type)) {
+		retval = -EINVAL;
+		goto out_path;
+	}
 	handle = kmalloc(struct_size(handle, f_handle, f_handle.handle_bytes),
 			 GFP_KERNEL);
 	if (!handle) {
@@ -322,6 +326,8 @@ static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
 		goto out_handle;
 	}
 
+	/* Filesystem code should not be exposed to user flags */
+	handle->handle_type &= ~FILEID_USER_FLAGS_MASK;
 	retval = do_handle_to_path(handle, path, &ctx);
 
 out_handle:
