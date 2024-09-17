@@ -159,6 +159,8 @@ struct fid {
 #define EXPORT_FH_CONNECTABLE	0x1 /* Encode file handle with parent */
 #define EXPORT_FH_FID		0x2 /* File handle may be non-decodeable */
 #define EXPORT_FH_DIR_ONLY	0x4 /* Only decode file handle for a directory */
+/* Flags allowed in encoded handle_flags that is exported to user */
+#define EXPORT_FH_USER_FLAGS	(EXPORT_FH_CONNECTABLE | EXPORT_FH_DIR_ONLY)
 
 /**
  * struct export_operations - for nfsd to communicate with file systems
