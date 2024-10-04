@@ -91,8 +91,7 @@ static int ovl_change_flags(struct file *file, unsigned int flags)
 	return 0;
 }
 
-static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
-			       bool upper_meta)
+static struct file *ovl_real_file_meta(const struct file *file, bool upper_meta)
 {
 	struct dentry *dentry = file_dentry(file);
 	struct file *realfile = file->private_data;
@@ -100,22 +99,20 @@ static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
 	struct path realpath;
 	int err;
 
-	real->word = 0;
-
 	if (upper_meta) {
 		ovl_path_upper(dentry, &realpath);
 		if (!realpath.dentry)
-			return 0;
+			return NULL;
 	} else {
 		/* lazy lookup and verify of lowerdata */
 		err = ovl_verify_lowerdata(dentry);
 		if (err)
-			return err;
+			return ERR_PTR(err);
 
 		ovl_path_realdata(dentry, &realpath);
 	}
 	if (!realpath.dentry)
-		return -EIO;
+		return ERR_PTR(-EIO);
 
 stashed_upper:
 	if (upperfile && file_inode(upperfile) == d_inode(realpath.dentry))
@@ -130,11 +127,11 @@ stashed_upper:
 
 		/* Stashed upperfile has a mismatched inode */
 		if (unlikely(upperfile))
-			return -EIO;
+			return ERR_PTR(-EIO);
 
 		upperfile = ovl_open_realfile(file, &realpath);
 		if (IS_ERR(upperfile))
-			return PTR_ERR(upperfile);
+			return upperfile;
 
 		old = cmpxchg_release(backing_file_private_ptr(realfile), NULL,
 				      upperfile);
@@ -146,26 +143,31 @@ stashed_upper:
 		goto stashed_upper;
 	}
 
-	real->word = (unsigned long)realfile;
-
 	/* Did the flags change since open? */
-	if (unlikely((file->f_flags ^ realfile->f_flags) & ~OVL_OPEN_FLAGS))
-		return ovl_change_flags(realfile, file->f_flags);
+	if (unlikely((file->f_flags ^ realfile->f_flags) & ~OVL_OPEN_FLAGS)) {
+		err = ovl_change_flags(realfile, file->f_flags);
+		if (err)
+			return ERR_PTR(err);
+	}
 
-	return 0;
+	return realfile;
+}
+
+static struct file *ovl_real_file(const struct file *file)
+{
+	if (d_is_dir(file_dentry(file)))
+		return ovl_dir_real_file(file, false);
+
+	return ovl_real_file_meta(file, false);
 }
 
 static int ovl_real_fdget(const struct file *file, struct fd *real)
 {
-	if (d_is_dir(file_dentry(file))) {
-		struct file *f = ovl_dir_real_file(file, false);
-		if (IS_ERR(f))
-			return PTR_ERR(f);
-		real->word = (unsigned long)f;
-		return 0;
-	}
-
-	return ovl_real_fdget_meta(file, real, false);
+	struct file *f = ovl_real_file(file, false);
+	if (IS_ERR(f))
+		return PTR_ERR(f);
+	real->word = (unsigned long)f;
+	return 0;
 }
 
 static int ovl_open(struct inode *inode, struct file *file)
@@ -422,7 +424,7 @@ out_unlock:
 
 static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	struct fd real;
+	struct file *realfile;
 	const struct cred *old_cred;
 	int ret;
 
@@ -430,18 +432,16 @@ static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	if (ret <= 0)
 		return ret;
 
-	ret = ovl_real_fdget_meta(file, &real, !datasync);
-	if (ret || fd_empty(real))
-		return ret;
+	realfile = ovl_real_file_meta(file, !datasync);
+	if (IS_ERR_OR_NULL(realfile))
+		return PTR_ERR(realfile);
 
 	/* Don't sync lower file for fear of receiving EROFS error */
-	if (file_inode(fd_file(real)) == ovl_inode_upper(file_inode(file))) {
+	if (file_inode(realfile) == ovl_inode_upper(file_inode(file))) {
 		old_cred = ovl_override_creds(file_inode(file)->i_sb);
-		ret = vfs_fsync_range(fd_file(real), start, end, datasync);
+		ret = vfs_fsync_range(realfile, start, end, datasync);
 		revert_creds(old_cred);
 	}
-
-	fdput(real);
 
 	return ret;
 }
