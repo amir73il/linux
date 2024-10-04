@@ -89,32 +89,19 @@ static int ovl_change_flags(struct file *file, unsigned int flags)
 	return 0;
 }
 
-static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
-			       bool allow_meta)
+static int ovl_real_fdget_path(const struct file *file, struct fd *real,
+			       struct path *realpath)
 {
-	struct dentry *dentry = file_dentry(file);
 	struct file *realfile = file->private_data;
-	struct path realpath;
-	int err;
 
 	real->word = (unsigned long)realfile;
 
-	if (allow_meta) {
-		ovl_path_real(dentry, &realpath);
-	} else {
-		/* lazy lookup and verify of lowerdata */
-		err = ovl_verify_lowerdata(dentry);
-		if (err)
-			return err;
-
-		ovl_path_realdata(dentry, &realpath);
-	}
-	if (!realpath.dentry)
+	if (WARN_ON_ONCE(!realpath->dentry))
 		return -EIO;
 
 	/* Has it been copied up since we'd opened it? */
-	if (unlikely(file_inode(realfile) != d_inode(realpath.dentry))) {
-		struct file *f = ovl_open_realfile(file, &realpath);
+	if (unlikely(file_inode(realfile) != d_inode(realpath->dentry))) {
+		struct file *f = ovl_open_realfile(file, realpath);
 		if (IS_ERR(f))
 			return PTR_ERR(f);
 		real->word = (unsigned long)f | FDPUT_FPUT;
@@ -130,7 +117,11 @@ static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
 
 static int ovl_real_fdget(const struct file *file, struct fd *real)
 {
-	if (d_is_dir(file_dentry(file))) {
+	struct dentry *dentry = file_dentry(file);
+	struct path realpath;
+	int err;
+
+	if (d_is_dir(dentry)) {
 		struct file *f = ovl_dir_real_file(file, false);
 		if (IS_ERR(f))
 			return PTR_ERR(f);
@@ -138,7 +129,33 @@ static int ovl_real_fdget(const struct file *file, struct fd *real)
 		return 0;
 	}
 
-	return ovl_real_fdget_meta(file, real, false);
+	/* lazy lookup and verify of lowerdata */
+	err = ovl_verify_lowerdata(dentry);
+	if (err)
+		return err;
+
+	ovl_path_realdata(dentry, &realpath);
+
+	return ovl_real_fdget_path(file, real, &realpath);
+}
+
+static int ovl_upper_fdget(const struct file *file, struct fd *real, bool data)
+{
+	struct dentry *dentry = file_dentry(file);
+	struct path realpath;
+	enum ovl_path_type type;
+
+	if (data)
+		type = ovl_path_realdata(dentry, &realpath);
+	else
+		type = ovl_path_real(dentry, &realpath);
+
+	real->word = 0;
+	/* Not interested in lower nor in upper meta if data was requested */
+	if (!OVL_TYPE_UPPER(type) || (data && OVL_TYPE_MERGE(type)))
+		return 0;
+
+	return ovl_real_fdget_path(file, real, &realpath);
 }
 
 static int ovl_open(struct inode *inode, struct file *file)
@@ -394,8 +411,8 @@ static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	if (ret <= 0)
 		return ret;
 
-	ret = ovl_real_fdget_meta(file, &real, !datasync);
-	if (ret)
+	ret = ovl_upper_fdget(file, &real, datasync);
+	if (ret || fd_empty(real))
 		return ret;
 
 	/* Don't sync lower file for fear of receiving EROFS error */
