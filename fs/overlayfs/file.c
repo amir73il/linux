@@ -90,17 +90,19 @@ static int ovl_change_flags(struct file *file, unsigned int flags)
 }
 
 static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
-			       bool allow_meta)
+			       bool upper_meta)
 {
 	struct dentry *dentry = file_dentry(file);
 	struct file *realfile = file->private_data;
 	struct path realpath;
 	int err;
 
-	real->word = (unsigned long)realfile;
+	real->word = 0;
 
-	if (allow_meta) {
-		ovl_path_real(dentry, &realpath);
+	if (upper_meta) {
+		ovl_path_upper(dentry, &realpath);
+		if (!realpath.dentry)
+			return 0;
 	} else {
 		/* lazy lookup and verify of lowerdata */
 		err = ovl_verify_lowerdata(dentry);
@@ -395,7 +397,7 @@ static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 		return ret;
 
 	ret = ovl_real_fdget_meta(file, &real, !datasync);
-	if (ret)
+	if (ret || fd_empty(real))
 		return ret;
 
 	/* Don't sync lower file for fear of receiving EROFS error */
