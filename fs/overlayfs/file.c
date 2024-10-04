@@ -14,6 +14,8 @@
 #include <linux/backing-file.h>
 #include "overlayfs.h"
 
+#include "../internal.h"	/* for backing_file_private{,_ptr}() */
+
 static char ovl_whatisit(struct inode *inode, struct inode *realinode)
 {
 	if (realinode != ovl_inode_upper(inode))
@@ -94,6 +96,7 @@ static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
 {
 	struct dentry *dentry = file_dentry(file);
 	struct file *realfile = file->private_data;
+	struct file *upperfile = backing_file_private(realfile);
 	struct path realpath;
 	int err;
 
@@ -114,14 +117,36 @@ static int ovl_real_fdget_meta(const struct file *file, struct fd *real,
 	if (!realpath.dentry)
 		return -EIO;
 
-	/* Has it been copied up since we'd opened it? */
+stashed_upper:
+	if (upperfile && file_inode(upperfile) == d_inode(realpath.dentry))
+		realfile = upperfile;
+
+	/*
+	 * If realfile is lower and has been copied up since we'd opened it,
+	 * open the real upper file and stash it in backing_file_private().
+	 */
 	if (unlikely(file_inode(realfile) != d_inode(realpath.dentry))) {
-		struct file *f = ovl_open_realfile(file, &realpath);
-		if (IS_ERR(f))
-			return PTR_ERR(f);
-		real->word = (unsigned long)f | FDPUT_FPUT;
-		return 0;
+		struct file *old;
+
+		/* Stashed upperfile has a mismatched inode */
+		if (unlikely(upperfile))
+			return -EIO;
+
+		upperfile = ovl_open_realfile(file, &realpath);
+		if (IS_ERR(upperfile))
+			return PTR_ERR(upperfile);
+
+		old = cmpxchg_release(backing_file_private_ptr(realfile), NULL,
+				      upperfile);
+		if (old) {
+			fput(upperfile);
+			upperfile = old;
+		}
+
+		goto stashed_upper;
 	}
+
+	real->word = (unsigned long)realfile;
 
 	/* Did the flags change since open? */
 	if (unlikely((file->f_flags ^ realfile->f_flags) & ~OVL_OPEN_FLAGS))
@@ -177,7 +202,16 @@ static int ovl_open(struct inode *inode, struct file *file)
 
 static int ovl_release(struct inode *inode, struct file *file)
 {
-	fput(file->private_data);
+	struct file *realfile = file->private_data;
+	struct file *upperfile = backing_file_private(realfile);
+
+	fput(realfile);
+	/*
+	 * If realfile is lower and file was copied up and accessed, we need
+	 * to put reference also on the stashed real upperfile.
+	 */
+	if (upperfile)
+		fput(upperfile);
 
 	return 0;
 }
