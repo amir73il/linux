@@ -47,6 +47,7 @@ static struct percpu_counter nr_files __cacheline_aligned_in_smp;
 struct backing_file {
 	struct file file;
 	struct path user_path;
+	void *private_data;
 };
 
 static inline struct backing_file *backing_file(struct file *f)
@@ -59,6 +60,12 @@ struct path *backing_file_user_path(struct file *f)
 	return &backing_file(f)->user_path;
 }
 EXPORT_SYMBOL_GPL(backing_file_user_path);
+
+void **backing_file_private_ptr(struct file *f)
+{
+	return &backing_file(f)->private_data;
+}
+EXPORT_SYMBOL_GPL(backing_file_private_ptr);
 
 static inline void file_free(struct file *f)
 {

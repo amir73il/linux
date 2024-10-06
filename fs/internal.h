@@ -100,6 +100,12 @@ extern void chroot_fs_refs(const struct path *, const struct path *);
 struct file *alloc_empty_file(int flags, const struct cred *cred);
 struct file *alloc_empty_file_noaccount(int flags, const struct cred *cred);
 struct file *alloc_empty_backing_file(int flags, const struct cred *cred);
+void **backing_file_private_ptr(struct file *f);
+
+static inline void *backing_file_private(struct file *f)
+{
+	return READ_ONCE(*backing_file_private_ptr(f));
+}
 
 static inline void file_put_write_access(struct file *file)
 {

@@ -14,6 +14,8 @@
 #include <linux/backing-file.h>
 #include "overlayfs.h"
 
+#include "../internal.h"	/* for backing_file_private{,_ptr}() */
+
 static char ovl_whatisit(struct inode *inode, struct inode *realinode)
 {
 	if (realinode != ovl_inode_upper(inode))
@@ -89,29 +91,70 @@ static int ovl_change_flags(struct file *file, unsigned int flags)
 	return 0;
 }
 
+static bool ovl_is_real_file(const struct file *realfile,
+			     const struct path *realpath)
+{
+	return file_inode(realfile) == d_inode(realpath->dentry);
+}
+
 static int ovl_real_fdget_path(const struct file *file, struct fd *real,
 			       struct path *realpath)
 {
 	struct file *realfile = file->private_data;
+	struct file *upperfile = backing_file_private(realfile);
 
-	real->word = (unsigned long)realfile;
+	real->word = 0;
 
 	if (WARN_ON_ONCE(!realpath->dentry))
 		return -EIO;
 
-	/* Has it been copied up since we'd opened it? */
-	if (unlikely(file_inode(realfile) != d_inode(realpath->dentry))) {
-		struct file *f = ovl_open_realfile(file, realpath);
-		if (IS_ERR(f))
-			return PTR_ERR(f);
-		real->word = (unsigned long)f | FDPUT_FPUT;
-		return 0;
+	/*
+	 * Usually, if we operated on a stashed upperfile once, all following
+	 * operations will operate on the stashed upperfile, but there is one
+	 * exception - ovl_fsync(datasync = false) can populate the stashed
+	 * upperfile to perform fsync on upper metadata inode.  In this case,
+	 * following read/write operations will not use the stashed upperfile.
+	 */
+	if (upperfile && likely(ovl_is_real_file(upperfile, realpath))) {
+		realfile = upperfile;
+		goto checkflags;
 	}
 
+	/*
+	 * If realfile is lower and has been copied up since we'd opened it,
+	 * open the real upper file and stash it in backing_file_private().
+	 */
+	if (unlikely(!ovl_is_real_file(realfile, realpath))) {
+		struct file *old;
+
+		/* Either stashed realfile or upperfile must match realinode */
+		if (WARN_ON_ONCE(upperfile))
+			return -EIO;
+
+		upperfile = ovl_open_realfile(file, realpath);
+		if (IS_ERR(upperfile))
+			return PTR_ERR(upperfile);
+
+		old = cmpxchg_release(backing_file_private_ptr(realfile), NULL,
+				      upperfile);
+		if (old) {
+			fput(upperfile);
+			upperfile = old;
+		}
+
+		/* Stashed upperfile that won the race must match realinode */
+		if (WARN_ON_ONCE(!ovl_is_real_file(upperfile, realpath)))
+			return -EIO;
+
+		realfile = upperfile;
+	}
+
+checkflags:
 	/* Did the flags change since open? */
 	if (unlikely((file->f_flags ^ realfile->f_flags) & ~OVL_OPEN_FLAGS))
 		return ovl_change_flags(realfile, file->f_flags);
 
+	real->word = (unsigned long)realfile;
 	return 0;
 }
 
@@ -192,7 +235,16 @@ static int ovl_open(struct inode *inode, struct file *file)
 
 static int ovl_release(struct inode *inode, struct file *file)
 {
-	fput(file->private_data);
+	struct file *realfile = file->private_data;
+	struct file *upperfile = backing_file_private(realfile);
+
+	fput(realfile);
+	/*
+	 * If realfile is lower and file was copied up and accessed, we need
+	 * to put reference also on the stashed real upperfile.
+	 */
+	if (upperfile)
+		fput(upperfile);
 
 	return 0;
 }
