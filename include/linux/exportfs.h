@@ -171,7 +171,7 @@ struct fid {
 /* Flags supported in encoded handle_type that is exported to user */
 #define FILEID_IS_CONNECTABLE	0x10000
 #define FILEID_IS_DIR		0x40000
-#define FILEID_VALID_USER_FLAGS	(0)
+#define FILEID_VALID_USER_FLAGS	(FILEID_IS_CONNECTABLE | FILEID_IS_DIR)
 
 #define FILEID_USER_TYPE_IS_VALID(type) \
 	(!(FILEID_USER_FLAGS(type) & ~FILEID_VALID_USER_FLAGS))
