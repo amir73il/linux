@@ -20,9 +20,18 @@ static void fuse_file_accessed(struct file *file)
 
 static void fuse_file_modified(struct file *file)
 {
+	struct fuse_file *ff = file->private_data;
+	struct file *backing_file = fuse_file_passthrough(ff);
 	struct inode *inode = file_inode(file);
+	loff_t size = i_size_read(file_inode(backing_file));
 
-	fuse_invalidate_attr_mask(inode, FUSE_STATX_MODSIZE);
+	/*
+	 * Most of the time we will be holding inode_lock(), but even if we are
+	 * called from async io completion without inode_lock(), the last write
+	 * will update fuse inode size to the size of the backing inode, even if
+	 * the last write was not the extending write.
+	 */
+	fuse_write_update_attr(inode, size, size);
 }
 
 ssize_t fuse_passthrough_read_iter(struct kiocb *iocb, struct iov_iter *iter)
