@@ -302,6 +302,8 @@ static struct dentry *ceph_fh_to_dentry(struct super_block *sb,
 
 	if (fh_type == FILEID_BTRFS_WITH_PARENT) {
 		struct ceph_nfs_snapfh *sfh = (void *)fid->raw;
+		if (fh_len < sizeof(*sfh) / 4)
+			return NULL;
 		return __snapfh_to_dentry(sb, sfh, false);
 	}
 
@@ -422,6 +424,8 @@ static struct dentry *ceph_fh_to_parent(struct super_block *sb,
 
 	if (fh_type == FILEID_BTRFS_WITH_PARENT) {
 		struct ceph_nfs_snapfh *sfh = (void *)fid->raw;
+		if (fh_len < sizeof(*sfh) / 4)
+			return NULL;
 		return __snapfh_to_dentry(sb, sfh, true);
 	}
 
