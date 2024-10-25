@@ -132,9 +132,16 @@ static inline int fsnotify_file(struct file *file, __u32 mask)
 }
 
 #ifdef CONFIG_FANOTIFY_ACCESS_PERMISSIONS
-static inline int fsnotify_pre_content(struct file *file)
+static inline int fsnotify_pre_content(const struct file *file,
+				       const loff_t *ppos, size_t count)
 {
 	struct inode *inode = file_inode(file);
+	struct file_range range;
+	const void *data;
+	int data_type;
+
+	if (file->f_mode & FMODE_NONOTIFY)
+		return 0;
 
 	/*
 	 * Pre-content events are only reported for regular files and dirs
@@ -146,7 +153,20 @@ static inline int fsnotify_pre_content(struct file *file)
 					       FSNOTIFY_PRIO_PRE_CONTENT))
 		return 0;
 
-	return fsnotify_file(file, FS_PRE_ACCESS);
+	/* Report page aligned range only when pos is known */
+	if (ppos) {
+		range.path = &file->f_path;
+		range.pos = PAGE_ALIGN_DOWN(*ppos);
+		range.count = PAGE_ALIGN(*ppos + count) - range.pos;
+		data = &range;
+		data_type = FSNOTIFY_EVENT_FILE_RANGE;
+	} else {
+		data = &file->f_path;
+		data_type = FSNOTIFY_EVENT_PATH;
+	}
+
+	return fsnotify_parent(file->f_path.dentry, FS_PRE_ACCESS,
+			       data, data_type);
 }
 
 /*
@@ -166,7 +186,7 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 	 * read()/write and other types of access generate pre-content events.
 	 */
 	if (perm_mask & (MAY_READ | MAY_WRITE | MAY_ACCESS)) {
-		int ret = fsnotify_pre_content(file);
+		int ret = fsnotify_pre_content(file, ppos, count);
 
 		if (ret)
 			return ret;
@@ -183,7 +203,7 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 }
 
 /*
- * fsnotify_file_perm - permission hook before file access
+ * fsnotify_file_perm - permission hook before file access (unknown range)
  */
 static inline int fsnotify_file_perm(struct file *file, int perm_mask)
 {
