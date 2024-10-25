@@ -1654,24 +1654,25 @@ static int fuse_notify_store(struct fuse_conn *fc, unsigned int size,
 
 	num = outarg.size;
 	while (num) {
+		struct folio *folio;
 		struct page *page;
 		unsigned int this_num;
 
-		err = -ENOMEM;
-		page = find_or_create_page(mapping, index,
-					   mapping_gfp_mask(mapping));
-		if (!page)
+		folio = filemap_grab_folio(mapping, index);
+		err = PTR_ERR(folio);
+		if (IS_ERR(folio))
 			goto out_iput;
 
-		this_num = min_t(unsigned, num, PAGE_SIZE - offset);
+		page = &folio->page;
+		this_num = min_t(unsigned, num, folio_size(folio) - offset);
 		err = fuse_copy_page(cs, &page, offset, this_num, 0);
-		if (!PageUptodate(page) && !err && offset == 0 &&
-		    (this_num == PAGE_SIZE || file_size == end)) {
-			zero_user_segment(page, this_num, PAGE_SIZE);
-			SetPageUptodate(page);
+		if (!folio_test_uptodate(folio) && !err && offset == 0 &&
+		    (this_num == folio_size(folio) || file_size == end)) {
+			folio_zero_segment(folio, this_num, folio_size(folio));
+			folio_mark_uptodate(folio);
 		}
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 
 		if (err)
 			goto out_iput;
@@ -1756,15 +1757,15 @@ static int fuse_retrieve(struct fuse_mount *fm, struct inode *inode,
 	index = outarg->offset >> PAGE_SHIFT;
 
 	while (num && ap->num_pages < num_pages) {
-		struct page *page;
+		struct folio *folio;
 		unsigned int this_num;
 
-		page = find_get_page(mapping, index);
-		if (!page)
+		folio = filemap_get_folio(mapping, index);
+		if (IS_ERR(folio))
 			break;
 
 		this_num = min_t(unsigned, num, PAGE_SIZE - offset);
-		ap->pages[ap->num_pages] = page;
+		ap->pages[ap->num_pages] = &folio->page;
 		ap->descs[ap->num_pages].offset = offset;
 		ap->descs[ap->num_pages].length = this_num;
 		ap->num_pages++;
