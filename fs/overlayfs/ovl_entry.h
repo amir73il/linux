@@ -14,7 +14,7 @@ struct ovl_config {
 	bool default_permissions;
 	int redirect_mode;
 	int verity_mode;
-	bool index;
+	int index;
 	int uuid;
 	bool nfs_export;
 	int xino;

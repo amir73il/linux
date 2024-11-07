@@ -47,7 +47,8 @@ static struct timespec64 ovl_get_indexdir_btime(struct ovl_fs *ofs)
 		.dentry = ofs->indexdir,
 	};
 
-	if (!ofs->indexdir)
+	/* With index=all record also changes in dirs created after index dir */
+	if (!ofs->indexdir || ofs->config.index == OVL_INDEX_ALL)
 	       return btime;
 
 	return ovl_get_btime(&indexpath);

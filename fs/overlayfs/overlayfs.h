@@ -101,6 +101,12 @@ enum {
 };
 
 enum {
+	OVL_INDEX_OFF,
+	OVL_INDEX_ON,
+	OVL_INDEX_ALL,
+};
+
+enum {
 	OVL_WATCH_OFF,
 	OVL_WATCH_MNT,
 	OVL_WATCH_SB,

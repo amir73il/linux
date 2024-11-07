@@ -69,6 +69,22 @@ static const struct constant_table ovl_parameter_bool[] = {
 	{}
 };
 
+static const struct constant_table ovl_parameter_index[] = {
+	{ "off",	OVL_INDEX_OFF	},
+	{ "on",		OVL_INDEX_ON	},
+	{ "all",	OVL_INDEX_ALL	},
+};
+
+static const char *ovl_index_mode(struct ovl_config *config)
+{
+	return ovl_parameter_index[config->index].name;
+}
+
+static int ovl_index_mode_def(void)
+{
+	return ovl_index_def ? OVL_INDEX_ON : OVL_INDEX_OFF;
+}
+
 static const struct constant_table ovl_parameter_watch[] = {
 	{ "off",	OVL_WATCH_OFF	},
 	{ "mnt",	OVL_WATCH_MNT	},
@@ -165,7 +181,7 @@ const struct fs_parameter_spec ovl_parameter_spec[] = {
 	fsparam_string("workdir",           Opt_workdir),
 	fsparam_flag("default_permissions", Opt_default_permissions),
 	fsparam_enum("redirect_dir",        Opt_redirect_dir, ovl_parameter_redirect_dir),
-	fsparam_enum("index",               Opt_index, ovl_parameter_bool),
+	fsparam_enum("index",               Opt_index, ovl_parameter_index),
 	fsparam_flag("watch",               Opt_watch),
 	fsparam_enum("watch",               Opt_watch_type, ovl_parameter_watch),
 	fsparam_enum("uuid",                Opt_uuid, ovl_parameter_uuid),
@@ -726,7 +742,7 @@ int ovl_init_fs_context(struct fs_context *fc)
 		goto out_err;
 
 	ofs->config.redirect_mode	= ovl_redirect_mode_def();
-	ofs->config.index		= ovl_index_def;
+	ofs->config.index		= ovl_index_mode_def();
 	ofs->config.watch		= ovl_watch_def();
 	ofs->config.uuid		= ovl_uuid_def();
 	ofs->config.nfs_export		= ovl_nfs_export_def;
@@ -1023,8 +1039,8 @@ int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 	if (ofs->config.redirect_mode != ovl_redirect_mode_def())
 		seq_printf(m, ",redirect_dir=%s",
 			   ovl_redirect_mode(&ofs->config));
-	if (ofs->config.index != ovl_index_def)
-		seq_printf(m, ",index=%s", ofs->config.index ? "on" : "off");
+	if (ofs->config.index != ovl_index_mode_def())
+		seq_printf(m, ",index=%s", ovl_index_mode(&ofs->config));
 	if (ofs->config.watch)
 		seq_printf(m, ",watch=%s", ovl_watch_mode(&ofs->config));
 	if (ofs->config.uuid != ovl_uuid_def())
