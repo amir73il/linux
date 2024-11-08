@@ -15,7 +15,12 @@
 #include "../mount.h"
 #include "overlayfs.h"
 
-#define OVL_FSNOTIFY_MASK (FS_MODIFY_INTENT | FS_NAME_INTENT | FS_MOVE_INTENT)
+/* Events to watch until dir is indexed */
+#define OVL_FSNOTIFY_ONESHOT_MASK (FS_MODIFY_INTENT | FS_NAME_INTENT)
+/* Events to watch until dir is deleted */
+#define OVL_FSNOTIFY_MULTISHOT_MASK (FS_MOVE_INTENT | FS_DELETE)
+#define OVL_FSNOTIFY_MASK \
+	(OVL_FSNOTIFY_ONESHOT_MASK | OVL_FSNOTIFY_MULTISHOT_MASK)
 
 static struct kmem_cache *ovl_mark_cachep;
 
@@ -351,6 +356,46 @@ fail:
 }
 
 /*
+ * Remove index if needed before lower dir delete.
+ *
+ * Called without any filesystem locks held.
+ */
+static int ovl_handle_want_delete(struct super_block *sb, struct dentry *lowerdir)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+	struct inode *dir = d_inode(ofs->indexdir);
+	const struct cred *old_cred;
+	struct dentry *index;
+	int err;
+
+	WARN_ON_ONCE(!(lowerdir->d_inode->i_flags & S_DEAD));
+
+	err = mnt_want_write(ovl_upper_mnt(ofs));
+	if (err)
+		return err;
+
+	old_cred = ovl_override_creds(sb);
+	inode_lock_nested(dir, I_MUTEX_PARENT);
+
+	index = ovl_lookup_lowerdir_index_locked(ofs, lowerdir);
+	if (IS_ERR_OR_NULL(index)) {
+		err = PTR_ERR(index);
+		index = NULL;
+	} else if (d_is_positive(index)) {
+		err = ovl_cleanup(ofs, dir, index);
+		pr_debug("%s: remove index of %pd2 %s\n", __func__, lowerdir,
+			 !err ? "" : "failed");
+	}
+	dput(index);
+
+	inode_unlock(dir);
+	revert_creds(old_cred);
+	mnt_drop_write(ovl_upper_mnt(ofs));
+
+	return err;
+}
+
+/*
  * Record change in index if needed before lower modification.
  *
  * Called without any filesystem locks held.
@@ -517,6 +562,10 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 		return 0;
 	smp_rmb();
 
+	/* We only care about cleaning index for deleted dirs */
+	if (mask & FS_DELETE && !d_is_dir(dentry))
+		return 0;
+
 	lowerdir = d_is_dir(dentry) ? dget(dentry) : dget_parent(dentry);
 	/* Not interested in events from non-dir with no parent */
 	if (unlikely(!d_is_dir(lowerdir)))
@@ -540,6 +589,12 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 		goto out;
 	}
 
+	if (mask & FS_DELETE) {
+		/* Best effort - remove index before delete of lower dir */
+		(void)ovl_handle_want_delete(sb, lowerdir);
+		goto out;
+	}
+
 	ret = ovl_handle_want_write(sb, mask, lowerdir);
 	if (ret < 0)
 		goto out;
@@ -548,7 +603,7 @@ static int ovl_handle_event(struct fsnotify_group *group, u32 mask,
 		/* Whiteout index before move of lower subdir */
 		ret = ovl_handle_want_move(sb, lowerdir, name);
 	} else {
-		u32 ignored_mask = OVL_FSNOTIFY_MASK & ~FS_MOVE_INTENT;
+		u32 ignored_mask = OVL_FSNOTIFY_ONESHOT_MASK;
 
 		/*
 		 * Add ignored mark for indexed lowerdir.
@@ -564,10 +619,9 @@ out:
 }
 
 static int ovl_add_sb_mark(struct fsnotify_group *group,
-			   struct vfsmount *lowermnt, bool watch_mnt)
+			   struct vfsmount *lowermnt, u32 mask, bool watch_mnt)
 {
 	struct ovl_mark *ovm;
-	u32 mask = OVL_FSNOTIFY_MASK;
 	void *obj;
 	int type, err;
 
@@ -589,6 +643,15 @@ static int ovl_add_sb_mark(struct fsnotify_group *group,
 
 	pr_debug("%s: %pd2 group=%p mark=%p type=%d mask=%x\n", __func__,
 		 lowermnt->mnt_root, group, ovm, type, mask);
+
+	/*
+	 * FS_DELETE event has no path info, so it cannot be filtered by mnt.
+	 * We add a mark on sb to get FS_DELETE events on all sb, because we
+	 * need to remove index entry of deleted dir no matter how it was
+	 * deleted.
+	 */
+	if (!err && watch_mnt)
+		err = ovl_add_sb_mark(group, lowermnt, FS_DELETE, false);
 
 	return err;
 }
@@ -636,8 +699,11 @@ int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs, struct path *lower
 		 __func__, lowerpath->dentry, ofs->config.watch,
 		 !!ofs->indexdir, ofs->indexdir_btime.tv_sec);
 
+	/* Best effort - avoid recursive events on index dir changes */
+	(void)ovl_add_ignored_mark(group, ofs->indexdir, OVL_FSNOTIFY_MASK);
+
 	/* Create a mark on lower sb/mnt */
-	err = ovl_add_sb_mark(group, lowerpath->mnt,
+	err = ovl_add_sb_mark(group, lowerpath->mnt, OVL_FSNOTIFY_MASK,
 			      ofs->config.watch == OVL_WATCH_MNT);
 	if (err)
 		pr_err("failed to add fsnotify sb mark (err=%i)\n", err);

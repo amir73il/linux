@@ -311,8 +311,9 @@ static inline void fsnotify_delete(struct inode *dir, struct inode *inode,
 	if (S_ISDIR(inode->i_mode))
 		mask |= FS_ISDIR;
 
-	fsnotify_name(mask, inode, FSNOTIFY_EVENT_INODE, dir, &dentry->d_name,
-		      0);
+	/* XXX: deliver delete event with dentry for ovl snapshot */
+	fsnotify_name(mask, dentry, FSNOTIFY_EVENT_DENTRY,
+		      dir, &dentry->d_name, 0);
 }
 
 /**
@@ -327,8 +328,9 @@ static inline void d_delete_notify(struct inode *dir, struct dentry *dentry)
 	struct inode *inode = d_inode(dentry);
 
 	ihold(inode);
-	d_delete(dentry);
 	fsnotify_delete(dir, inode, dentry);
+	/* XXX: deliver delete event before unhashing dentry for ovl snapshot */
+	d_delete(dentry);
 	iput(inode);
 }
 
