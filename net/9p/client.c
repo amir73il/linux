@@ -1527,13 +1527,15 @@ p9_client_read(struct p9_fid *fid, u64 offset, struct iov_iter *to, int *err)
 	*err = 0;
 
 	while (iov_iter_count(to)) {
+		struct iov_iter tmp = *to;
 		int count;
 
-		count = p9_client_read_once(fid, offset, to, err);
+		count = p9_client_read_once(fid, offset, &tmp, err);
 		if (!count || *err)
 			break;
 		offset += count;
 		total += count;
+		iov_iter_advance(to, count);
 	}
 	return total;
 }
@@ -1575,16 +1577,12 @@ p9_client_read_once(struct p9_fid *fid, u64 offset, struct iov_iter *to,
 	}
 	if (IS_ERR(req)) {
 		*err = PTR_ERR(req);
-		if (!non_zc)
-			iov_iter_revert(to, count - iov_iter_count(to));
 		return 0;
 	}
 
 	*err = p9pdu_readf(&req->rc, clnt->proto_version,
 			   "D", &received, &dataptr);
 	if (*err) {
-		if (!non_zc)
-			iov_iter_revert(to, count - iov_iter_count(to));
 		trace_9p_protocol_dump(clnt, &req->rc);
 		p9_req_put(clnt, req);
 		return 0;
@@ -1604,8 +1602,6 @@ p9_client_read_once(struct p9_fid *fid, u64 offset, struct iov_iter *to,
 			p9_req_put(clnt, req);
 			return n;
 		}
-	} else {
-		iov_iter_revert(to, count - received - iov_iter_count(to));
 	}
 	p9_req_put(clnt, req);
 	return received;
