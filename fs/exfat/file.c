@@ -584,6 +584,12 @@ static ssize_t exfat_file_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 	if (ret < 0)
 		goto unlock;
 
+	if ((iocb->ki_flags & IOCB_DIRECT) &&
+	    EXFAT_BLK_OFFSET(pos | ret, inode->i_sb)) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+
 	if (pos > valid_size) {
 		ret = exfat_extend_valid_size(file, pos);
 		if (ret < 0 && ret != -ENOSPC) {
