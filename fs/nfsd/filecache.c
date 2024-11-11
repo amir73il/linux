@@ -1050,7 +1050,7 @@ retry:
 		 * the last one however, since we should hold another.
 		 */
 		if (nfsd_file_lru_remove(nf))
-			WARN_ON_ONCE(refcount_dec_and_test(&nf->nf_ref));
+			refcount_dec(&nf->nf_ref);
 		goto wait_for_construction;
 	}
 
@@ -1123,8 +1123,7 @@ open_file:
 			status = nfs_ok;
 			trace_nfsd_file_opened(nf, status);
 		} else {
-			ret = nfsd_open_verified(rqstp, fhp, may_flags,
-						 &nf->nf_file);
+			ret = nfsd_open_verified(fhp, may_flags, &nf->nf_file);
 			if (ret == -EOPENSTALE && stale_retry) {
 				stale_retry = false;
 				nfsd_file_unhash(nf);
