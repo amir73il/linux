@@ -25,9 +25,8 @@
 
 static void bch2_btree_node_header_to_text(struct printbuf *out, struct btree_node *bn)
 {
-	prt_printf(out, "btree=%s l=%u seq %llux\n",
-		   bch2_btree_id_str(BTREE_NODE_ID(bn)),
-		   (unsigned) BTREE_NODE_LEVEL(bn), bn->keys.seq);
+	bch2_btree_id_level_to_text(out, BTREE_NODE_ID(bn), BTREE_NODE_LEVEL(bn));
+	prt_printf(out, " seq %llux\n", bn->keys.seq);
 	prt_str(out, "min: ");
 	bch2_bpos_to_text(out, bn->min_key);
 	prt_newline(out);
@@ -733,11 +732,8 @@ static int validate_bset(struct bch_fs *c, struct bch_dev *ca,
 			 c, ca, b, i, NULL,
 			 bset_past_end_of_btree_node,
 			 "bset past end of btree node (offset %u len %u but written %zu)",
-			 offset, sectors, ptr_written ?: btree_sectors(c))) {
+			 offset, sectors, ptr_written ?: btree_sectors(c)))
 		i->u64s = 0;
-		ret = 0;
-		goto out;
-	}
 
 	btree_err_on(offset && !i->u64s,
 		     -BCH_ERR_btree_node_read_err_fixable,
@@ -829,7 +825,6 @@ static int validate_bset(struct bch_fs *c, struct bch_dev *ca,
 			       BSET_BIG_ENDIAN(i), write,
 			       &bn->format);
 	}
-out:
 fsck_err:
 	printbuf_exit(&buf2);
 	printbuf_exit(&buf1);
@@ -1347,9 +1342,11 @@ start:
 	    !btree_node_read_error(b) &&
 	    c->curr_recovery_pass != BCH_RECOVERY_PASS_scan_for_btree_nodes) {
 		printbuf_reset(&buf);
-		bch2_bpos_to_text(&buf, b->key.k.p);
-		bch_err_ratelimited(c, "%s: rewriting btree node at btree=%s level=%u %s due to error",
-			 __func__, bch2_btree_id_str(b->c.btree_id), b->c.level, buf.buf);
+		bch2_btree_id_level_to_text(&buf, b->c.btree_id, b->c.level);
+		prt_str(&buf, " ");
+		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
+		bch_err_ratelimited(c, "%s: rewriting btree node at due to error\n  %s",
+				    __func__, buf.buf);
 
 		bch2_btree_node_rewrite_async(c, b);
 	}

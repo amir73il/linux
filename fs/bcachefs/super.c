@@ -272,6 +272,7 @@ static void __bch2_fs_read_only(struct bch_fs *c)
 		clean_passes++;
 
 		if (bch2_btree_interior_updates_flush(c) ||
+		    bch2_btree_write_buffer_flush_going_ro(c) ||
 		    bch2_journal_flush_all_pins(&c->journal) ||
 		    bch2_btree_flush_all_writes(c) ||
 		    seq != atomic64_read(&c->journal.seq)) {
@@ -289,7 +290,7 @@ static void __bch2_fs_read_only(struct bch_fs *c)
 
 	bch2_fs_journal_stop(&c->journal);
 
-	bch_info(c, "%sshutdown complete, journal seq %llu",
+	bch_info(c, "%sclean shutdown complete, journal seq %llu",
 		 test_bit(BCH_FS_clean_shutdown, &c->flags) ? "" : "un",
 		 c->journal.seq_ondisk);
 
@@ -439,6 +440,8 @@ static int bch2_fs_read_write_late(struct bch_fs *c)
 static int __bch2_fs_read_write(struct bch_fs *c, bool early)
 {
 	int ret;
+
+	BUG_ON(!test_bit(BCH_FS_may_go_rw, &c->flags));
 
 	if (test_bit(BCH_FS_initial_gc_unfixed, &c->flags)) {
 		bch_err(c, "cannot go rw, unfixed btree errors");
@@ -765,6 +768,7 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 
 	refcount_set(&c->ro_ref, 1);
 	init_waitqueue_head(&c->ro_ref_wait);
+	spin_lock_init(&c->recovery_pass_lock);
 	sema_init(&c->online_fsck_mutex, 1);
 
 	init_rwsem(&c->gc_lock);
@@ -807,9 +811,6 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 
 	INIT_LIST_HEAD(&c->vfs_inodes_list);
 	mutex_init(&c->vfs_inodes_lock);
-
-	c->copy_gc_enabled		= 1;
-	c->rebalance.enabled		= 1;
 
 	c->journal.flush_write_time	= &c->times[BCH_TIME_journal_flush_write];
 	c->journal.noflush_write_time	= &c->times[BCH_TIME_journal_noflush_write];
@@ -1032,9 +1033,12 @@ int bch2_fs_start(struct bch_fs *c)
 		bch2_dev_allocator_add(c, ca);
 	bch2_recalc_capacity(c);
 
+	c->recovery_task = current;
 	ret = BCH_SB_INITIALIZED(c->disk_sb.sb)
 		? bch2_fs_recovery(c)
 		: bch2_fs_initialize(c);
+	c->recovery_task = NULL;
+
 	if (ret)
 		goto err;
 
@@ -1119,12 +1123,12 @@ static int bch2_dev_in_fs(struct bch_sb_handle *fs,
 
 		prt_bdevname(&buf, fs->bdev);
 		prt_char(&buf, ' ');
-		bch2_prt_datetime(&buf, le64_to_cpu(fs->sb->write_time));;
+		bch2_prt_datetime(&buf, le64_to_cpu(fs->sb->write_time));
 		prt_newline(&buf);
 
 		prt_bdevname(&buf, sb->bdev);
 		prt_char(&buf, ' ');
-		bch2_prt_datetime(&buf, le64_to_cpu(sb->sb->write_time));;
+		bch2_prt_datetime(&buf, le64_to_cpu(sb->sb->write_time));
 		prt_newline(&buf);
 
 		if (!opts->no_splitbrain_check)
@@ -1197,7 +1201,7 @@ static void bch2_dev_free(struct bch_dev *ca)
 
 	free_percpu(ca->io_done);
 	bch2_dev_buckets_free(ca);
-	free_page((unsigned long) ca->sb_read_scratch);
+	kfree(ca->sb_read_scratch);
 
 	bch2_time_stats_quantiles_exit(&ca->io_latency[WRITE]);
 	bch2_time_stats_quantiles_exit(&ca->io_latency[READ]);
@@ -1336,7 +1340,7 @@ static struct bch_dev *__bch2_dev_alloc(struct bch_fs *c,
 
 	if (percpu_ref_init(&ca->io_ref, bch2_dev_io_ref_complete,
 			    PERCPU_REF_INIT_DEAD, GFP_KERNEL) ||
-	    !(ca->sb_read_scratch = (void *) __get_free_page(GFP_KERNEL)) ||
+	    !(ca->sb_read_scratch = kmalloc(BCH_SB_READ_SCRATCH_BUF_SIZE, GFP_KERNEL)) ||
 	    bch2_dev_buckets_alloc(c, ca) ||
 	    !(ca->io_done	= alloc_percpu(*ca->io_done)))
 		goto err;
@@ -1365,7 +1369,6 @@ static int bch2_dev_alloc(struct bch_fs *c, unsigned dev_idx)
 {
 	struct bch_member member = bch2_sb_member_get(c->disk_sb.sb, dev_idx);
 	struct bch_dev *ca = NULL;
-	int ret = 0;
 
 	if (bch2_fs_init_fault("dev_alloc"))
 		goto err;
@@ -1377,10 +1380,8 @@ static int bch2_dev_alloc(struct bch_fs *c, unsigned dev_idx)
 	ca->fs = c;
 
 	bch2_dev_attach(c, ca, dev_idx);
-	return ret;
+	return 0;
 err:
-	if (ca)
-		bch2_dev_free(ca);
 	return -BCH_ERR_ENOMEM_dev_alloc;
 }
 

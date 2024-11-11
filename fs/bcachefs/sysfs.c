@@ -146,7 +146,7 @@ write_attribute(trigger_journal_writes);
 write_attribute(trigger_btree_cache_shrink);
 write_attribute(trigger_btree_key_cache_shrink);
 write_attribute(trigger_freelist_wakeup);
-rw_attribute(gc_gens_pos);
+read_attribute(gc_gens_pos);
 
 read_attribute(uuid);
 read_attribute(minor);
@@ -211,12 +211,11 @@ BCH_PERSISTENT_COUNTERS()
 #undef x
 
 rw_attribute(discard);
+read_attribute(state);
 rw_attribute(label);
 
-rw_attribute(copy_gc_enabled);
 read_attribute(copy_gc_wait);
 
-rw_attribute(rebalance_enabled);
 sysfs_pd_controller_attribute(rebalance);
 read_attribute(rebalance_status);
 
@@ -236,11 +235,6 @@ write_attribute(perf_test);
 		{ .name = #_name, .mode = 0644 };
 	BCH_TIME_STATS()
 #undef x
-
-static struct attribute sysfs_state_rw = {
-	.name = "state",
-	.mode =  0444,
-};
 
 static size_t bch2_btree_cache_size(struct bch_fs *c)
 {
@@ -302,7 +296,8 @@ static int bch2_compression_stats_to_text(struct printbuf *out, struct bch_fs *c
 
 static void bch2_gc_gens_pos_to_text(struct printbuf *out, struct bch_fs *c)
 {
-	prt_printf(out, "%s: ", bch2_btree_id_str(c->gc_gens_btree));
+	bch2_btree_id_to_text(out, c->gc_gens_btree);
+	prt_printf(out, ": ");
 	bch2_bpos_to_text(out, c->gc_gens_pos);
 	prt_printf(out, "\n");
 }
@@ -339,9 +334,6 @@ SHOW(bch2_fs)
 	if (attr == &sysfs_gc_gens_pos)
 		bch2_gc_gens_pos_to_text(out, c);
 
-	sysfs_printf(copy_gc_enabled, "%i", c->copy_gc_enabled);
-
-	sysfs_printf(rebalance_enabled,		"%i", c->rebalance.enabled);
 	sysfs_pd_controller_show(rebalance,	&c->rebalance.pd); /* XXX */
 
 	if (attr == &sysfs_copy_gc_wait)
@@ -417,23 +409,6 @@ SHOW(bch2_fs)
 STORE(bch2_fs)
 {
 	struct bch_fs *c = container_of(kobj, struct bch_fs, kobj);
-
-	if (attr == &sysfs_copy_gc_enabled) {
-		ssize_t ret = strtoul_safe(buf, c->copy_gc_enabled)
-			?: (ssize_t) size;
-
-		if (c->copygc_thread)
-			wake_up_process(c->copygc_thread);
-		return ret;
-	}
-
-	if (attr == &sysfs_rebalance_enabled) {
-		ssize_t ret = strtoul_safe(buf, c->rebalance.enabled)
-			?: (ssize_t) size;
-
-		rebalance_wakeup(c);
-		return ret;
-	}
 
 	sysfs_pd_controller_store(rebalance,	&c->rebalance.pd);
 
@@ -610,10 +585,8 @@ struct attribute *bch2_fs_internal_files[] = {
 
 	&sysfs_gc_gens_pos,
 
-	&sysfs_copy_gc_enabled,
 	&sysfs_copy_gc_wait,
 
-	&sysfs_rebalance_enabled,
 	sysfs_pd_controller_files(rebalance),
 
 	&sysfs_moving_ctxts,
@@ -681,6 +654,13 @@ STORE(bch2_fs_opts_dir)
 	     id == Opt_background_compression ||
 	     (id == Opt_compression && !c->opts.background_compression)))
 		bch2_set_rebalance_needs_scan(c, 0);
+
+	if (v && id == Opt_rebalance_enabled)
+		rebalance_wakeup(c);
+
+	if (v && id == Opt_copygc_enabled &&
+	    c->copygc_thread)
+		wake_up_process(c->copygc_thread);
 
 	ret = size;
 err:
@@ -790,7 +770,7 @@ SHOW(bch2_dev)
 		prt_char(out, '\n');
 	}
 
-	if (attr == &sysfs_state_rw) {
+	if (attr == &sysfs_state) {
 		prt_string_option(out, bch2_member_states, ca->mi.state);
 		prt_char(out, '\n');
 	}
@@ -870,7 +850,7 @@ struct attribute *bch2_dev_files[] = {
 
 	/* settings: */
 	&sysfs_discard,
-	&sysfs_state_rw,
+	&sysfs_state,
 	&sysfs_label,
 
 	&sysfs_has_data,

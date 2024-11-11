@@ -61,7 +61,7 @@ static size_t bch2_journal_key_search(struct journal_keys *keys,
 }
 
 /* Returns first non-overwritten key >= search key: */
-struct bkey_i *bch2_journal_keys_peek_upto(struct bch_fs *c, enum btree_id btree_id,
+struct bkey_i *bch2_journal_keys_peek_max(struct bch_fs *c, enum btree_id btree_id,
 					   unsigned level, struct bpos pos,
 					   struct bpos end_pos, size_t *idx)
 {
@@ -107,12 +107,58 @@ search:
 	return NULL;
 }
 
+struct bkey_i *bch2_journal_keys_peek_prev_min(struct bch_fs *c, enum btree_id btree_id,
+					   unsigned level, struct bpos pos,
+					   struct bpos end_pos, size_t *idx)
+{
+	struct journal_keys *keys = &c->journal_keys;
+	unsigned iters = 0;
+	struct journal_key *k;
+
+	BUG_ON(*idx > keys->nr);
+search:
+	if (!*idx)
+		*idx = __bch2_journal_key_search(keys, btree_id, level, pos);
+
+	while (*idx &&
+	       __journal_key_cmp(btree_id, level, end_pos, idx_to_key(keys, *idx - 1)) <= 0) {
+		(*idx)++;
+		iters++;
+		if (iters == 10) {
+			*idx = 0;
+			goto search;
+		}
+	}
+
+	while ((k = *idx < keys->nr ? idx_to_key(keys, *idx) : NULL)) {
+		if (__journal_key_cmp(btree_id, level, end_pos, k) > 0)
+			return NULL;
+
+		if (k->overwritten) {
+			--(*idx);
+			continue;
+		}
+
+		if (__journal_key_cmp(btree_id, level, pos, k) >= 0)
+			return k->k;
+
+		--(*idx);
+		iters++;
+		if (iters == 10) {
+			*idx = 0;
+			goto search;
+		}
+	}
+
+	return NULL;
+}
+
 struct bkey_i *bch2_journal_keys_peek_slot(struct bch_fs *c, enum btree_id btree_id,
 					   unsigned level, struct bpos pos)
 {
 	size_t idx = 0;
 
-	return bch2_journal_keys_peek_upto(c, btree_id, level, pos, pos, &idx);
+	return bch2_journal_keys_peek_max(c, btree_id, level, pos, pos, &idx);
 }
 
 static void journal_iter_verify(struct journal_iter *iter)
@@ -628,8 +674,11 @@ void bch2_journal_keys_dump(struct bch_fs *c)
 
 	darray_for_each(*keys, i) {
 		printbuf_reset(&buf);
+		prt_printf(&buf, "btree=");
+		bch2_btree_id_to_text(&buf, i->btree_id);
+		prt_printf(&buf, " l=%u ", i->level);
 		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(i->k));
-		pr_err("%s l=%u %s", bch2_btree_id_str(i->btree_id), i->level, buf.buf);
+		pr_err("%s", buf.buf);
 	}
 	printbuf_exit(&buf);
 }

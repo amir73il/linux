@@ -509,10 +509,16 @@ struct btree_trans {
 	bool			notrace_relock_fail:1;
 	enum bch_errcode	restarted:16;
 	u32			restart_count;
+#ifdef CONFIG_BCACHEFS_INJECT_TRANSACTION_RESTARTS
+	u32			restart_count_this_trans;
+#endif
 
 	u64			last_begin_time;
 	unsigned long		last_begin_ip;
 	unsigned long		last_restarted_ip;
+#ifdef CONFIG_BCACHEFS_DEBUG
+	bch_stacktrace		last_restarted_trace;
+#endif
 	unsigned long		last_unlock_ip;
 	unsigned long		srcu_lock_time;
 

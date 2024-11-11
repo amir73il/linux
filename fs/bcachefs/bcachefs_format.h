@@ -499,8 +499,6 @@ struct bch_sb_field {
 #include "disk_groups_format.h"
 #include "extents_format.h"
 #include "ec_format.h"
-#include "dirent_format.h"
-#include "disk_groups_format.h"
 #include "inode_format.h"
 #include "journal_seq_blacklist_format.h"
 #include "logged_ops_format.h"
@@ -1032,7 +1030,7 @@ static inline _Bool bch2_csum_type_is_encryption(enum bch_csum_type type)
 	x(crc64,		2)	\
 	x(xxhash,		3)
 
-enum bch_csum_opts {
+enum bch_csum_opt {
 #define x(t, n) BCH_CSUM_OPT_##t = n,
 	BCH_CSUM_OPTS()
 #undef x
@@ -1221,6 +1219,15 @@ struct jset_entry_log {
 	u8			d[];
 } __packed __aligned(8);
 
+static inline unsigned jset_entry_log_msg_bytes(struct jset_entry_log *l)
+{
+	unsigned b = vstruct_bytes(&l->entry) - offsetof(struct jset_entry_log, d);
+
+	while (b && !l->d[b - 1])
+		--b;
+	return b;
+}
+
 struct jset_entry_datetime {
 	struct jset_entry	entry;
 	__le64			seconds;
@@ -1361,6 +1368,8 @@ static inline bool btree_id_is_alloc(enum btree_id id)
 	case BTREE_ID_need_discard:
 	case BTREE_ID_freespace:
 	case BTREE_ID_bucket_gens:
+	case BTREE_ID_lru:
+	case BTREE_ID_accounting:
 		return true;
 	default:
 		return false;

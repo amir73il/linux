@@ -14,6 +14,7 @@
 #include "extent_update.h"
 #include "fs.h"
 #include "inode.h"
+#include "opts.h"
 #include "str_hash.h"
 #include "snapshot.h"
 #include "subvolume.h"
@@ -617,7 +618,7 @@ bch2_bkey_get_iter_snapshot_parent(struct btree_trans *trans, struct btree_iter 
 	struct bkey_s_c k;
 	int ret = 0;
 
-	for_each_btree_key_upto_norestart(trans, *iter, btree,
+	for_each_btree_key_max_norestart(trans, *iter, btree,
 					  bpos_successor(pos),
 					  SPOS(pos.inode, pos.offset, U32_MAX),
 					  flags|BTREE_ITER_all_snapshots, k, ret)
@@ -652,7 +653,7 @@ int __bch2_inode_has_child_snapshots(struct btree_trans *trans, struct bpos pos)
 	struct bkey_s_c k;
 	int ret = 0;
 
-	for_each_btree_key_upto_norestart(trans, iter,
+	for_each_btree_key_max_norestart(trans, iter,
 			BTREE_ID_inodes, POS(0, pos.offset), bpos_predecessor(pos),
 			BTREE_ITER_all_snapshots|
 			BTREE_ITER_with_updates, k, ret)
@@ -966,7 +967,7 @@ static int bch2_inode_delete_keys(struct btree_trans *trans,
 
 		bch2_btree_iter_set_snapshot(&iter, snapshot);
 
-		k = bch2_btree_iter_peek_upto(&iter, end);
+		k = bch2_btree_iter_peek_max(&iter, end);
 		ret = bkey_err(k);
 		if (ret)
 			goto err;
@@ -1141,12 +1142,17 @@ struct bch_opts bch2_inode_opts_to_opts(struct bch_inode_unpacked *inode)
 void bch2_inode_opts_get(struct bch_io_opts *opts, struct bch_fs *c,
 			 struct bch_inode_unpacked *inode)
 {
-#define x(_name, _bits)		opts->_name = inode_opt_get(c, inode, _name);
+#define x(_name, _bits)							\
+	if ((inode)->bi_##_name) {					\
+		opts->_name = inode->bi_##_name - 1;			\
+		opts->_name##_from_inode = true;			\
+	} else {							\
+		opts->_name = c->opts._name;				\
+	}
 	BCH_INODE_OPTS()
 #undef x
 
-	if (opts->nocow)
-		opts->compression = opts->background_compression = opts->data_checksum = opts->erasure_code = 0;
+	bch2_io_opts_fixups(opts);
 }
 
 int bch2_inum_opts_get(struct btree_trans *trans, subvol_inum inum, struct bch_io_opts *opts)
@@ -1380,7 +1386,8 @@ again:
 					NULL, NULL, BCH_TRANS_COMMIT_no_enospc, ({
 		ret = may_delete_deleted_inode(trans, &iter, k.k->p, &need_another_pass);
 		if (ret > 0) {
-			bch_verbose(c, "deleting unlinked inode %llu:%u", k.k->p.offset, k.k->p.snapshot);
+			bch_verbose_ratelimited(c, "deleting unlinked inode %llu:%u",
+						k.k->p.offset, k.k->p.snapshot);
 
 			ret = bch2_inode_rm_snapshot(trans, k.k->p.offset, k.k->p.snapshot);
 			/*

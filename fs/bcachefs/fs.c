@@ -23,6 +23,7 @@
 #include "journal.h"
 #include "keylist.h"
 #include "quota.h"
+#include "rebalance.h"
 #include "snapshot.h"
 #include "super.h"
 #include "xattr.h"
@@ -89,10 +90,25 @@ int __must_check bch2_write_inode(struct bch_fs *c,
 retry:
 	bch2_trans_begin(trans);
 
-	ret   = bch2_inode_peek(trans, &iter, &inode_u, inode_inum(inode),
-				BTREE_ITER_intent) ?:
-		(set ? set(trans, inode, &inode_u, p) : 0) ?:
-		bch2_inode_write(trans, &iter, &inode_u) ?:
+	ret = bch2_inode_peek(trans, &iter, &inode_u, inode_inum(inode), BTREE_ITER_intent);
+	if (ret)
+		goto err;
+
+	struct bch_extent_rebalance old_r = bch2_inode_rebalance_opts_get(c, &inode_u);
+
+	ret = (set ? set(trans, inode, &inode_u, p) : 0);
+	if (ret)
+		goto err;
+
+	struct bch_extent_rebalance new_r = bch2_inode_rebalance_opts_get(c, &inode_u);
+
+	if (memcmp(&old_r, &new_r, sizeof(new_r))) {
+		ret = bch2_set_rebalance_needs_scan_trans(trans, inode_u.bi_inum);
+		if (ret)
+			goto err;
+	}
+
+	ret   = bch2_inode_write(trans, &iter, &inode_u) ?:
 		bch2_trans_commit(trans, NULL, NULL, BCH_TRANS_COMMIT_no_enospc);
 
 	/*
@@ -101,7 +117,7 @@ retry:
 	 */
 	if (!ret)
 		bch2_inode_update_after_write(trans, inode, &inode_u, fields);
-
+err:
 	bch2_trans_iter_exit(trans, &iter);
 
 	if (bch2_err_matches(ret, BCH_ERR_transaction_restart))
@@ -628,7 +644,7 @@ static struct bch_inode_info *bch2_lookup_trans(struct btree_trans *trans,
 		goto err;
 
 	/* regular files may have hardlinks: */
-	if (bch2_fs_inconsistent_on(bch2_inode_should_have_bp(&inode_u) &&
+	if (bch2_fs_inconsistent_on(bch2_inode_should_have_single_bp(&inode_u) &&
 				    !bkey_eq(k.k->p, POS(inode_u.bi_dir, inode_u.bi_dir_offset)),
 				    c,
 				    "dirent points to inode that does not point back:\n  %s",
@@ -1245,7 +1261,6 @@ static int bch2_fiemap(struct inode *vinode, struct fiemap_extent_info *info,
 	struct btree_iter iter;
 	struct bkey_s_c k;
 	struct bkey_buf cur, prev;
-	unsigned offset_into_extent, sectors;
 	bool have_extent = false;
 	int ret = 0;
 
@@ -1278,7 +1293,7 @@ static int bch2_fiemap(struct inode *vinode, struct fiemap_extent_info *info,
 
 		bch2_btree_iter_set_snapshot(&iter, snapshot);
 
-		k = bch2_btree_iter_peek_upto(&iter, end);
+		k = bch2_btree_iter_peek_max(&iter, end);
 		ret = bkey_err(k);
 		if (ret)
 			continue;
@@ -1292,9 +1307,8 @@ static int bch2_fiemap(struct inode *vinode, struct fiemap_extent_info *info,
 			continue;
 		}
 
-		offset_into_extent	= iter.pos.offset -
-			bkey_start_offset(k.k);
-		sectors			= k.k->size - offset_into_extent;
+		s64 offset_into_extent	= iter.pos.offset - bkey_start_offset(k.k);
+		unsigned sectors	= k.k->size - offset_into_extent;
 
 		bch2_bkey_buf_reassemble(&cur, c, k);
 
@@ -1306,7 +1320,7 @@ static int bch2_fiemap(struct inode *vinode, struct fiemap_extent_info *info,
 		k = bkey_i_to_s_c(cur.k);
 		bch2_bkey_buf_realloc(&prev, c, k.k->u64s);
 
-		sectors = min(sectors, k.k->size - offset_into_extent);
+		sectors = min_t(unsigned, sectors, k.k->size - offset_into_extent);
 
 		bch2_cut_front(POS(k.k->p.inode,
 				   bkey_start_offset(k.k) +
@@ -1736,7 +1750,6 @@ static void bch2_vfs_inode_init(struct btree_trans *trans,
 	bch2_inode_update_after_write(trans, inode, bi, ~0);
 
 	inode->v.i_blocks	= bi->bi_sectors;
-	inode->v.i_ino		= bi->bi_inum;
 	inode->v.i_rdev		= bi->bi_dev;
 	inode->v.i_generation	= bi->bi_generation;
 	inode->v.i_size		= bi->bi_size;
@@ -2200,7 +2213,8 @@ got_sb:
 	sb->s_time_gran		= c->sb.nsec_per_time_unit;
 	sb->s_time_min		= div_s64(S64_MIN, c->sb.time_units_per_sec) + 1;
 	sb->s_time_max		= div_s64(S64_MAX, c->sb.time_units_per_sec);
-	sb->s_uuid		= c->sb.user_uuid;
+	super_set_uuid(sb, c->sb.user_uuid.b, sizeof(c->sb.user_uuid));
+	super_set_sysfs_name_uuid(sb);
 	sb->s_shrink->seeks	= 0;
 	c->vfs_sb		= sb;
 	strscpy(sb->s_id, c->name, sizeof(sb->s_id));

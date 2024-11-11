@@ -21,6 +21,7 @@
 #include "extents.h"
 #include "inode.h"
 #include "journal.h"
+#include "rebalance.h"
 #include "replicas.h"
 #include "super.h"
 #include "super-io.h"
@@ -203,7 +204,8 @@ int bch2_btree_ptr_v2_validate(struct bch_fs *c, struct bkey_s_c k,
 			 c, btree_ptr_v2_min_key_bad,
 			 "min_key > key");
 
-	if (flags & BCH_VALIDATE_write)
+	if ((flags & BCH_VALIDATE_write) &&
+	    c->sb.version_min >= bcachefs_metadata_version_btree_ptr_sectors_written)
 		bkey_fsck_err_on(!bp.v->sectors_written,
 				 c, btree_ptr_v2_written_0,
 				 "sectors_written == 0");
@@ -1120,6 +1122,57 @@ void bch2_extent_crc_unpacked_to_text(struct printbuf *out, struct bch_extent_cr
 	bch2_prt_compression_type(out, crc->compression_type);
 }
 
+static void bch2_extent_rebalance_to_text(struct printbuf *out, struct bch_fs *c,
+					  const struct bch_extent_rebalance *r)
+{
+	prt_str(out, "rebalance:");
+
+	prt_printf(out, " replicas=%u", r->data_replicas);
+	if (r->data_replicas_from_inode)
+		prt_str(out, " (inode)");
+
+	prt_str(out, " checksum=");
+	bch2_prt_csum_opt(out, r->data_checksum);
+	if (r->data_checksum_from_inode)
+		prt_str(out, " (inode)");
+
+	if (r->background_compression || r->background_compression_from_inode) {
+		prt_str(out, " background_compression=");
+		bch2_compression_opt_to_text(out, r->background_compression);
+
+		if (r->background_compression_from_inode)
+			prt_str(out, " (inode)");
+	}
+
+	if (r->background_target || r->background_target_from_inode) {
+		prt_str(out, " background_target=");
+		if (c)
+			bch2_target_to_text(out, c, r->background_target);
+		else
+			prt_printf(out, "%u", r->background_target);
+
+		if (r->background_target_from_inode)
+			prt_str(out, " (inode)");
+	}
+
+	if (r->promote_target || r->promote_target_from_inode) {
+		prt_str(out, " promote_target=");
+		if (c)
+			bch2_target_to_text(out, c, r->promote_target);
+		else
+			prt_printf(out, "%u", r->promote_target);
+
+		if (r->promote_target_from_inode)
+			prt_str(out, " (inode)");
+	}
+
+	if (r->erasure_code || r->erasure_code_from_inode) {
+		prt_printf(out, " ec=%u", r->erasure_code);
+		if (r->erasure_code_from_inode)
+			prt_str(out, " (inode)");
+	}
+}
+
 void bch2_bkey_ptrs_to_text(struct printbuf *out, struct bch_fs *c,
 			    struct bkey_s_c k)
 {
@@ -1155,18 +1208,10 @@ void bch2_bkey_ptrs_to_text(struct printbuf *out, struct bch_fs *c,
 			       (u64) ec->idx, ec->block);
 			break;
 		}
-		case BCH_EXTENT_ENTRY_rebalance: {
-			const struct bch_extent_rebalance *r = &entry->rebalance;
-
-			prt_str(out, "rebalance: target ");
-			if (c)
-				bch2_target_to_text(out, c, r->target);
-			else
-				prt_printf(out, "%u", r->target);
-			prt_str(out, " compression ");
-			bch2_compression_opt_to_text(out, r->compression);
+		case BCH_EXTENT_ENTRY_rebalance:
+			bch2_extent_rebalance_to_text(out, c, &entry->rebalance);
 			break;
-		}
+
 		default:
 			prt_printf(out, "(invalid extent entry %.16llx)", *((u64 *) entry));
 			return;
@@ -1388,166 +1433,6 @@ void bch2_ptr_swab(struct bkey_s k)
 	}
 }
 
-const struct bch_extent_rebalance *bch2_bkey_rebalance_opts(struct bkey_s_c k)
-{
-	struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(k);
-	const union bch_extent_entry *entry;
-
-	bkey_extent_entry_for_each(ptrs, entry)
-		if (__extent_entry_type(entry) == BCH_EXTENT_ENTRY_rebalance)
-			return &entry->rebalance;
-
-	return NULL;
-}
-
-unsigned bch2_bkey_ptrs_need_rebalance(struct bch_fs *c, struct bkey_s_c k,
-				       unsigned target, unsigned compression)
-{
-	struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(k);
-	unsigned rewrite_ptrs = 0;
-
-	if (compression) {
-		unsigned compression_type = bch2_compression_opt_to_type(compression);
-		const union bch_extent_entry *entry;
-		struct extent_ptr_decoded p;
-		unsigned i = 0;
-
-		bkey_for_each_ptr_decode(k.k, ptrs, p, entry) {
-			if (p.crc.compression_type == BCH_COMPRESSION_TYPE_incompressible ||
-			    p.ptr.unwritten) {
-				rewrite_ptrs = 0;
-				goto incompressible;
-			}
-
-			if (!p.ptr.cached && p.crc.compression_type != compression_type)
-				rewrite_ptrs |= 1U << i;
-			i++;
-		}
-	}
-incompressible:
-	if (target && bch2_target_accepts_data(c, BCH_DATA_user, target)) {
-		unsigned i = 0;
-
-		bkey_for_each_ptr(ptrs, ptr) {
-			if (!ptr->cached && !bch2_dev_in_target(c, ptr->dev, target))
-				rewrite_ptrs |= 1U << i;
-			i++;
-		}
-	}
-
-	return rewrite_ptrs;
-}
-
-bool bch2_bkey_needs_rebalance(struct bch_fs *c, struct bkey_s_c k)
-{
-	const struct bch_extent_rebalance *r = bch2_bkey_rebalance_opts(k);
-
-	/*
-	 * If it's an indirect extent, we don't delete the rebalance entry when
-	 * done so that we know what options were applied - check if it still
-	 * needs work done:
-	 */
-	if (r &&
-	    k.k->type == KEY_TYPE_reflink_v &&
-	    !bch2_bkey_ptrs_need_rebalance(c, k, r->target, r->compression))
-		r = NULL;
-
-	return r != NULL;
-}
-
-static u64 __bch2_bkey_sectors_need_rebalance(struct bch_fs *c, struct bkey_s_c k,
-				       unsigned target, unsigned compression)
-{
-	struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(k);
-	const union bch_extent_entry *entry;
-	struct extent_ptr_decoded p;
-	u64 sectors = 0;
-
-	if (compression) {
-		unsigned compression_type = bch2_compression_opt_to_type(compression);
-
-		bkey_for_each_ptr_decode(k.k, ptrs, p, entry) {
-			if (p.crc.compression_type == BCH_COMPRESSION_TYPE_incompressible ||
-			    p.ptr.unwritten) {
-				sectors = 0;
-				goto incompressible;
-			}
-
-			if (!p.ptr.cached && p.crc.compression_type != compression_type)
-				sectors += p.crc.compressed_size;
-		}
-	}
-incompressible:
-	if (target && bch2_target_accepts_data(c, BCH_DATA_user, target)) {
-		bkey_for_each_ptr_decode(k.k, ptrs, p, entry)
-			if (!p.ptr.cached && !bch2_dev_in_target(c, p.ptr.dev, target))
-				sectors += p.crc.compressed_size;
-	}
-
-	return sectors;
-}
-
-u64 bch2_bkey_sectors_need_rebalance(struct bch_fs *c, struct bkey_s_c k)
-{
-	const struct bch_extent_rebalance *r = bch2_bkey_rebalance_opts(k);
-
-	return r ? __bch2_bkey_sectors_need_rebalance(c, k, r->target, r->compression) : 0;
-}
-
-int bch2_bkey_set_needs_rebalance(struct bch_fs *c, struct bkey_i *_k,
-				  struct bch_io_opts *opts)
-{
-	struct bkey_s k = bkey_i_to_s(_k);
-	struct bch_extent_rebalance *r;
-	unsigned target = opts->background_target;
-	unsigned compression = background_compression(*opts);
-	bool needs_rebalance;
-
-	if (!bkey_extent_is_direct_data(k.k))
-		return 0;
-
-	/* get existing rebalance entry: */
-	r = (struct bch_extent_rebalance *) bch2_bkey_rebalance_opts(k.s_c);
-	if (r) {
-		if (k.k->type == KEY_TYPE_reflink_v) {
-			/*
-			 * indirect extents: existing options take precedence,
-			 * so that we don't move extents back and forth if
-			 * they're referenced by different inodes with different
-			 * options:
-			 */
-			if (r->target)
-				target = r->target;
-			if (r->compression)
-				compression = r->compression;
-		}
-
-		r->target	= target;
-		r->compression	= compression;
-	}
-
-	needs_rebalance = bch2_bkey_ptrs_need_rebalance(c, k.s_c, target, compression);
-
-	if (needs_rebalance && !r) {
-		union bch_extent_entry *new = bkey_val_end(k);
-
-		new->rebalance.type		= 1U << BCH_EXTENT_ENTRY_rebalance;
-		new->rebalance.compression	= compression;
-		new->rebalance.target		= target;
-		new->rebalance.unused		= 0;
-		k.k->u64s += extent_entry_u64s(new);
-	} else if (!needs_rebalance && r && k.k->type != KEY_TYPE_reflink_v) {
-		/*
-		 * For indirect extents, don't delete the rebalance entry when
-		 * we're finished so that we know we specifically moved it or
-		 * compressed it to its current location/compression type
-		 */
-		extent_entry_drop(k, (union bch_extent_entry *) r);
-	}
-
-	return 0;
-}
-
 /* Generic extent code: */
 
 int bch2_cut_front_s(struct bpos where, struct bkey_s k)
@@ -1607,7 +1492,7 @@ int bch2_cut_front_s(struct bpos where, struct bkey_s k)
 	case KEY_TYPE_reflink_p: {
 		struct bkey_s_reflink_p p = bkey_s_to_reflink_p(k);
 
-		le64_add_cpu(&p.v->idx, sub);
+		SET_REFLINK_P_IDX(p.v, REFLINK_P_IDX(p.v) + sub);
 		break;
 	}
 	case KEY_TYPE_inline_data:

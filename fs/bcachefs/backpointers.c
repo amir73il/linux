@@ -52,6 +52,12 @@ int bch2_backpointer_validate(struct bch_fs *c, struct bkey_s_c k,
 			      enum bch_validate_flags flags)
 {
 	struct bkey_s_c_backpointer bp = bkey_s_c_to_backpointer(k);
+	int ret = 0;
+
+	bkey_fsck_err_on(bp.v->level > BTREE_MAX_DEPTH,
+			 c, backpointer_level_bad,
+			 "backpointer level bad: %u >= %u",
+			 bp.v->level, BTREE_MAX_DEPTH);
 
 	rcu_read_lock();
 	struct bch_dev *ca = bch2_dev_rcu_noerror(c, bp.k->p.inode);
@@ -64,7 +70,6 @@ int bch2_backpointer_validate(struct bch_fs *c, struct bkey_s_c k,
 	struct bpos bucket = bp_pos_to_bucket(ca, bp.k->p);
 	struct bpos bp_pos = bucket_pos_to_bp_noerror(ca, bucket, bp.v->bucket_offset);
 	rcu_read_unlock();
-	int ret = 0;
 
 	bkey_fsck_err_on((bp.v->bucket_offset >> MAX_EXTENT_COMPRESS_RATIO_SHIFT) >= ca->mi.bucket_size ||
 			 !bpos_eq(bp.k->p, bp_pos),
@@ -76,12 +81,11 @@ fsck_err:
 
 void bch2_backpointer_to_text(struct printbuf *out, const struct bch_backpointer *bp)
 {
-	prt_printf(out, "btree=%s l=%u offset=%llu:%u len=%u pos=",
-	       bch2_btree_id_str(bp->btree_id),
-	       bp->level,
-	       (u64) (bp->bucket_offset >> MAX_EXTENT_COMPRESS_RATIO_SHIFT),
-	       (u32) bp->bucket_offset & ~(~0U << MAX_EXTENT_COMPRESS_RATIO_SHIFT),
-	       bp->bucket_len);
+	bch2_btree_id_level_to_text(out, bp->btree_id, bp->level);
+	prt_printf(out, " offset=%llu:%u len=%u pos=",
+		   (u64) (bp->bucket_offset >> MAX_EXTENT_COMPRESS_RATIO_SHIFT),
+		   (u32) bp->bucket_offset & ~(~0U << MAX_EXTENT_COMPRESS_RATIO_SHIFT),
+		   bp->bucket_len);
 	bch2_bpos_to_text(out, bp->pos);
 }
 
@@ -496,9 +500,13 @@ found:
 		goto err;
 
 	prt_str(&buf, "extents pointing to same space, but first extent checksum bad:");
-	prt_printf(&buf, "\n  %s ", bch2_btree_id_str(btree));
+	prt_printf(&buf, "\n  ");
+	bch2_btree_id_to_text(&buf, btree);
+	prt_str(&buf, " ");
 	bch2_bkey_val_to_text(&buf, c, extent);
-	prt_printf(&buf, "\n  %s ", bch2_btree_id_str(o_btree));
+	prt_printf(&buf, "\n  ");
+	bch2_btree_id_to_text(&buf, o_btree);
+	prt_str(&buf, " ");
 	bch2_bkey_val_to_text(&buf, c, extent2);
 
 	struct nonce nonce = extent_nonce(extent.k->bversion, p.crc);
@@ -633,8 +641,9 @@ check_existing_bp:
 	goto err;
 missing:
 	printbuf_reset(&buf);
-	prt_printf(&buf, "missing backpointer for btree=%s l=%u ",
-	       bch2_btree_id_str(bp.btree_id), bp.level);
+	prt_str(&buf, "missing backpointer for btree=");
+	bch2_btree_id_to_text(&buf, bp.btree_id);
+	prt_printf(&buf, " l=%u ", bp.level);
 	bch2_bkey_val_to_text(&buf, c, orig_k);
 	prt_printf(&buf, "\n  got:   ");
 	bch2_bkey_val_to_text(&buf, c, bp_k);
@@ -947,9 +956,13 @@ int bch2_check_extents_to_backpointers(struct bch_fs *c)
 static int check_one_backpointer(struct btree_trans *trans,
 				 struct bbpos start,
 				 struct bbpos end,
-				 struct bkey_s_c_backpointer bp,
+				 struct bkey_s_c bp_k,
 				 struct bkey_buf *last_flushed)
 {
+	if (bp_k.k->type != KEY_TYPE_backpointer)
+		return 0;
+
+	struct bkey_s_c_backpointer bp = bkey_s_c_to_backpointer(bp_k);
 	struct bch_fs *c = trans->c;
 	struct btree_iter iter;
 	struct bbpos pos = bp_to_bbpos(*bp.v);
@@ -1004,9 +1017,7 @@ static int bch2_check_backpointers_to_extents_pass(struct btree_trans *trans,
 				  POS_MIN, BTREE_ITER_prefetch, k,
 				  NULL, NULL, BCH_TRANS_COMMIT_no_enospc, ({
 			progress_update_iter(trans, &progress, &iter, "backpointers_to_extents");
-			check_one_backpointer(trans, start, end,
-					      bkey_s_c_to_backpointer(k),
-					      &last_flushed);
+			check_one_backpointer(trans, start, end, k, &last_flushed);
 	}));
 
 	bch2_bkey_buf_exit(&last_flushed, c);

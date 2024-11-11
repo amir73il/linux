@@ -62,7 +62,7 @@ int bch2_btree_node_check_topology(struct btree_trans *trans, struct btree *b)
 		if (!bpos_eq(b->data->min_key, POS_MIN)) {
 			printbuf_reset(&buf);
 			bch2_bpos_to_text(&buf, b->data->min_key);
-			need_fsck_err(trans, btree_root_bad_min_key,
+			log_fsck_err(trans, btree_root_bad_min_key,
 				      "btree root with incorrect min_key: %s", buf.buf);
 			goto topology_repair;
 		}
@@ -70,7 +70,7 @@ int bch2_btree_node_check_topology(struct btree_trans *trans, struct btree *b)
 		if (!bpos_eq(b->data->max_key, SPOS_MAX)) {
 			printbuf_reset(&buf);
 			bch2_bpos_to_text(&buf, b->data->max_key);
-			need_fsck_err(trans, btree_root_bad_max_key,
+			log_fsck_err(trans, btree_root_bad_max_key,
 				      "btree root with incorrect max_key: %s", buf.buf);
 			goto topology_repair;
 		}
@@ -97,16 +97,16 @@ int bch2_btree_node_check_topology(struct btree_trans *trans, struct btree *b)
 			bch2_topology_error(c);
 
 			printbuf_reset(&buf);
-			prt_str(&buf, "end of prev node doesn't match start of next node\n"),
-			prt_printf(&buf, "  in btree %s level %u node ",
-				   bch2_btree_id_str(b->c.btree_id), b->c.level);
+			prt_str(&buf, "end of prev node doesn't match start of next node\n  in ");
+			bch2_btree_id_level_to_text(&buf, b->c.btree_id, b->c.level);
+			prt_str(&buf, " node ");
 			bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
 			prt_str(&buf, "\n  prev ");
 			bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(prev.k));
 			prt_str(&buf, "\n  next ");
 			bch2_bkey_val_to_text(&buf, c, k);
 
-			need_fsck_err(trans, btree_node_topology_bad_min_key, "%s", buf.buf);
+			log_fsck_err(trans, btree_node_topology_bad_min_key, "%s", buf.buf);
 			goto topology_repair;
 		}
 
@@ -118,25 +118,25 @@ int bch2_btree_node_check_topology(struct btree_trans *trans, struct btree *b)
 		bch2_topology_error(c);
 
 		printbuf_reset(&buf);
-		prt_str(&buf, "empty interior node\n");
-		prt_printf(&buf, "  in btree %s level %u node ",
-			   bch2_btree_id_str(b->c.btree_id), b->c.level);
+		prt_str(&buf, "empty interior node\n  in ");
+		bch2_btree_id_level_to_text(&buf, b->c.btree_id, b->c.level);
+		prt_str(&buf, " node ");
 		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
 
-		need_fsck_err(trans, btree_node_topology_empty_interior_node, "%s", buf.buf);
+		log_fsck_err(trans, btree_node_topology_empty_interior_node, "%s", buf.buf);
 		goto topology_repair;
 	} else if (!bpos_eq(prev.k->k.p, b->key.k.p)) {
 		bch2_topology_error(c);
 
 		printbuf_reset(&buf);
-		prt_str(&buf, "last child node doesn't end at end of parent node\n");
-		prt_printf(&buf, "  in btree %s level %u node ",
-			   bch2_btree_id_str(b->c.btree_id), b->c.level);
+		prt_str(&buf, "last child node doesn't end at end of parent node\n  in ");
+		bch2_btree_id_level_to_text(&buf, b->c.btree_id, b->c.level);
+		prt_str(&buf, " node ");
 		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
 		prt_str(&buf, "\n  last key ");
 		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(prev.k));
 
-		need_fsck_err(trans, btree_node_topology_bad_max_key, "%s", buf.buf);
+		log_fsck_err(trans, btree_node_topology_bad_max_key, "%s", buf.buf);
 		goto topology_repair;
 	}
 out:
@@ -146,13 +146,7 @@ fsck_err:
 	printbuf_exit(&buf);
 	return ret;
 topology_repair:
-	if ((c->opts.recovery_passes & BIT_ULL(BCH_RECOVERY_PASS_check_topology)) &&
-	    c->curr_recovery_pass > BCH_RECOVERY_PASS_check_topology) {
-		bch2_inconsistent_error(c);
-		ret = -BCH_ERR_btree_need_topology_repair;
-	} else {
-		ret = bch2_run_explicit_recovery_pass(c, BCH_RECOVERY_PASS_check_topology);
-	}
+	ret = bch2_topology_error(c);
 	goto out;
 }
 
@@ -1418,15 +1412,26 @@ bch2_btree_insert_keys_interior(struct btree_update *as,
 	       (bkey_cmp_left_packed(b, k, &insert->k.p) >= 0))
 		;
 
-	while (!bch2_keylist_empty(keys)) {
-		insert = bch2_keylist_front(keys);
-
-		if (bpos_gt(insert->k.p, b->key.k.p))
-			break;
-
+	for (;
+	     insert != keys->top && bpos_le(insert->k.p, b->key.k.p);
+	     insert = bkey_next(insert))
 		bch2_insert_fixup_btree_ptr(as, trans, path, b, &node_iter, insert);
-		bch2_keylist_pop_front(keys);
+
+	if (bch2_btree_node_check_topology(trans, b)) {
+		struct printbuf buf = PRINTBUF;
+
+		for (struct bkey_i *k = keys->keys;
+		     k != insert;
+		     k = bkey_next(k)) {
+			bch2_bkey_val_to_text(&buf, trans->c, bkey_i_to_s_c(k));
+			prt_newline(&buf);
+		}
+
+		panic("%s(): check_topology error: inserted keys\n%s", __func__, buf.buf);
 	}
+
+	memmove_u64s_down(keys->keys, insert, keys->top_p - insert->_data);
+	keys->top_p -= insert->_data - keys->keys_p;
 }
 
 static bool key_deleted_in_insert(struct keylist *insert_keys, struct bpos pos)
@@ -1575,8 +1580,6 @@ static void btree_split_insert_keys(struct btree_update *as,
 		bch2_btree_node_iter_init(&node_iter, b, &bch2_keylist_front(keys)->k.p);
 
 		bch2_btree_insert_keys_interior(as, trans, path, b, node_iter, keys);
-
-		BUG_ON(bch2_btree_node_check_topology(trans, b));
 	}
 }
 
@@ -1827,8 +1830,6 @@ static int bch2_btree_insert_node(struct btree_update *as, struct btree_trans *t
 
 	btree_update_updated_node(as, b);
 	bch2_btree_node_unlock_write(trans, path, b);
-
-	BUG_ON(bch2_btree_node_check_topology(trans, b));
 	return 0;
 split:
 	/*
@@ -1953,8 +1954,7 @@ int __bch2_foreground_maybe_merge(struct btree_trans *trans,
 	u64 start_time = local_clock();
 	int ret = 0;
 
-	bch2_trans_verify_not_in_restart(trans);
-	bch2_trans_verify_not_unlocked(trans);
+	bch2_trans_verify_not_unlocked_or_in_restart(trans);
 	BUG_ON(!trans->paths[path].should_be_locked);
 	BUG_ON(!btree_node_locked(&trans->paths[path], level));
 
@@ -2398,7 +2398,8 @@ static int __bch2_btree_node_update_key(struct btree_trans *trans,
 	if (new_hash) {
 		mutex_lock(&c->btree_cache.lock);
 		bch2_btree_node_hash_remove(&c->btree_cache, new_hash);
-		bch2_btree_node_hash_remove(&c->btree_cache, b);
+
+		__bch2_btree_node_hash_remove(&c->btree_cache, b);
 
 		bkey_copy(&b->key, new_key);
 		ret = __bch2_btree_node_hash_insert(&c->btree_cache, b);
@@ -2574,8 +2575,9 @@ static void bch2_btree_update_to_text(struct printbuf *out, struct btree_update 
 	prt_printf(out, "%ps: ", (void *) as->ip_started);
 	bch2_trans_commit_flags_to_text(out, as->flags);
 
-	prt_printf(out, " btree=%s l=%u-%u mode=%s nodes_written=%u cl.remaining=%u journal_seq=%llu\n",
-		   bch2_btree_id_str(as->btree_id),
+	prt_str(out, " ");
+	bch2_btree_id_to_text(out, as->btree_id);
+	prt_printf(out, " l=%u-%u mode=%s nodes_written=%u cl.remaining=%u journal_seq=%llu\n",
 		   as->update_level_start,
 		   as->update_level_end,
 		   bch2_btree_update_modes[as->mode],
