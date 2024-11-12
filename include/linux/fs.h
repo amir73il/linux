@@ -173,13 +173,14 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 
 #define	FMODE_NOREUSE		((__force fmode_t)(1 << 23))
 
-/* FMODE_* bit 24 */
-
 /* File is embedded in backing_file object */
-#define FMODE_BACKING		((__force fmode_t)(1 << 25))
+#define FMODE_BACKING		((__force fmode_t)(1 << 24))
 
-/* File was opened by fanotify and shouldn't generate fanotify events */
-#define FMODE_NONOTIFY		((__force fmode_t)(1 << 26))
+/* File shouldn't generate fanotify pre-content events */
+#define FMODE_NONOTIFY_HSM	((__force fmode_t)(1 << 25))
+
+/* File shouldn't generate fanotify permission events */
+#define FMODE_NONOTIFY_PERM	((__force fmode_t)(1 << 26))
 
 /* File is capable of returning -EAGAIN if I/O will block */
 #define FMODE_NOWAIT		((__force fmode_t)(1 << 27))
@@ -189,6 +190,30 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 
 /* File does not contribute to nr_files count */
 #define FMODE_NOACCOUNT		((__force fmode_t)(1 << 29))
+
+/*
+ * The two FMODE_NONOTIFY_ bits used together have a special meaning of
+ * not reporting any events at all including non-permission events.
+ * These are the possible values of FMODE_FSNOTIFY(f->f_mode) and their meaning:
+ *
+ * FMODE_NONOTIFY_HSM - suppress only pre-content events.
+ * FMODE_NONOTIFY_PERM - suppress permission (incl. pre-content) events.
+ * FMODE_NONOTIFY - suppress all (incl. non-permission) events.
+ */
+#define FMODE_FSNOTIFY_MASK \
+	(FMODE_NONOTIFY_HSM | FMODE_NONOTIFY_PERM)
+#define FMODE_NONOTIFY FMODE_FSNOTIFY_MASK
+#define FMODE_FSNOTIFY(mode) \
+	((mode) & FMODE_FSNOTIFY_MASK)
+
+#define FMODE_FSNOTIFY_NONE(mode) \
+	(FMODE_FSNOTIFY(mode) == FMODE_NONOTIFY)
+#define FMODE_FSNOTIFY_NORMAL(mode) \
+	(FMODE_FSNOTIFY(mode) == FMODE_NONOTIFY_PERM)
+#define FMODE_FSNOTIFY_PERM(mode) \
+	(!((mode) & FMODE_NONOTIFY_PERM))
+#define FMODE_FSNOTIFY_HSM(mode) \
+	(FMODE_FSNOTIFY(mode) == 0)
 
 /*
  * Attribute flags.  These should be or-ed together to figure out what
