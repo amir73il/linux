@@ -193,15 +193,37 @@ static bool fsnotify_event_needs_parent(struct inode *inode, __u32 mnt_mask,
 	return mask & marks_mask;
 }
 
-/* Are there any inode/mount/sb objects that are interested in this event? */
-static inline bool fsnotify_object_watched(struct inode *inode, __u32 mnt_mask,
-					   __u32 mask)
+/* Are there any inode/mount/sb objects that watch for these events? */
+static inline __u32 fsnotify_object_watched(struct inode *inode, __u32 mnt_mask,
+					    __u32 events_mask)
 {
 	__u32 marks_mask = READ_ONCE(inode->i_fsnotify_mask) | mnt_mask |
 			   READ_ONCE(inode->i_sb->s_fsnotify_mask);
 
-	return mask & marks_mask & ALL_FSNOTIFY_EVENTS;
+	return events_mask & marks_mask;
 }
+
+/* Are there any inode/mount/sb/parent objects that watch for these events? */
+__u32 fsnotify_file_object_watched(struct file *file, __u32 events_mask)
+{
+	struct dentry *dentry = file->f_path.dentry;
+	struct dentry *parent;
+	__u32 marks_mask, mnt_mask =
+		READ_ONCE(real_mount(file->f_path.mnt)->mnt_fsnotify_mask);
+
+	marks_mask = fsnotify_object_watched(d_inode(dentry), mnt_mask,
+					     events_mask);
+
+	if (likely(!(dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED)))
+		return marks_mask;
+
+	parent = dget_parent(dentry);
+	marks_mask |= fsnotify_inode_watches_children(d_inode(parent));
+	dput(parent);
+
+	return marks_mask & events_mask;
+}
+EXPORT_SYMBOL_GPL(fsnotify_file_object_watched);
 
 /*
  * Notify this dentry's parent about a child's events with child name info
@@ -221,7 +243,7 @@ int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 	struct dentry *parent;
 	bool parent_watched = dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED;
 	bool parent_needed, parent_interested;
-	__u32 p_mask;
+	__u32 p_mask, test_mask = mask & ALL_FSNOTIFY_EVENTS;
 	struct inode *p_inode = NULL;
 	struct name_snapshot name;
 	struct qstr *file_name = NULL;
@@ -229,7 +251,7 @@ int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 
 	/* Optimize the likely case of nobody watching this path */
 	if (likely(!parent_watched &&
-		   !fsnotify_object_watched(inode, mnt_mask, mask)))
+		   !fsnotify_object_watched(inode, mnt_mask, test_mask)))
 		return 0;
 
 	parent = NULL;
@@ -248,7 +270,7 @@ int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 	 * Include parent/name in notification either if some notification
 	 * groups require parent info or the parent is interested in this event.
 	 */
-	parent_interested = mask & p_mask & ALL_FSNOTIFY_EVENTS;
+	parent_interested = p_mask & test_mask;
 	if (parent_needed || parent_interested) {
 		/* When notifying parent, child should be passed as data */
 		WARN_ON_ONCE(inode != fsnotify_data_inode(data, data_type));

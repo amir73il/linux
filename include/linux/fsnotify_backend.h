@@ -855,7 +855,14 @@ static inline void fsnotify_init_event(struct fsnotify_event *event)
 	INIT_LIST_HEAD(&event->list);
 }
 
+__u32 fsnotify_file_object_watched(struct file *file, __u32 mask);
+
 #else
+
+static inline __u32 fsnotify_file_object_watched(struct file *file, __u32 mask)
+{
+	return 0;
+}
 
 static inline int fsnotify(__u32 mask, const void *data, int data_type,
 			   struct inode *dir, const struct qstr *name,
