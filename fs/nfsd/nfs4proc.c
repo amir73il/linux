@@ -1055,9 +1055,12 @@ nfsd4_rename(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 
 	if (opens_in_grace(SVC_NET(rqstp)))
 		return nfserr_grace;
-	status = nfsd_rename_ftype_(rqstp, &cstate->save_fh, rename->rn_sname,
+	status = nfsd_rename_ftype(rqstp, &cstate->save_fh, rename->rn_sname,
 			     rename->rn_snamelen, &ftype, &cstate->current_fh,
 			     rename->rn_tname, rename->rn_tnamelen);
+	/* RFC 8881 Section 18.25.4 paragraph 5 */
+	if (status == nfserr_file_open && ftype != S_IFREG)
+		status = nfserr_acces;
 	if (status)
 		return status;
 	set_change_info(&rename->rn_sinfo, &cstate->save_fh);

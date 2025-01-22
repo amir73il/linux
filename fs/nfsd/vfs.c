@@ -1909,7 +1909,14 @@ retry:
  out_dput_old:
 	dput(odentry);
  out_nfserr:
-	err = nfserrno(host_err);
+	if (host_err == -EBUSY) {
+		/* name is mounted-on. There is no perfect
+		 * error status.
+		 */
+		err = nfserr_file_open;
+	} else {
+		err = nfserrno(host_err);
+	}
 
 	if (!close_cached) {
 		fh_fill_post_attrs(ffhp);
