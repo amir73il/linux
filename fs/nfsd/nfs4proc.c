@@ -1037,6 +1037,9 @@ nfsd4_remove(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		return nfserr_grace;
 	status = nfsd_unlink_ftype(rqstp, &cstate->current_fh,
 				   remove->rm_name, remove->rm_namelen, &ftype);
+	/* RFC 8881 Section 18.25.4 paragraph 5 */
+	if (status == nfserr_file_open && ftype != S_IFREG)
+		status = nfserr_acces;
 	if (!status)
 		set_change_info(&remove->rm_cinfo, &cstate->current_fh);
 	return status;
