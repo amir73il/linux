@@ -145,9 +145,9 @@ __be32		nfsd_link(struct svc_rqst *, struct svc_fh *,
 				char *, int, struct svc_fh *);
 ssize_t		nfsd_copy_file_range(struct file *, u64,
 				     struct file *, u64, u64);
-__be32		nfsd_rename(struct svc_rqst *,
-				struct svc_fh *, char *, int,
-				struct svc_fh *, char *, int);
+__be32		nfsd_rename_ftype(struct svc_rqst *rqstp, struct svc_fh *ffhp,
+				  char *fname, int flen, int *ftypep,
+				  struct svc_fh *tfhp, char *tname, int tlen);
 __be32		nfsd_unlink_ftype(struct svc_rqst *rqstp, struct svc_fh *fhp,
 				  char *name, int len, int *ftypep);
 __be32		nfsd_readdir(struct svc_rqst *, struct svc_fh *,
@@ -159,6 +159,14 @@ __be32		nfsd_permission(struct svc_cred *cred, struct svc_export *exp,
 				struct dentry *dentry, int acc);
 
 void		nfsd_filp_close(struct file *fp);
+
+static inline __be32 nfsd_rename(struct svc_rqst *rqstp,
+				 struct svc_fh *ffhp, char *fname, int flen,
+				 struct svc_fh *tfhp, char *tname, int tlen)
+{
+	return nfsd_rename_ftype(rqstp, ffhp, fname, flen, NULL,
+				 tfhp, tname, tlen);
+}
 
 static inline __be32 nfsd_remove(struct svc_rqst *rqstp, struct svc_fh *fhp,
 				 char *fname, int flen)

@@ -1796,12 +1796,14 @@ nfsd_has_cached_files(struct dentry *dentry)
 }
 
 /*
- * Rename a file
+ * Rename a file or directory
+ * Return file type in *ftypep
  * N.B. After this call _both_ ffhp and tfhp need an fh_put
  */
 __be32
-nfsd_rename(struct svc_rqst *rqstp, struct svc_fh *ffhp, char *fname, int flen,
-			    struct svc_fh *tfhp, char *tname, int tlen)
+nfsd_rename_ftype(struct svc_rqst *rqstp,
+		  struct svc_fh *ffhp, char *fname, int flen, int *ftypep,
+		  struct svc_fh *tfhp, char *tname, int tlen)
 {
 	struct dentry	*fdentry, *tdentry, *odentry, *ndentry, *trap;
 	struct inode	*fdir, *tdir;
@@ -1862,6 +1864,9 @@ retry:
 	host_err = -EINVAL;
 	if (odentry == trap)
 		goto out_dput_old;
+
+	if (ftypep)
+		*ftypep = d_inode(odentry)->i_mode & S_IFMT;
 
 	ndentry = lookup_one_len(tname, tdentry, tlen);
 	host_err = PTR_ERR(ndentry);
