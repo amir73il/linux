@@ -516,10 +516,8 @@ nfsd3_proc_remove(struct svc_rqst *rqstp)
 				argp->len,
 				argp->name);
 
-	/* Unlink. -S_IFDIR means file must not be a directory */
 	fh_copy(&resp->fh, &argp->fh);
-	resp->status = nfsd_unlink(rqstp, &resp->fh, -S_IFDIR,
-				   argp->name, argp->len);
+	resp->status = nfsd_remove(rqstp, &resp->fh, argp->name, argp->len);
 	resp->status = nfsd3_map_status(resp->status);
 	return rpc_success;
 }
@@ -539,8 +537,7 @@ nfsd3_proc_rmdir(struct svc_rqst *rqstp)
 				argp->name);
 
 	fh_copy(&resp->fh, &argp->fh);
-	resp->status = nfsd_unlink(rqstp, &resp->fh, S_IFDIR,
-				   argp->name, argp->len);
+	resp->status = nfsd_rmdir(rqstp, &resp->fh, argp->name, argp->len);
 	resp->status = nfsd3_map_status(resp->status);
 	return rpc_success;
 }

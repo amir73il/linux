@@ -1933,11 +1933,12 @@ out:
 
 /*
  * Unlink a file or directory
+ * Return file type in *ftypep
  * N.B. After this call fhp needs an fh_put
  */
 __be32
-nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
-				char *fname, int flen)
+nfsd_unlink_ftype(struct svc_rqst *rqstp, struct svc_fh *fhp,
+		  char *fname, int flen, int *ftypep)
 {
 	struct dentry	*dentry, *rdentry;
 	struct inode	*dirp;
@@ -1976,10 +1977,10 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 		goto out_unlock;
 
 	ihold(rinode);
-	if (!type)
-		type = d_inode(rdentry)->i_mode & S_IFMT;
+	if (!*ftypep)
+		*ftypep = d_inode(rdentry)->i_mode & S_IFMT;
 
-	if (type != S_IFDIR) {
+	if (*ftypep != S_IFDIR) {
 		int retries;
 
 		if (rdentry->d_sb->s_export_op->flags & EXPORT_OP_CLOSE_BEFORE_UNLINK)

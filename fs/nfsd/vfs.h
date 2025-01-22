@@ -148,8 +148,8 @@ ssize_t		nfsd_copy_file_range(struct file *, u64,
 __be32		nfsd_rename(struct svc_rqst *,
 				struct svc_fh *, char *, int,
 				struct svc_fh *, char *, int);
-__be32		nfsd_unlink(struct svc_rqst *, struct svc_fh *, int type,
-				char *name, int len);
+__be32		nfsd_unlink_ftype(struct svc_rqst *rqstp, struct svc_fh *fhp,
+				  char *name, int len, int *ftypep);
 __be32		nfsd_readdir(struct svc_rqst *, struct svc_fh *,
 			     loff_t *, struct readdir_cd *, nfsd_filldir_t);
 __be32		nfsd_statfs(struct svc_rqst *, struct svc_fh *,
@@ -159,6 +159,23 @@ __be32		nfsd_permission(struct svc_cred *cred, struct svc_export *exp,
 				struct dentry *dentry, int acc);
 
 void		nfsd_filp_close(struct file *fp);
+
+static inline __be32 nfsd_remove(struct svc_rqst *rqstp, struct svc_fh *fhp,
+				 char *fname, int flen)
+{
+	/* -S_IFDIR means file must not be a directory */
+	int ftype = -S_IFDIR;
+
+	return nfsd_unlink_ftype(rqstp, fhp, fname, flen, &ftype);
+}
+
+static inline __be32 nfsd_rmdir(struct svc_rqst *rqstp, struct svc_fh *fhp,
+				char *fname, int flen)
+{
+	int ftype = S_IFDIR;
+
+	return nfsd_unlink_ftype(rqstp, fhp, fname, flen, &ftype);
+}
 
 static inline int fh_want_write(struct svc_fh *fh)
 {

@@ -1031,11 +1031,12 @@ nfsd4_remove(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 {
 	struct nfsd4_remove *remove = &u->remove;
 	__be32 status;
+	int ftype = 0;
 
 	if (opens_in_grace(SVC_NET(rqstp)))
 		return nfserr_grace;
-	status = nfsd_unlink(rqstp, &cstate->current_fh, 0,
-			     remove->rm_name, remove->rm_namelen);
+	status = nfsd_unlink_ftype(rqstp, &cstate->current_fh,
+				   remove->rm_name, remove->rm_namelen, &ftype);
 	if (!status)
 		set_change_info(&remove->rm_cinfo, &cstate->current_fh);
 	return status;
