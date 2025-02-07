@@ -1577,6 +1577,11 @@ static inline bool fuse_inode_passthrough_op(struct inode *inode,
 	return fb && fb->ops_mask & FUSE_PASSTHROUGH_OP(op);
 }
 
+ssize_t fuse_passthrough_getxattr(struct inode *inode, const char *name,
+				  void *value, size_t size);
+ssize_t fuse_passthrough_listxattr(struct dentry *entry, char *list,
+				   size_t size);
+
 #ifdef CONFIG_SYSCTL
 extern int fuse_sysctl_register(void);
 extern void fuse_sysctl_unregister(void);
