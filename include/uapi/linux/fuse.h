@@ -1113,8 +1113,20 @@ struct fuse_notify_retrieve_in {
 struct fuse_backing_map {
 	int32_t		fd;
 	uint32_t	flags;
-	uint64_t	padding;
+	uint64_t	ops_mask;
 };
+
+#define FUSE_PASSTHROUGH_OP(op)	(1ULL << ((op) - 1))
+
+/* These passthrough operations are implied by FOPEN_PASSTHROUGH */
+#define FUSE_PASSTHROUGH_RW_OPS \
+	(FUSE_PASSTHROUGH_OP(FUSE_READ) | FUSE_PASSTHROUGH_OP(FUSE_WRITE))
+
+#define FUSE_BACKING_MAP_OP(map, op) \
+	((map)->ops_mask & FUSE_PASSTHROUGH_OP(op))
+
+#define FUSE_BACKING_MAP_VALID_OPS \
+	(FUSE_PASSTHROUGH_RW_OPS)
 
 /* Device ioctls: */
 #define FUSE_DEV_IOC_MAGIC		229
