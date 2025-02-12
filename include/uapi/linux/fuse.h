@@ -235,6 +235,9 @@
  *
  *  7.44
  *  - add FUSE_NOTIFY_INC_EPOCH
+ *
+ *  7.45
+ *  - add FUSE_PASSTHROUGH_INO
  */
 
 #ifndef _LINUX_FUSE_H
@@ -490,6 +493,7 @@ struct fuse_file_lock {
 #define FUSE_ALLOW_IDMAP	(1ULL << 40)
 #define FUSE_OVER_IO_URING	(1ULL << 41)
 #define FUSE_REQUEST_TIMEOUT	(1ULL << 42)
+#define FUSE_PASSTHROUGH_INO	(1ULL << 43)
 
 /**
  * CUSE INIT request/reply flags
