@@ -1123,6 +1123,10 @@ struct fuse_backing_map {
 #define FUSE_PASSTHROUGH_RW_OPS \
 	(FUSE_PASSTHROUGH_OP(FUSE_READ) | FUSE_PASSTHROUGH_OP(FUSE_WRITE))
 
+/* Passthrough operations for directories */
+#define FUSE_PASSTHROUGH_DIR_OPS \
+	(FUSE_PASSTHROUGH_OP(FUSE_READDIR))
+
 /* Inode passthrough operations for backing file attached to inode */
 #define FUSE_PASSTHROUGH_INODE_OPS \
 	(FUSE_PASSTHROUGH_OP(FUSE_GETATTR) | \
@@ -1134,7 +1138,8 @@ struct fuse_backing_map {
 	((map)->ops_mask & FUSE_PASSTHROUGH_OP(op))
 
 #define FUSE_BACKING_MAP_VALID_OPS \
-	(FUSE_PASSTHROUGH_RW_OPS | FUSE_PASSTHROUGH_INODE_OPS)
+	(FUSE_PASSTHROUGH_RW_OPS | FUSE_PASSTHROUGH_DIR_OPS | \
+	 FUSE_PASSTHROUGH_INODE_OPS)
 
 /* Device ioctls: */
 #define FUSE_DEV_IOC_MAGIC		229

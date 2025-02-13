@@ -242,6 +242,11 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	if (!file)
 		goto out;
 
+	res = -ENOTDIR;
+	if (map->ops_mask & FUSE_PASSTHROUGH_DIR_OPS &&
+	    !d_is_dir(file->f_path.dentry))
+		goto out_fput;
+
 	res = -EOPNOTSUPP;
 	/*
 	 * It is not a problem to use an O_PATH fd as a backing file, because
@@ -252,7 +257,6 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	 */
 	if ((FUSE_BACKING_MAP_OP(map, FUSE_READ) && !file->f_op->read_iter) ||
 	    (FUSE_BACKING_MAP_OP(map, FUSE_WRITE) && !file->f_op->write_iter))
-		goto out_fput;
 
 	/* FUSE_STATX passthrough implies FUSE_GETATTR passthrough */
 	if (FUSE_BACKING_MAP_OP(map, FUSE_STATX))
