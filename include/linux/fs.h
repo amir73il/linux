@@ -3033,13 +3033,27 @@ static inline void file_start_write(struct file *file)
 	if (!S_ISREG(file_inode(file)->i_mode))
 		return;
 	sb_start_write(file_inode(file)->i_sb);
+	/*
+	 * Prevent fault-in pages from user that may call HSM hooks with
+	 * sb_writers held.
+	 */
+	if (unlikely(FMODE_FSNOTIFY_HSM(file->f_mode)))
+		pagefault_disable();
 }
 
 static inline bool file_start_write_trylock(struct file *file)
 {
 	if (!S_ISREG(file_inode(file)->i_mode))
 		return true;
-	return sb_start_write_trylock(file_inode(file)->i_sb);
+	if (!sb_start_write_trylock(file_inode(file)->i_sb))
+		return false;
+	/*
+	 * Prevent fault-in pages from user that may call HSM hooks with
+	 * sb_writers held.
+	 */
+	if (unlikely(FMODE_FSNOTIFY_HSM(file->f_mode)))
+		pagefault_disable();
+	return true;
 }
 
 /**
@@ -3053,6 +3067,8 @@ static inline void file_end_write(struct file *file)
 	if (!S_ISREG(file_inode(file)->i_mode))
 		return;
 	sb_end_write(file_inode(file)->i_sb);
+	if (unlikely(FMODE_FSNOTIFY_HSM(file->f_mode)))
+		pagefault_enable();
 }
 
 /**
