@@ -650,9 +650,8 @@ EXPORT_SYMBOL_GPL(fsnotify);
  */
 void file_set_fsnotify_mode_from_watchers(struct file *file)
 {
-	struct dentry *dentry = file->f_path.dentry, *parent;
+	struct dentry *dentry = file->f_path.dentry;
 	struct super_block *sb = dentry->d_sb;
-	__u32 mnt_mask, p_mask;
 
 	/* Is it a file opened by fanotify? */
 	if (FMODE_FSNOTIFY_NONE(file->f_mode))
@@ -681,30 +680,10 @@ void file_set_fsnotify_mode_from_watchers(struct file *file)
 	}
 
 	/*
-	 * OK, there are some pre-content watchers. Check if anybody is
-	 * watching for pre-content events on *this* file.
+	 * OK, there are some pre-content watchers on this fs, so
+	 * Enable pre-content events.
 	 */
-	mnt_mask = READ_ONCE(real_mount(file->f_path.mnt)->mnt_fsnotify_mask);
-	if (unlikely(fsnotify_object_watched(d_inode(dentry), mnt_mask,
-				     FSNOTIFY_PRE_CONTENT_EVENTS))) {
-		/* Enable pre-content events */
-		file_set_fsnotify_mode(file, 0);
-		return;
-	}
-
-	/* Is parent watching for pre-content events on this file? */
-	if (dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED) {
-		parent = dget_parent(dentry);
-		p_mask = fsnotify_inode_watches_children(d_inode(parent));
-		dput(parent);
-		if (p_mask & FSNOTIFY_PRE_CONTENT_EVENTS) {
-			/* Enable pre-content events */
-			file_set_fsnotify_mode(file, 0);
-			return;
-		}
-	}
-	/* Nobody watching for pre-content events from this file */
-	file_set_fsnotify_mode(file, FMODE_NONOTIFY | FMODE_NONOTIFY_PERM);
+	file_set_fsnotify_mode(file, 0);
 }
 #endif
 
