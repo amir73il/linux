@@ -48,6 +48,7 @@
 #include <linux/sched/mm.h>
 #include <linux/ksm.h>
 #include <linux/memfd.h>
+#include <linux/fsnotify.h>
 
 #include <linux/uaccess.h>
 #include <asm/cacheflush.h>
@@ -1149,6 +1150,17 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 	if (ret) {
 		fput(file);
 		return ret;
+	}
+
+	if (file && unlikely(FMODE_FSNOTIFY_HSM(file->f_mode))) {
+		int mask = (prot & PROT_WRITE) ? MAY_WRITE : MAY_READ;
+		loff_t pos = start;
+
+		ret = fsnotify_file_area_perm(file, mask, &pos, size);
+		if (ret) {
+			fput(file);
+			return ret;
+		}
 	}
 
 	ret = -EINVAL;
