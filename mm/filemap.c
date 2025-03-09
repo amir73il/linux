@@ -3350,7 +3350,6 @@ static vm_fault_t filemap_fault_recheck_pte_none(struct vm_fault *vmf)
 vm_fault_t filemap_fsnotify_fault(struct vm_fault *vmf)
 {
 	struct file *fpin = NULL;
-	int mask = (vmf->flags & FAULT_FLAG_WRITE) ? MAY_WRITE : MAY_ACCESS;
 	loff_t pos = vmf->pgoff >> PAGE_SHIFT;
 	size_t count = PAGE_SIZE;
 	int err;
@@ -3370,7 +3369,7 @@ vm_fault_t filemap_fsnotify_fault(struct vm_fault *vmf)
 	if (!fpin)
 		return VM_FAULT_SIGBUS;
 
-	err = fsnotify_file_area_perm(fpin, mask, &pos, count);
+	err = fsnotify_file_area_perm(fpin, MAY_ACCESS, &pos, count);
 	fput(fpin);
 	if (err)
 		return VM_FAULT_SIGBUS;
