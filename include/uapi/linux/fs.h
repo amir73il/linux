@@ -148,6 +148,9 @@ struct fsxattr {
 	unsigned char	fsx_pad[8];
 };
 
+#define FSXATTR_SIZE_VER0 28
+#define FSXATTR_SIZE_LATEST FSXATTR_SIZE_VER0
+
 /*
  * Flags for the fsx_xflags field
  */
