@@ -3049,7 +3049,9 @@ SYSCALL_DEFINE5(setfsxattrat, int, dfd, const char __user *, filename,
 	if (error)
 		return error;
 
-	fsxattr_to_fileattr(&fsx, &fa);
+	error = fsxattr_to_fileattr(&fsx, &fa);
+	if (error)
+		return error;
 
 	name = getname_maybe_null(filename, at_flags);
 	if (!name) {
