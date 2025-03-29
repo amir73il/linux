@@ -540,10 +540,13 @@ EXPORT_SYMBOL(vfs_fileattr_get);
 
 void fileattr_to_fsxattr(const struct fileattr *fa, struct fsxattr *fsx)
 {
-	__u32 mask = FS_XFLAGS_MASK;
+	/* Filesystem may or may not advertize supported xflags */
+	__u32 fs_mask = fa->fsx_xflags_mask & FS_XFLAGS_MASK;
+	__u32 mask = fs_mask ?: FS_XFLAGS_MASK;
 
 	memset(fsx, 0, sizeof(struct fsxattr));
 	fsx->fsx_xflags = fa->fsx_xflags & mask;
+	fsx->fsx_xflags_mask = fs_mask;
 	fsx->fsx_extsize = fa->fsx_extsize;
 	fsx->fsx_nextents = fa->fsx_nextents;
 	fsx->fsx_projid = fa->fsx_projid;
@@ -562,6 +565,8 @@ int copy_fsxattr_to_user(const struct fileattr *fa, struct fsxattr __user *ufa)
 	struct fsxattr xfa;
 
 	fileattr_to_fsxattr(fa, &xfa);
+	/* FS_IOC_FSGETXATTR ioctl does not report supported fsx_xflags_mask */
+	xfa.fsx_xflags_mask = 0;
 
 	if (copy_to_user(ufa, &xfa, sizeof(xfa)))
 		return -EFAULT;
@@ -572,16 +577,30 @@ EXPORT_SYMBOL(copy_fsxattr_to_user);
 
 int fsxattr_to_fileattr(const struct fsxattr *fsx, struct fileattr *fa)
 {
-	__u32 mask = FS_XFLAGS_MASK;
+	/* User may or may not provide custom xflags mask */
+	__u32 mask = fsx->fsx_xflags_mask ?: FS_XFLAGS_MASK;
 
-	if (fsx->fsx_xflags & ~mask)
+	if ((fsx->fsx_xflags & ~mask) || (mask & ~FS_XFLAGS_MASK))
 		return -EINVAL;
 
 	fileattr_fill_xflags(fa, fsx->fsx_xflags);
 	fa->fsx_xflags &= ~FS_XFLAG_RDONLY_MASK;
-	fa->fsx_extsize = fsx->fsx_extsize;
-	fa->fsx_projid = fsx->fsx_projid;
-	fa->fsx_cowextsize = fsx->fsx_cowextsize;
+	fa->fsx_xflags_mask = fsx->fsx_xflags_mask;
+	/*
+	 * If flags mask is specified, we copy the fields value only if the
+	 * relevant flag is set in the mask.
+	 */
+	if (mask & (FS_XFLAG_EXTSIZE | FS_XFLAG_EXTSZINHERIT))
+		fa->fsx_extsize = fsx->fsx_extsize;
+	if (mask & FS_XFLAG_COWEXTSIZE)
+		fa->fsx_cowextsize = fsx->fsx_cowextsize;
+	/*
+	 * To save a mask flag (i.e. FS_XFLAG_PROJID), require setting values
+	 * of fsx_projid and FS_XFLAG_PROJINHERIT flag values together.
+	 * For a non-directory, FS_XFLAG_PROJINHERIT flag value should be 0.
+	 */
+	if (mask & FS_XFLAG_PROJINHERIT)
+		fa->fsx_projid = fsx->fsx_projid;
 
 	return 0;
 }
@@ -593,6 +612,10 @@ static int copy_fsxattr_from_user(struct fileattr *fa,
 
 	if (copy_from_user(&xfa, ufa, sizeof(xfa)))
 		return -EFAULT;
+
+	/* FS_IOC_FSSETXATTR ioctl does not support user fsx_xflags_mask */
+	if (xfa.fsx_xflags_mask)
+		return -EINVAL;
 
 	return fsxattr_to_fileattr(&xfa, fa);
 }

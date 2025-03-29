@@ -145,7 +145,8 @@ struct fsxattr {
 	__u32		fsx_nextents;	/* nextents field value (get)	*/
 	__u32		fsx_projid;	/* project identifier (get/set) */
 	__u32		fsx_cowextsize;	/* CoW extsize field value (get/set)*/
-	unsigned char	fsx_pad[8];
+	__u32		fsx_xflags_mask;/* xflags valid mask (get/set) */
+	unsigned char	fsx_pad[4];
 };
 
 #define FSXATTR_SIZE_VER0 28
