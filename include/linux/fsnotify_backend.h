@@ -58,6 +58,7 @@
 /* #define FS_DIR_MODIFY	0x00080000 */	/* Deprecated (reserved) */
 
 #define FS_PRE_ACCESS		0x00100000	/* Pre-content access hook */
+#define FS_PRE_MODIFY		0x00200000	/* Pre-content modify hook */
 
 #define FS_MNT_ATTACH		0x01000000	/* Mount was attached */
 #define FS_MNT_DETACH		0x02000000	/* Mount was detached */
@@ -91,7 +92,7 @@
 #define FSNOTIFY_CONTENT_PERM_EVENTS (FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
 				      FS_ACCESS_PERM)
 /* Pre-content events can be used to fill file content */
-#define FSNOTIFY_PRE_CONTENT_EVENTS  (FS_PRE_ACCESS)
+#define FSNOTIFY_PRE_CONTENT_EVENTS  (FS_PRE_ACCESS | FS_PRE_MODIFY)
 
 #define ALL_FSNOTIFY_PERM_EVENTS (FSNOTIFY_CONTENT_PERM_EVENTS | \
 				  FSNOTIFY_PRE_CONTENT_EVENTS)
@@ -932,12 +933,13 @@ static inline void fsnotify_init_event(struct fsnotify_event *event)
 	INIT_LIST_HEAD(&event->list);
 }
 int fsnotify_pre_content(const struct path *path, const loff_t *ppos,
-			 size_t count);
+			 size_t count, bool write);
 
 #else
 
 static inline int fsnotify_pre_content(const struct path *path,
-				       const loff_t *ppos, size_t count)
+				       const loff_t *ppos, size_t count,
+				       bool write)
 {
 	return 0;
 }

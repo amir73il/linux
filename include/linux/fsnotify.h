@@ -144,7 +144,7 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 	 */
 	lockdep_assert_once(file_write_not_started(file));
 
-	if (!(perm_mask & (MAY_READ | MAY_WRITE | MAY_ACCESS)))
+	if (!(perm_mask & (MAY_READ | MAY_WRITE)))
 		return 0;
 
 	if (likely(!FMODE_FSNOTIFY_PERM(file->f_mode)))
@@ -154,7 +154,8 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 	 * read()/write() and other types of access generate pre-content events.
 	 */
 	if (unlikely(FMODE_FSNOTIFY_HSM(file->f_mode))) {
-		int ret = fsnotify_pre_content(&file->f_path, ppos, count);
+		int ret = fsnotify_pre_content(&file->f_path, ppos, count,
+					       perm_mask & MAY_WRITE);
 
 		if (ret)
 			return ret;
@@ -182,7 +183,8 @@ static inline int fsnotify_mmap_perm(struct file *file, int prot,
 	if (!file || likely(!FMODE_FSNOTIFY_HSM(file->f_mode)))
 		return 0;
 
-	return fsnotify_pre_content(&file->f_path, &off, len);
+	/* XXX: should we report pre-modify for writably shared maps */
+	return fsnotify_pre_content(&file->f_path, &off, len, false);
 }
 
 /*
@@ -197,7 +199,7 @@ static inline int fsnotify_truncate_perm(const struct path *path, loff_t length)
 					       FSNOTIFY_PRIO_PRE_CONTENT))
 		return 0;
 
-	return fsnotify_pre_content(path, &length, 0);
+	return fsnotify_pre_content(path, &length, 0, true);
 }
 
 /*

@@ -210,19 +210,23 @@ static inline bool fsnotify_object_watched(struct inode *inode, __u32 mnt_mask,
 
 /* Report pre-content event with optional range info */
 int fsnotify_pre_content(const struct path *path, const loff_t *ppos,
-			 size_t count)
+			 size_t count, bool write)
 {
+	__u32 mask = FS_PRE_ACCESS;
 	struct file_range range;
+
+	if (write)
+		mask |= FS_PRE_MODIFY;
 
 	/* Report page aligned range only when pos is known */
 	if (!ppos)
-		return fsnotify_path(path, FS_PRE_ACCESS);
+		return fsnotify_path(path, mask);
 
 	range.path = path;
 	range.pos = PAGE_ALIGN_DOWN(*ppos);
 	range.count = PAGE_ALIGN(*ppos + count) - range.pos;
 
-	return fsnotify_parent(path->dentry, FS_PRE_ACCESS, &range,
+	return fsnotify_parent(path->dentry, mask, &range,
 			       FSNOTIFY_EVENT_FILE_RANGE);
 }
 
@@ -745,7 +749,7 @@ static __init int fsnotify_init(void)
 {
 	int ret;
 
-	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 26);
+	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 27);
 
 	ret = init_srcu_struct(&fsnotify_mark_srcu);
 	if (ret)
