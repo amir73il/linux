@@ -255,6 +255,14 @@ static void *__fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 		    !(mark->flags & FSNOTIFY_MARK_FLAG_NO_IREF))
 			want_iref = true;
 	}
+
+	if (conn->type == FSNOTIFY_OBJ_TYPE_SB) {
+		struct fsnotify_sb_info *sbinfo = fsnotify_sb_info(sb);
+
+		if (sbinfo)
+			new_mask |= sbinfo->default_mask;
+	}
+
 	/*
 	 * We use WRITE_ONCE() to prevent silly compiler optimizations from
 	 * confusing readers not holding conn->lock with partial updates.

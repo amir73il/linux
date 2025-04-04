@@ -585,7 +585,8 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	 * SRCU because we have no references to any objects and do not
 	 * need SRCU to keep them "alive".
 	 */
-	if ((!sbinfo || !sbinfo->sb_marks) &&
+	if ((!sbinfo || (!sbinfo->sb_marks &&
+			 !READ_ONCE(sbinfo->default_mask))) &&
 	    (!mnt || !mnt->mnt_fsnotify_marks) &&
 	    (!inode || !inode->i_fsnotify_marks) &&
 	    (!inode2 || !inode2->i_fsnotify_marks) &&
@@ -641,6 +642,7 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	 * ignore masks are properly reflected for mount/sb mark notifications.
 	 * That's why this traversal is so complicated...
 	 */
+	ret = 1;
 	while (fsnotify_iter_select_report_types(&iter_info)) {
 		ret = send_to_group(mask, data, data_type, dir, file_name,
 				    cookie, &iter_info);
@@ -650,6 +652,21 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 
 		fsnotify_iter_next(&iter_info);
 	}
+
+	/*
+	 * The sb default mask has permission events and there currently no
+	 * groups with marks handling permission events for this object.
+	 * That could mean that an "access modertating" service was stopped
+	 * or died without the chance or desire to allow sb access.
+	 * Err on the side of caution and deny access until another access
+	 * moderating service has started.
+	 */
+	if (ret > 0 && (mask & ALL_FSNOTIFY_PERM_EVENTS) &&
+	    sbinfo && (mask & READ_ONCE(sbinfo->default_mask))) {
+		ret = -EPERM;
+		goto out;
+	}
+
 	ret = 0;
 out:
 	srcu_read_unlock(&fsnotify_mark_srcu, iter_info.srcu_idx);
