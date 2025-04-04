@@ -303,8 +303,7 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 				     struct inode *dir)
 {
 	__u32 marks_mask = 0, marks_ignore_mask = 0;
-	__u32 test_mask, user_mask = FANOTIFY_OUTGOING_EVENTS |
-				     FANOTIFY_EVENT_FLAGS;
+	__u32 test_mask, user_mask = FANOTIFY_OUTGOING_EVENTS;
 	const struct path *path = fsnotify_data_path(data, data_type);
 	unsigned int fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	struct fsnotify_mark *mark;
@@ -356,6 +355,9 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	 * the child entry name information, we report FAN_ONDIR for mkdir/rmdir
 	 * so user can differentiate them from creat/unlink.
 	 *
+	 * For pre-content events we report FAN_ONDIR for readdir, so user can
+	 * differentiate them from read.
+	 *
 	 * For backward compatibility and consistency, do not report FAN_ONDIR
 	 * to user in legacy fanotify mode (reporting fd) and report FAN_ONDIR
 	 * to user in fid mode for all event types.
@@ -364,7 +366,7 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	 * fanotify_alloc_event() when group is reporting fid as indication
 	 * that event happened on child.
 	 */
-	if (fid_mode) {
+	if (fid_mode || test_mask & FANOTIFY_PRE_CONTENT_EVENTS) {
 		/* Do not report event flags without any event */
 		if (!(test_mask & ~FANOTIFY_EVENT_FLAGS))
 			return 0;
