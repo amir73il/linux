@@ -18,6 +18,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/xattr.h>
+#include <sys/mount.h>
 
 #include "utils.h"
 
@@ -445,6 +446,70 @@ out_close:
 	close(fd_socket[0]);
 	close(fd_socket[1]);
 	return fret;
+}
+
+static int write_file(const char *path, const char *val)
+{
+	int fd = open(path, O_WRONLY);
+	size_t len = strlen(val);
+	int ret;
+
+	if (fd == -1) {
+		syserror("opening %s for write: %s\n", path, strerror(errno));
+		return -1;
+	}
+
+	ret = write(fd, val, len);
+	if (ret == -1) {
+		syserror("writing to %s: %s\n", path, strerror(errno));
+		return -1;
+	}
+	if (ret != len) {
+		syserror("short write to %s\n", path);
+		return -1;
+	}
+
+	ret = close(fd);
+	if (ret == -1) {
+		syserror("closing %s\n", path);
+		return -1;
+	}
+
+	return 0;
+}
+
+int setup_userns(void)
+{
+	int ret;
+	char buf[32];
+	uid_t uid = getuid();
+	gid_t gid = getgid();
+
+	ret = unshare(CLONE_NEWNS|CLONE_NEWUSER|CLONE_NEWPID);
+	if (ret) {
+		syserror("unsharing mountns and userns: %s\n", strerror(errno));
+		return ret;
+	}
+
+	sprintf(buf, "0 %d 1", uid);
+	ret = write_file("/proc/self/uid_map", buf);
+	if (ret)
+		return ret;
+	ret = write_file("/proc/self/setgroups", "deny");
+	if (ret)
+		return ret;
+	sprintf(buf, "0 %d 1", gid);
+	ret = write_file("/proc/self/gid_map", buf);
+	if (ret)
+		return ret;
+
+	ret = mount("", "/", NULL, MS_REC|MS_PRIVATE, NULL);
+	if (ret) {
+		syserror("making mount tree private: %s\n", strerror(errno));
+		return ret;
+	}
+
+	return 0;
 }
 
 /* caps_down - lower all effective caps */
