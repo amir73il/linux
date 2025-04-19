@@ -499,3 +499,23 @@ out:
 	cap_free(caps);
 	return fret;
 }
+
+uint64_t get_unique_mnt_id(const char *path)
+{
+	struct statx sx;
+	int ret;
+
+	ret = statx(AT_FDCWD, path, 0, STATX_MNT_ID_UNIQUE, &sx);
+	if (ret == -1) {
+		syserror("retrieving unique mount ID for %s: %s\n", path,
+			 strerror(errno));
+		return 0;
+	}
+
+	if (!(sx.stx_mask & STATX_MNT_ID_UNIQUE)) {
+		syserror("no unique mount ID available for %s\n", path);
+		return 0;
+	}
+
+	return sx.stx_mnt_id;
+}

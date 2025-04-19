@@ -15,6 +15,7 @@
 
 #include "../../kselftest_harness.h"
 #include "../statmount/statmount.h"
+#include "../utils.h"
 
 #ifndef FAN_MNT_ATTACH
 struct fanotify_event_info_mnt {
@@ -35,16 +36,6 @@ struct fanotify_event_info_mnt {
 #ifndef FAN_MARK_MNTNS
 #define FAN_MARK_MNTNS 0x00000110
 #endif
-
-static uint64_t get_mnt_id(struct __test_metadata *const _metadata,
-			   const char *path)
-{
-	struct statx sx;
-
-	ASSERT_EQ(statx(AT_FDCWD, path, 0, STATX_MNT_ID_UNIQUE, &sx), 0);
-	ASSERT_TRUE(!!(sx.stx_mask & STATX_MNT_ID_UNIQUE));
-	return sx.stx_mnt_id;
-}
 
 static const char root_mntpoint_templ[] = "/tmp/mount-notify_test_root.XXXXXX";
 
@@ -94,7 +85,7 @@ FIXTURE_SETUP(fanotify)
 
 	ASSERT_EQ(mkdir("b", 0700), 0);
 
-	self->root_id = get_mnt_id(_metadata, "/");
+	self->root_id = get_unique_mnt_id("/");
 	ASSERT_NE(self->root_id, 0);
 
 	for (i = 0; i < NUM_FAN_FDS; i++) {
