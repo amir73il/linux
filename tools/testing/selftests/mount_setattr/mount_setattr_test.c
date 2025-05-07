@@ -173,11 +173,6 @@ static inline int sys_mount_setattr(int dfd, const char *path, unsigned int flag
 #define AT_RECURSIVE 0x8000 /* Apply to the entire subtree */
 #endif
 
-static inline int sys_open_tree(int dfd, const char *filename, unsigned int flags)
-{
-	return syscall(__NR_open_tree, dfd, filename, flags);
-}
-
 static ssize_t write_nointr(int fd, const void *buf, size_t count)
 {
 	ssize_t ret;
@@ -1076,7 +1071,7 @@ FIXTURE_SETUP(mount_setattr_idmapped)
 	ASSERT_EQ(mkdir("/mnt/D", 0777), 0);
 	img_fd = openat(-EBADF, "/mnt/C/ext4.img", O_CREAT | O_WRONLY, 0600);
 	ASSERT_GE(img_fd, 0);
-	ASSERT_EQ(ftruncate(img_fd, 1024 * 2048), 0);
+	ASSERT_EQ(ftruncate(img_fd, 2147483648 /* 2 GB */), 0);
 	ASSERT_EQ(system("mkfs.ext4 -q /mnt/C/ext4.img"), 0);
 	ASSERT_EQ(system("mount -o loop -t ext4 /mnt/C/ext4.img /mnt/D/"), 0);
 	ASSERT_EQ(close(img_fd), 0);

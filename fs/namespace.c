@@ -355,12 +355,13 @@ static struct mount *alloc_vfsmnt(const char *name)
 		if (err)
 			goto out_free_cache;
 
-		if (name) {
+		if (name)
 			mnt->mnt_devname = kstrdup_const(name,
 							 GFP_KERNEL_ACCOUNT);
-			if (!mnt->mnt_devname)
-				goto out_free_id;
-		}
+		else
+			mnt->mnt_devname = "none";
+		if (!mnt->mnt_devname)
+			goto out_free_id;
 
 #ifdef CONFIG_SMP
 		mnt->mnt_pcp = alloc_percpu(struct mnt_pcp);
@@ -1268,7 +1269,7 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
 	if (!fc->root)
 		return ERR_PTR(-EINVAL);
 
-	mnt = alloc_vfsmnt(fc->source ?: "none");
+	mnt = alloc_vfsmnt(fc->source);
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
 
@@ -5494,7 +5495,7 @@ static int statmount_sb_source(struct kstatmount *s, struct seq_file *seq)
 		seq->buf[seq->count] = '\0';
 		seq->count = start;
 		seq_commit(seq, string_unescape_inplace(seq->buf + start, UNESCAPE_OCTAL));
-	} else if (r->mnt_devname) {
+	} else {
 		seq_puts(seq, r->mnt_devname);
 	}
 	return 0;
@@ -5842,12 +5843,28 @@ static int do_statmount(struct kstatmount *s, u64 mnt_id, u64 mnt_ns_id,
 		return err;
 
 	s->root = root;
-	s->idmap = mnt_idmap(s->mnt);
-	if (s->mask & STATMOUNT_SB_BASIC)
-		statmount_sb_basic(s);
 
+	/*
+	 * Note that mount properties in mnt->mnt_flags, mnt->mnt_idmap
+	 * can change concurrently as we only hold the read-side of the
+	 * namespace semaphore and mount properties may change with only
+	 * the mount lock held.
+	 *
+	 * We could sample the mount lock sequence counter to detect
+	 * those changes and retry. But it's not worth it. Worst that
+	 * happens is that the mnt->mnt_idmap pointer is already changed
+	 * while mnt->mnt_flags isn't or vica versa. So what.
+	 *
+	 * Both mnt->mnt_flags and mnt->mnt_idmap are set and retrieved
+	 * via READ_ONCE()/WRITE_ONCE() and guard against theoretical
+	 * torn read/write. That's all we care about right now.
+	 */
+	s->idmap = mnt_idmap(s->mnt);
 	if (s->mask & STATMOUNT_MNT_BASIC)
 		statmount_mnt_basic(s);
+
+	if (s->mask & STATMOUNT_SB_BASIC)
+		statmount_sb_basic(s);
 
 	if (s->mask & STATMOUNT_PROPAGATE_FROM)
 		statmount_propagate_from(s);
@@ -6160,6 +6177,10 @@ SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 	    !ns_capable_noaudit(ns->user_ns, CAP_SYS_ADMIN))
 		return -ENOENT;
 
+	/*
+	 * We only need to guard against mount topology changes as
+	 * listmount() doesn't care about any mount properties.
+	 */
 	scoped_guard(rwsem_read, &namespace_sem)
 		ret = do_listmount(ns, kreq.mnt_id, last_mnt_id, kmnt_ids,
 				   nr_mnt_ids, (flags & LISTMOUNT_REVERSE));
