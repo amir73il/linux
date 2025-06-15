@@ -201,6 +201,7 @@ enum fsnotify_group_prio {
 	FSNOTIFY_PRIO_NORMAL = 0,	/* normal notifiers, no permissions */
 	FSNOTIFY_PRIO_CONTENT,		/* fanotify permission events */
 	FSNOTIFY_PRIO_PRE_CONTENT,	/* fanotify pre-content events */
+	FSNOTIFY_PRIO_PRE_CONTENT_FID,	/* fanotify pre-content events with fid */
 	__FSNOTIFY_PRIO_NUM
 };
 

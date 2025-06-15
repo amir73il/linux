@@ -73,6 +73,9 @@
 /* Convenience macro - FAN_REPORT_TARGET_FID requires all other FID flags */
 #define FAN_REPORT_DFID_NAME_TARGET (FAN_REPORT_DFID_NAME | \
 				     FAN_REPORT_FID | FAN_REPORT_TARGET_FID)
+/* Convenience macro - FAN_CLASS_PRE_CONTENT requires all or no FID flags */
+#define FAN_CLASS_PRE_CONTENT_FID   (FAN_CLASS_PRE_CONTENT | \
+				     FAN_REPORT_DFID_NAME_TARGET)
 
 /* Deprecated - do not use this in programs and do not add new flags here! */
 #define FAN_ALL_INIT_FLAGS	(FAN_CLOEXEC | FAN_NONBLOCK | \

@@ -353,7 +353,7 @@ static int process_access_response(struct fsnotify_group *group,
 		break;
 	case FAN_DENY:
 		/* Custom errno is supported only for pre-content groups */
-		if (errno && group->priority != FSNOTIFY_PRIO_PRE_CONTENT)
+		if (errno && group->priority < FSNOTIFY_PRIO_PRE_CONTENT)
 			return -EINVAL;
 
 		/*
@@ -1383,6 +1383,16 @@ static int fanotify_group_init_error_pool(struct fsnotify_group *group)
 					 sizeof(struct fanotify_error_event));
 }
 
+/* Check for forbidden events/flags combinations */
+static bool fanotify_mask_is_valid(__u64 mask)
+{
+	/* Pre-content events do not support event flags */
+	if (mask & FANOTIFY_PRE_CONTENT_EVENTS && mask & FAN_ONDIR)
+		return false;
+
+	return true;
+}
+
 static int fanotify_may_update_existing_mark(struct fsnotify_mark *fsn_mark,
 					     __u32 mask, unsigned int fan_flags)
 {
@@ -1411,9 +1421,9 @@ static int fanotify_may_update_existing_mark(struct fsnotify_mark *fsn_mark,
 	    fsn_mark->flags & FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY)
 		return -EEXIST;
 
-	/* For now pre-content events are not generated for directories */
+	/* Check for forbidden event combinations after update */
 	mask |= fsn_mark->mask;
-	if (mask & FANOTIFY_PRE_CONTENT_EVENTS && mask & FAN_ONDIR)
+	if (!fanotify_mask_is_valid(mask))
 		return -EEXIST;
 
 	return 0;
@@ -1564,7 +1574,13 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 		return -EINVAL;
 	}
 
-	if (fid_mode && class != FAN_CLASS_NOTIF)
+	/*
+	 * Async events support any fid report mode.
+	 * Permission events do not support any fid report mode.
+	 * Pre-content events support only FAN_REPORT_DFID_NAME_TARGET mode.
+	 */
+	if (fid_mode && class != FAN_CLASS_NOTIF &&
+	    (class | fid_mode) != FAN_CLASS_PRE_CONTENT_FID)
 		return -EINVAL;
 
 	/*
@@ -1633,7 +1649,12 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 		group->priority = FSNOTIFY_PRIO_CONTENT;
 		break;
 	case FAN_CLASS_PRE_CONTENT:
-		group->priority = FSNOTIFY_PRIO_PRE_CONTENT;
+		/*
+		 * FAN_CLASS_PRE_CONTENT_FID is exclusively for pre-content
+		 * events, so it gets a higher priority.
+		 */
+		group->priority = fid_mode ? FSNOTIFY_PRIO_PRE_CONTENT_FID :
+					     FSNOTIFY_PRIO_PRE_CONTENT;
 		break;
 	default:
 		fd = -EINVAL;
@@ -1749,6 +1770,9 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 	bool strict_dir_events = FAN_GROUP_FLAG(group, FAN_REPORT_TARGET_FID) ||
 				 (mask & FAN_RENAME) ||
 				 (flags & FAN_MARK_IGNORE);
+
+	if (!fanotify_mask_is_valid(mask))
+		return -EINVAL;
 
 	/*
 	 * Filesystems need to opt-into pre-content evnets (a.k.a HSM)
@@ -1911,13 +1935,27 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	/*
 	 * Permission events are not allowed for FAN_CLASS_NOTIF.
 	 * Pre-content permission events are not allowed for FAN_CLASS_CONTENT.
+	 * Only pre-content events are allowed for FAN_CLASS_PRE_CONTENT_FID.
 	 */
-	if (mask & FANOTIFY_PERM_EVENTS &&
-	    group->priority == FSNOTIFY_PRIO_NORMAL)
+	fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
+	switch (group->priority) {
+	case FSNOTIFY_PRIO_NORMAL:
+		if (mask & FANOTIFY_PERM_EVENTS)
+			return -EINVAL;
+		break;
+	case FSNOTIFY_PRIO_CONTENT:
+		if (mask & FANOTIFY_PRE_CONTENT_EVENTS)
+			return -EINVAL;
+		break;
+	case FSNOTIFY_PRIO_PRE_CONTENT:
+               break;
+	case FSNOTIFY_PRIO_PRE_CONTENT_FID:
+	       if (mask & ~FANOTIFY_PRE_CONTENT_EVENTS)
+		       return -EINVAL;
+		break;
+	default:
 		return -EINVAL;
-	else if (mask & FANOTIFY_PRE_CONTENT_EVENTS &&
-		 group->priority == FSNOTIFY_PRIO_CONTENT)
-		return -EINVAL;
+	}
 
 	if (mask & FAN_FS_ERROR &&
 	    mark_type != FAN_MARK_FILESYSTEM)
@@ -1938,7 +1976,6 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 * carry enough information (i.e. path) to be filtered by mount
 	 * point.
 	 */
-	fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	if (mask & ~(FANOTIFY_FD_EVENTS|FANOTIFY_MOUNT_EVENTS|FANOTIFY_EVENT_FLAGS) &&
 	    (!fid_mode || mark_type == FAN_MARK_MOUNT))
 		return -EINVAL;
@@ -1949,10 +1986,6 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 * useful and was not implemented.
 	 */
 	if (mask & FAN_RENAME && !(fid_mode & FAN_REPORT_NAME))
-		return -EINVAL;
-
-	/* Pre-content events are not currently generated for directories. */
-	if (mask & FANOTIFY_PRE_CONTENT_EVENTS && mask & FAN_ONDIR)
 		return -EINVAL;
 
 	if (mark_cmd == FAN_MARK_FLUSH) {
@@ -2041,6 +2074,13 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		if ((fid_mode & FAN_REPORT_DIR_FID) &&
 		    (flags & FAN_MARK_ADD) && !ignore)
 			mask |= FAN_EVENT_ON_CHILD;
+	} else if (fid_mode && (mask & FANOTIFY_PRE_CONTENT_EVENTS)) {
+		/*
+		 * Pre-content events on directory inode mask implies that
+		 * we are watching access to children.
+		 */
+		mask |= FAN_EVENT_ON_CHILD;
+		umask = FAN_EVENT_ON_CHILD;
 	}
 
 	/* create/update an inode mark */
