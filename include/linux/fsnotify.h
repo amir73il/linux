@@ -199,7 +199,7 @@ static inline int fsnotify_truncate_perm(const struct path *path, loff_t length)
 }
 
 /*
- * fsnotify_file_perm - permission hook before file access (unknown range)
+ * fsnotify_file_perm - permission hook before file/dir access (unknown range)
  */
 static inline int fsnotify_file_perm(struct file *file, int perm_mask)
 {
