@@ -226,6 +226,24 @@ int fsnotify_pre_content(const struct path *path, const loff_t *ppos,
 			 size_t count)
 {
 	struct file_range range;
+	struct inode *inode = d_inode(path->dentry);
+
+	/*
+	 * Report FS_PRE_DIR_ACCESS only once, if the event was handled.
+	 * Do not report FS_PRE_DIR_ACCESS on parent, only on self.
+	 */
+	if (S_ISDIR(inode->i_mode)) {
+		if (READ_ONCE(path->dentry->d_flags) & DCACHE_HSM_ONCE)
+			return 0;
+
+		int ret = fsnotify(FS_PRE_DIR_ACCESS, path, FSNOTIFY_EVENT_PATH,
+				   inode, NULL, NULL, 0);
+
+		if (ret > 0)
+			fsnotify_set_hsm_once(path->dentry);
+
+		return ret;
+	}
 
 	/* Report page aligned range only when pos is known */
 	if (!ppos)
