@@ -153,7 +153,7 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 	if (unlikely(FMODE_FSNOTIFY_HSM(file->f_mode))) {
 		int ret = fsnotify_pre_content(&file->f_path, ppos, count);
 
-		if (ret)
+		if (ret < 0)
 			return ret;
 	}
 
