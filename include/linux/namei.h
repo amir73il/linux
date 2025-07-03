@@ -29,7 +29,8 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT};
 #define LOOKUP_RCU		BIT(8)	/* RCU pathwalk mode; semi-internal */
 #define LOOKUP_CACHED		BIT(9) /* Only do cached lookup */
 #define LOOKUP_PARENT		BIT(10)	/* Looking up final parent in path */
-/* 5 spare bits for pathwalk */
+#define LOOKUP_NONOTIFY		BIT(11)	/* Don't call fsnotify lookup hook */
+/* 4 spare bits for pathwalk */
 
 /* These tell filesystem methods that we are dealing with the final component... */
 #define LOOKUP_OPEN		BIT(16)	/* ... in open */

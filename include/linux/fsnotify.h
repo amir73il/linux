@@ -234,8 +234,10 @@ static inline int fsnotify_lookup_perm(struct dentry *dentry,
 	 * filesystem may be modified in the context of permission events
 	 * (e.g. by HSM filling a dir on access), so sb freeze protection
 	 * must not be held.
+	 * If path is NULL, we do not send the event to userspace, we only
+	 * check if it would have been sent to userspace.
 	 */
-	lockdep_assert_once(sb_write_not_started(dir->i_sb));
+	lockdep_assert_once(path && sb_write_not_started(dir->i_sb));
 
 	return fsnotify(FS_PRE_DIR_ACCESS, path, FSNOTIFY_EVENT_PATH,
 			dir, name, NULL, 0);

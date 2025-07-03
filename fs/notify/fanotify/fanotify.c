@@ -324,6 +324,10 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 		/* Path type events are only relevant for files and dirs */
 		if (!d_is_reg(path->dentry) && !d_can_lookup(path->dentry))
 			return 0;
+	} else if (event_mask & FANOTIFY_PRE_DIR_CONTENT_EVENTS) {
+		/* Cannot handle pre-content lookup events without a path */
+		if (!path)
+			return -ENOENT;
 	} else if (!(fid_mode & FAN_REPORT_FID)) {
 		/* Do we have a directory inode to report? */
 		if (!dir && !ondir)

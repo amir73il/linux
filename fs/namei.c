@@ -1817,6 +1817,7 @@ static struct dentry *__lookup_slow(const struct qstr *name,
 	struct dentry *dentry, *old;
 	struct inode *inode = dir->d_inode;
 	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(wq);
+	int error;
 
 	/* Don't go there if it's already dead */
 	if (unlikely(IS_DEADDIR(inode)))
@@ -1826,7 +1827,7 @@ again:
 	if (IS_ERR(dentry))
 		return dentry;
 	if (unlikely(!d_in_lookup(dentry))) {
-		int error = d_revalidate(inode, name, dentry, flags);
+		error = d_revalidate(inode, name, dentry, flags);
 		if (unlikely(error <= 0)) {
 			if (!error) {
 				d_invalidate(dentry);
@@ -1842,6 +1843,29 @@ again:
 		if (unlikely(old)) {
 			dput(dentry);
 			dentry = old;
+		} else if (!(flags & LOOKUP_NONOTIFY) &&
+			   d_flags_negative(smp_load_acquire(&dentry->d_flags))) {
+			/*
+			 * We cannot block waiting for usersapce to respond to
+			 * pre-content lookup event in this locked context.
+			 * Instead, if the lookup result is positive, we always
+			 * allow it and if the result is negative, we call the
+			 * hook to see if we can trust the negative result.
+			 * If the directory is not watched, we will return the
+			 * negative dentry, which then could be use to create
+			 * a positive dentry.
+			 * If the directory is watched, we will get an error and
+			 * pass it back to the caller without leaving a negative
+			 * dentry, so that next lookup attempt from a safe
+			 * context will be able to call the hook and populate
+			 * the directory.
+			 */
+			error = fsnotify_lookup_perm(dir, name, NULL);
+			if (unlikely(error != -EOPNOTSUPP) && error < 0) {
+				lookup_drop_negative(dentry);
+				dput(dentry);
+				return ERR_PTR(error);
+			}
 		}
 	}
 	return dentry;
@@ -1872,7 +1896,9 @@ static struct dentry *lookup_slow_notify(struct nameidata *nd)
 			return ERR_PTR(ret);
 	}
 
-	return lookup_slow(&nd->last, nd->path.dentry, nd->flags);
+	/* Avoid the hook for negative results of internal vfs callers */
+	return lookup_slow(&nd->last, nd->path.dentry,
+			   nd->flags | LOOKUP_NONOTIFY);
 }
 
 static inline int may_lookup(struct mnt_idmap *idmap,
