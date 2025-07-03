@@ -217,7 +217,7 @@ static int fanotify_merge(struct fsnotify_group *group,
 /*
  * Wait for response to permission event. The function also takes care of
  * freeing the permission event (or offloads that in case the wait is canceled
- * by a signal). The function returns 0 in case access got allowed by userspace,
+ * by a signal). The function returns 1 in case access got allowed by userspace,
  * -EPERM in case userspace disallowed the access, and -ERESTARTSYS in case
  * the wait got interrupted by a signal.
  */
@@ -261,7 +261,7 @@ static int fanotify_get_response(struct fsnotify_group *group,
 	/* userspace responded, convert to something usable */
 	switch (event->response & FANOTIFY_RESPONSE_ACCESS) {
 	case FAN_ALLOW:
-		ret = 0;
+		ret = 1;
 		break;
 	case FAN_DENY:
 		/* Check custom errno from pre-content events */
@@ -1025,7 +1025,7 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 				    fanotify_insert_event);
 	if (ret) {
 		/* Permission events shouldn't be merged */
-		BUG_ON(ret == 1 && mask & FANOTIFY_PERM_EVENTS);
+		WARN_ON(ret == 1 && mask & FANOTIFY_PERM_EVENTS);
 		/* Our event wasn't used in the end. Free it. */
 		fsnotify_destroy_event(group, fsn_event);
 

@@ -551,6 +551,7 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	struct dentry *moved;
 	int inode2_type;
 	int ret = 0;
+	bool handled = false;
 	__u32 test_mask, marks_mask = 0;
 
 	if (path)
@@ -641,12 +642,16 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		ret = send_to_group(mask, data, data_type, dir, file_name,
 				    cookie, &iter_info);
 
-		if (ret && (mask & ALL_FSNOTIFY_PERM_EVENTS))
+		if (ret < 0 && (mask & ALL_FSNOTIFY_PERM_EVENTS))
 			goto out;
+
+		if (ret > 0)
+			handled = true;
 
 		fsnotify_iter_next(&iter_info);
 	}
-	ret = 0;
+	/* Let callers know if pre-dir-content event was handled in userspace */
+	ret = (mask & FSNOTIFY_PRE_DIR_CONTENT_EVENTS) ? handled : 0;
 out:
 	srcu_read_unlock(&fsnotify_mark_srcu, iter_info.srcu_idx);
 
