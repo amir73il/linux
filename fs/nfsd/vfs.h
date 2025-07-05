@@ -160,22 +160,12 @@ __be32		nfsd_permission(struct svc_cred *cred, struct svc_export *exp,
 
 void		nfsd_filp_close(struct file *fp);
 
-static inline int fh_want_write(struct svc_fh *fh)
-{
-	int ret;
-
-	if (fh->fh_want_write)
-		return 0;
-	ret = mnt_want_write(fh->fh_export->ex_path.mnt);
-	if (!ret)
-		fh->fh_want_write = true;
-	return ret;
-}
+int fh_want_write(struct svc_fh *fh);
 
 static inline void fh_drop_write(struct svc_fh *fh)
 {
-	if (fh->fh_want_write) {
-		fh->fh_want_write = false;
+	if (fh->fh_got_write) {
+		fh->fh_got_write = false;
 		mnt_drop_write(fh->fh_export->ex_path.mnt);
 	}
 }

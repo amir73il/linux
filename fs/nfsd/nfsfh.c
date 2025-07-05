@@ -297,6 +297,18 @@ out:
 	return error;
 }
 
+int fh_want_write(struct svc_fh *fhp)
+{
+	int ret;
+
+	if (fhp->fh_got_write)
+		return 0;
+	ret = mnt_want_write(fhp->fh_export->ex_path.mnt);
+	if (!ret)
+		fhp->fh_got_write = true;
+	return ret;
+}
+
 /**
  * __fh_verify - filehandle lookup and access checking
  * @rqstp: RPC transaction context, or NULL
