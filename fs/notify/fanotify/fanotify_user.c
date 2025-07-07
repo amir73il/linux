@@ -763,7 +763,7 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 			info_type = FAN_EVENT_INFO_TYPE_DFID_NAME;
 			dot = ".";
 			dot_len = 1;
-		} else if ((event->mask & ALL_FSNOTIFY_DIRENT_EVENTS) ||
+		} else if ((event->mask & FANOTIFY_DIRONLY_EVENTS) ||
 			   (event->mask & FAN_ONDIR)) {
 			/*
 			 * With group flag FAN_REPORT_DIR_FID, a single info
@@ -1996,7 +1996,8 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	/*
 	 * Permission events are not allowed for FAN_CLASS_NOTIF.
 	 * Pre-content permission events are not allowed for FAN_CLASS_CONTENT.
-	 * Only pre-content events are allowed for FAN_CLASS_PRE_CONTENT_FID.
+	 * Only pre-content events are allowed for FAN_CLASS_PRE_CONTENT_FID and
+	 * pre-content dir events are allowed only for FAN_CLASS_PRE_CONTENT_FID.
 	 */
 	fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	switch (group->priority) {
@@ -2009,7 +2010,9 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 			return -EINVAL;
 		break;
 	case FSNOTIFY_PRIO_PRE_CONTENT:
-               break;
+		if (mask & FANOTIFY_PRE_DIR_CONTENT_EVENTS)
+			return -EINVAL;
+		break;
 	case FSNOTIFY_PRIO_PRE_CONTENT_FID:
 	       if (mask & ~FANOTIFY_PRE_CONTENT_EVENTS)
 		       return -EINVAL;
@@ -2147,7 +2150,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		if ((fid_mode & FAN_REPORT_DIR_FID) &&
 		    (flags & FAN_MARK_ADD) && !ignore)
 			mask |= FAN_EVENT_ON_CHILD;
-	} else if (fid_mode && (mask & FANOTIFY_PRE_CONTENT_EVENTS)) {
+	} else if (fid_mode && (mask & FANOTIFY_PRE_FILE_CONTENT_EVENTS)) {
 		/*
 		 * Pre-content events on directory inode mask implies that
 		 * we are watching access to children.
