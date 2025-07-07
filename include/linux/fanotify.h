@@ -95,7 +95,7 @@
 /* Pre-content events can be used to fill file content */
 #define FANOTIFY_PRE_FILE_CONTENT_EVENTS (FAN_PRE_ACCESS)
 /* Pre-content events can be used to fill dir content */
-#define FANOTIFY_PRE_DIR_CONTENT_EVENTS  (0)
+#define FANOTIFY_PRE_DIR_CONTENT_EVENTS  (FAN_PRE_DIR_ACCESS)
 
 #define FANOTIFY_PRE_CONTENT_EVENTS \
 				(FANOTIFY_PRE_FILE_CONTENT_EVENTS | \
