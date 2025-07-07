@@ -206,6 +206,40 @@ static inline int fsnotify_file_perm(struct file *file, int perm_mask)
 	return fsnotify_file_area_perm(file, perm_mask, NULL, 0);
 }
 
+/*
+ * fsnotify_lookup_perm - permission hook before name lookup
+ *
+ * Returns >0 if event was handled and allowed by userspace.
+ */
+static inline int fsnotify_lookup_perm(struct dentry *dentry,
+				       const struct qstr *name,
+				       struct path *path)
+{
+	struct inode *dir = d_inode(dentry);
+
+	if (!(dir->i_sb->s_iflags & SB_I_ALLOW_HSM) ||
+	    !fsnotify_sb_has_priority_watchers(dir->i_sb,
+					       FSNOTIFY_PRIO_PRE_CONTENT_FID))
+		return 0;
+
+	/* No need to populate content if readdir hook already did */
+	if (READ_ONCE(dentry->d_flags) & DCACHE_HSM_ONCE)
+		return 0;
+
+	if (WARN_ON_ONCE(!S_ISDIR(dir->i_mode)))
+		return 0;
+
+	/*
+	 * filesystem may be modified in the context of permission events
+	 * (e.g. by HSM filling a dir on access), so sb freeze protection
+	 * must not be held.
+	 */
+	lockdep_assert_once(sb_write_not_started(dir->i_sb));
+
+	return fsnotify(FS_PRE_DIR_ACCESS, path, FSNOTIFY_EVENT_PATH,
+			dir, name, NULL, 0);
+}
+
 #else
 static inline int fsnotify_open_perm_and_set_mode(struct file *file)
 {
@@ -230,6 +264,13 @@ static inline int fsnotify_truncate_perm(const struct path *path, loff_t length)
 }
 
 static inline int fsnotify_file_perm(struct file *file, int perm_mask)
+{
+	return 0;
+}
+
+static inline int fsnotify_lookup_perm(struct dentry *dentry,
+				       const struct qstr *name,
+				       struct path *path)
 {
 	return 0;
 }
