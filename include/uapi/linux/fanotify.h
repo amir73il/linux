@@ -27,7 +27,9 @@
 #define FAN_OPEN_EXEC_PERM	0x00040000	/* File open/exec in perm check */
 /* #define FAN_DIR_MODIFY	0x00080000 */	/* Deprecated (reserved) */
 
-#define FAN_PRE_ACCESS		0x00100000	/* Pre-content access hook */
+#define FAN_PRE_ACCESS		0x00100000	/* Pre-content file access hook */
+#define FAN_PRE_DIR_ACCESS	0x00200000	/* Pre-content dir access hook */
+
 #define FAN_MNT_ATTACH		0x01000000	/* Mount was attached */
 #define FAN_MNT_DETACH		0x02000000	/* Mount was detached */
 
