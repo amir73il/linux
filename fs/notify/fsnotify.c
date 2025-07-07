@@ -208,6 +208,19 @@ static inline __u32 fsnotify_object_watched(struct inode *inode, __u32 mnt_mask,
 	return mask & marks_mask & ALL_FSNOTIFY_EVENTS;
 }
 
+/*
+ * Mark dentry when pre-dir-content event was handled, so that we won't need
+ * to handle dir-pre-content event more than once until dir gets out of dcache.
+ */
+static inline void fsnotify_set_hsm_once(struct dentry *dentry)
+{
+	spin_lock(&dentry->d_lock);
+	WRITE_ONCE(dentry->d_flags,
+		   READ_ONCE(dentry->d_flags) | DCACHE_HSM_ONCE);
+	spin_unlock(&dentry->d_lock);
+}
+
+
 /* Report pre-content event with optional range info */
 int fsnotify_pre_content(const struct path *path, const loff_t *ppos,
 			 size_t count)

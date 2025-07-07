@@ -222,6 +222,7 @@ enum dentry_flags {
 	DCACHE_PAR_LOOKUP		= BIT(24),	/* being looked up (with parent locked shared) */
 	DCACHE_DENTRY_CURSOR		= BIT(25),
 	DCACHE_NORCU			= BIT(26),	/* No RCU delay for freeing */
+	DCACHE_HSM_ONCE			= BIT(27),	/* Pre-dir-content hook was called */
 };
 
 #define DCACHE_MANAGED_DENTRY \
