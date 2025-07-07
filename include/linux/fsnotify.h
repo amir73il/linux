@@ -217,10 +217,11 @@ static inline int fsnotify_lookup_perm(struct dentry *dentry,
 {
 	struct inode *dir = d_inode(dentry);
 
+	/* Singal to path walk that no need to call hook until crossing sb */
 	if (!(dir->i_sb->s_iflags & SB_I_ALLOW_HSM) ||
 	    !fsnotify_sb_has_priority_watchers(dir->i_sb,
 					       FSNOTIFY_PRIO_PRE_CONTENT_FID))
-		return 0;
+		return -EOPNOTSUPP;
 
 	/* No need to populate content if readdir hook already did */
 	if (READ_ONCE(dentry->d_flags) & DCACHE_HSM_ONCE)
