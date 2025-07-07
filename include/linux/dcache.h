@@ -239,6 +239,7 @@ enum dentry_flags {
 	DCACHE_DENTRY_CURSOR		= BIT(25),
 	DCACHE_NORCU			= BIT(26),	/* No RCU delay for freeing */
 	DCACHE_PERSISTENT		= BIT(27),
+	DCACHE_HSM_ONCE			= BIT(28),	/* Pre-dir-content hook was called */
 /* 28, 29, 30 free */
 	DCACHE_PRIVATE			= BIT(31)	/* fs-specific flag */
 };
