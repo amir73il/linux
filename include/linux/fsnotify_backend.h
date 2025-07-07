@@ -43,6 +43,7 @@
 #define FS_OPEN_EXEC		0x00001000	/* File was opened for exec */
 
 #define FS_UNMOUNT		0x00002000	/* inode on umount fs */
+
 #define FS_Q_OVERFLOW		0x00004000	/* Event queued overflowed */
 #define FS_ERROR		0x00008000	/* Filesystem Error (fanotify) */
 
@@ -57,7 +58,8 @@
 #define FS_OPEN_EXEC_PERM	0x00040000	/* open/exec event in a permission hook */
 /* #define FS_DIR_MODIFY	0x00080000 */	/* Deprecated (reserved) */
 
-#define FS_PRE_ACCESS		0x00100000	/* Pre-content access hook */
+#define FS_PRE_ACCESS		0x00100000	/* Pre-content file access hook */
+#define FS_PRE_DIR_ACCESS	0x00200000	/* Pre-content dir access hook */
 
 #define FS_MNT_ATTACH		0x01000000	/* Mount was attached */
 #define FS_MNT_DETACH		0x02000000	/* Mount was detached */
@@ -91,7 +93,13 @@
 #define FSNOTIFY_CONTENT_PERM_EVENTS (FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
 				      FS_ACCESS_PERM)
 /* Pre-content events can be used to fill file content */
-#define FSNOTIFY_PRE_CONTENT_EVENTS  (FS_PRE_ACCESS)
+#define FSNOTIFY_PRE_FILE_CONTENT_EVENTS (FS_PRE_ACCESS)
+/* Pre-content events can be used to fill dir content */
+#define FSNOTIFY_PRE_DIR_CONTENT_EVENTS  (FS_PRE_DIR_ACCESS)
+
+#define FSNOTIFY_PRE_CONTENT_EVENTS \
+				 (FSNOTIFY_PRE_FILE_CONTENT_EVENTS | \
+				  FSNOTIFY_PRE_DIR_CONTENT_EVENTS)
 
 #define ALL_FSNOTIFY_PERM_EVENTS (FSNOTIFY_CONTENT_PERM_EVENTS | \
 				  FSNOTIFY_PRE_CONTENT_EVENTS)
@@ -100,7 +108,8 @@
  * This is a list of all events that may get sent to a parent that is watching
  * with flag FS_EVENT_ON_CHILD based on fs event on a child of that directory.
  */
-#define FS_EVENTS_POSS_ON_CHILD   (ALL_FSNOTIFY_PERM_EVENTS | \
+#define FS_EVENTS_POSS_ON_CHILD   (FSNOTIFY_CONTENT_PERM_EVENTS | \
+				   FSNOTIFY_PRE_FILE_CONTENT_EVENTS | \
 				   FS_ACCESS | FS_MODIFY | FS_ATTRIB | \
 				   FS_CLOSE_WRITE | FS_CLOSE_NOWRITE | \
 				   FS_OPEN | FS_OPEN_EXEC)
@@ -115,6 +124,7 @@
 
 /* Events that can be reported to backends */
 #define ALL_FSNOTIFY_EVENTS (ALL_FSNOTIFY_DIRENT_EVENTS | \
+			     ALL_FSNOTIFY_PERM_EVENTS | \
 			     FSNOTIFY_MNT_EVENTS | \
 			     FS_EVENTS_POSS_ON_CHILD | \
 			     FS_DELETE_SELF | FS_MOVE_SELF | \

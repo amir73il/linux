@@ -89,11 +89,17 @@
 #define FANOTIFY_DIRENT_EVENTS	(FAN_MOVE | FAN_CREATE | FAN_DELETE | \
 				 FAN_RENAME)
 
-/* Content events can be used to inspect file content */
+/* Content events can be used to inspect file/dir content */
 #define FANOTIFY_CONTENT_PERM_EVENTS (FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM | \
 				      FAN_ACCESS_PERM)
 /* Pre-content events can be used to fill file content */
-#define FANOTIFY_PRE_CONTENT_EVENTS  (FAN_PRE_ACCESS)
+#define FANOTIFY_PRE_FILE_CONTENT_EVENTS (FAN_PRE_ACCESS)
+/* Pre-content events can be used to fill dir content */
+#define FANOTIFY_PRE_DIR_CONTENT_EVENTS  (0)
+
+#define FANOTIFY_PRE_CONTENT_EVENTS \
+				(FANOTIFY_PRE_FILE_CONTENT_EVENTS | \
+				 FANOTIFY_PRE_DIR_CONTENT_EVENTS)
 
 /* Events that require a permission response from user */
 #define FANOTIFY_PERM_EVENTS	(FANOTIFY_CONTENT_PERM_EVENTS | \
@@ -125,8 +131,12 @@
 					 FANOTIFY_PERM_EVENTS | \
 					 FAN_Q_OVERFLOW | FAN_ONDIR)
 
+/* Events reported only for directories */
+#define FANOTIFY_DIRONLY_EVENTS		(FANOTIFY_DIRENT_EVENTS | \
+					 FANOTIFY_PRE_DIR_CONTENT_EVENTS)
+
 /* Events and flags relevant only for directories */
-#define FANOTIFY_DIRONLY_EVENT_BITS	(FANOTIFY_DIRENT_EVENTS | \
+#define FANOTIFY_DIRONLY_EVENT_BITS	(FANOTIFY_DIRONLY_EVENTS | \
 					 FAN_EVENT_ON_CHILD | FAN_ONDIR)
 
 #define ALL_FANOTIFY_EVENT_BITS		(FANOTIFY_OUTGOING_EVENTS | \
