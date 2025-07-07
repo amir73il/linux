@@ -470,7 +470,7 @@ static inline bool fanotify_is_perm_event(u32 mask)
 
 static inline bool fanotify_event_has_access_range(struct fanotify_event *event)
 {
-	if (!(event->mask & FANOTIFY_PRE_CONTENT_EVENTS))
+	if (!(event->mask & FANOTIFY_PRE_FILE_CONTENT_EVENTS))
 		return false;
 
 	return FANOTIFY_PERM(event)->ppos;

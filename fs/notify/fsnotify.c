@@ -707,12 +707,13 @@ int fsnotify_open_perm_and_set_mode(struct file *file)
 	}
 
 	/*
-	 * Pre-content events are only supported on regular files.
+	 * Pre-content events are only supported on regular files and dirs.
 	 * If there are pre-content event watchers and no permission access
 	 * watchers, set FMODE_NONOTIFY | FMODE_NONOTIFY_PERM to indicate that.
 	 * That is the common case with HSM service.
 	 */
-	if (d_is_reg(dentry) && (p_mask & FSNOTIFY_PRE_CONTENT_EVENTS)) {
+	if ((d_is_reg(dentry) && (p_mask & FSNOTIFY_PRE_FILE_CONTENT_EVENTS)) ||
+	    (d_is_dir(dentry) && (p_mask & FSNOTIFY_PRE_DIR_CONTENT_EVENTS))) {
 		file_set_fsnotify_mode(file, FMODE_NONOTIFY |
 					     FMODE_NONOTIFY_PERM);
 		goto open_perm;
@@ -764,7 +765,7 @@ static __init int fsnotify_init(void)
 {
 	int ret;
 
-	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 26);
+	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 27);
 
 	ret = init_srcu_struct(&fsnotify_mark_srcu);
 	if (ret)
