@@ -657,6 +657,14 @@ struct nameidata {
 #define ND_ROOT_PRESET 1
 #define ND_ROOT_GRABBED 2
 #define ND_JUMPED 4
+#define ND_NONOTIFY 8
+
+static void nd_set_jumped(struct nameidata *nd)
+{
+	nd->state |= ND_JUMPED;
+	/* Maybe crossed sb/mount so need to re-test sb/mount watches */
+	nd->state &= ~ND_NONOTIFY;
+}
 
 static void __set_nameidata(struct nameidata *p, int dfd, struct filename *name)
 {
@@ -1051,7 +1059,7 @@ static int nd_jump_root(struct nameidata *nd)
 		path_get(&nd->path);
 		nd->inode = nd->path.dentry->d_inode;
 	}
-	nd->state |= ND_JUMPED;
+	nd_set_jumped(nd);
 	return 0;
 }
 
@@ -1079,7 +1087,7 @@ int nd_jump_link(const struct path *path)
 	path_put(&nd->path);
 	nd->path = *path;
 	nd->inode = nd->path.dentry->d_inode;
-	nd->state |= ND_JUMPED;
+	nd_set_jumped(nd);
 	return 0;
 
 err:
@@ -1594,7 +1602,7 @@ static bool __follow_mount_rcu(struct nameidata *nd, struct path *path)
 			if (mounted) {
 				path->mnt = &mounted->mnt;
 				dentry = path->dentry = mounted->mnt.mnt_root;
-				nd->state |= ND_JUMPED;
+				nd_set_jumped(nd);
 				nd->next_seq = read_seqcount_begin(&dentry->d_seq);
 				flags = dentry->d_flags;
 				// makes sure that non-RCU pathwalk could reach
@@ -1634,7 +1642,7 @@ static inline int handle_mounts(struct nameidata *nd, struct dentry *dentry,
 		if (unlikely(nd->flags & LOOKUP_NO_XDEV))
 			ret = -EXDEV;
 		else
-			nd->state |= ND_JUMPED;
+			nd_set_jumped(nd);
 	}
 	if (unlikely(ret)) {
 		dput(path->dentry);
@@ -1838,10 +1846,16 @@ static struct dentry *lookup_slow(const struct qstr *name,
 
 static struct dentry *lookup_slow_notify(struct nameidata *nd)
 {
-	int ret = fsnotify_lookup_perm(nd->path.dentry, &nd->last, &nd->path);
+	if (!(nd->state & ND_NONOTIFY)) {
+		int ret = fsnotify_lookup_perm(nd->path.dentry, &nd->last,
+					       &nd->path);
 
-	if (unlikely(ret < 0))
-		return ERR_PTR(ret);
+		/* Avoid hooks on same sb again until nd_set_jumped() */
+		if (likely(ret == -EOPNOTSUPP))
+			nd->state |= ND_NONOTIFY;
+		else if (unlikely(ret < 0))
+			return ERR_PTR(ret);
+	}
 
 	return lookup_slow(&nd->last, nd->path.dentry, nd->flags);
 }
@@ -2471,7 +2485,7 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		switch(lastword) {
 		case LAST_WORD_IS_DOTDOT:
 			nd->last_type = LAST_DOTDOT;
-			nd->state |= ND_JUMPED;
+			nd_set_jumped(nd);
 			break;
 
 		case LAST_WORD_IS_DOT:
@@ -2551,7 +2565,7 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 		nd->seq = nd->next_seq = 0;
 
 	nd->flags = flags;
-	nd->state |= ND_JUMPED;
+	nd_set_jumped(nd);
 
 	nd->m_seq = __read_seqcount_begin(&mount_lock.seqcount);
 	nd->r_seq = __read_seqcount_begin(&rename_lock.seqcount);
