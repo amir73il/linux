@@ -1653,6 +1653,21 @@ static inline int handle_mounts(struct nameidata *nd, struct dentry *dentry,
 }
 
 /*
+ * Drop a negative dentry that caller just created and is expected to be
+ * referenced only by the caller.
+ */
+static void lookup_drop_negative(struct dentry *dentry)
+{
+	if (dentry->d_lockref.count == 1) {
+		spin_lock(&dentry->d_lock);
+		/* Recheck condition under lock */
+		if (d_is_negative(dentry) && dentry->d_lockref.count == 1)
+			__d_drop(dentry);
+		spin_unlock(&dentry->d_lock);
+	}
+}
+
+/*
  * This looks up the name in dcache and possibly revalidates the found dentry.
  * NULL is returned if the dentry does not exist in the cache.
  */
@@ -3048,6 +3063,7 @@ EXPORT_SYMBOL(lookup_one_unlocked);
  * @idmap:	idmap of the mount the lookup is performed from
  * @name:	qstr holding pathname component to lookup
  * @base:	base directory to lookup from
+ * @drop_negative: do not leave a negative dentry because of this lookup
  *
  * This helper will yield ERR_PTR(-ENOENT) on negatives. The helper returns
  * known positive or ERR_PTR(). This is what most of the users want.
@@ -3062,11 +3078,14 @@ EXPORT_SYMBOL(lookup_one_unlocked);
  */
 struct dentry *lookup_one_positive_unlocked(struct mnt_idmap *idmap,
 					    struct qstr *name,
-					    struct dentry *base)
+					    struct dentry *base,
+					    bool drop_negative)
 {
 	struct dentry *ret = lookup_one_unlocked(idmap, name, base);
 
 	if (!IS_ERR(ret) && d_flags_negative(smp_load_acquire(&ret->d_flags))) {
+		if (drop_negative)
+			lookup_drop_negative(ret);
 		dput(ret);
 		ret = ERR_PTR(-ENOENT);
 	}

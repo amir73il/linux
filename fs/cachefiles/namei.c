@@ -631,7 +631,8 @@ bool cachefiles_look_up_object(struct cachefiles_object *object)
 	ret = cachefiles_inject_read_error();
 	if (ret == 0)
 		dentry = lookup_one_positive_unlocked(&nop_mnt_idmap,
-						      &QSTR(object->d_name), fan);
+						      &QSTR(object->d_name),
+						      fan, false);
 	else
 		dentry = ERR_PTR(ret);
 	trace_cachefiles_lookup(object, fan, dentry);

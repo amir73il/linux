@@ -79,7 +79,8 @@ struct dentry *lookup_one_unlocked(struct mnt_idmap *idmap,
 				   struct qstr *name, struct dentry *base);
 struct dentry *lookup_one_positive_unlocked(struct mnt_idmap *idmap,
 					    struct qstr *name,
-					    struct dentry *base);
+					    struct dentry *base,
+					    bool drop_negative);
 
 extern int follow_down_one(struct path *);
 extern int follow_down(struct path *path, unsigned int flags);

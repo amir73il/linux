@@ -3831,7 +3831,7 @@ nfsd4_encode_entry4_fattr(struct nfsd4_readdir *cd, const char *name,
 
 	dentry = lookup_one_positive_unlocked(&nop_mnt_idmap,
 					      &QSTR_LEN(name, namlen),
-					      cd->rd_fhp->fh_dentry);
+					      cd->rd_fhp->fh_dentry, false);
 	if (IS_ERR(dentry))
 		return nfserrno(PTR_ERR(dentry));
 
