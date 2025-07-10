@@ -238,6 +238,7 @@
  *
  *  7.45
  *  - add FUSE_PASSTHROUGH_INO
+ *  - add ops_mask field to struct fuse_backing_map
  */
 
 #ifndef _LINUX_FUSE_H
@@ -1121,8 +1122,14 @@ struct fuse_notify_retrieve_in {
 struct fuse_backing_map {
 	int32_t		fd;
 	uint32_t	flags;
-	uint64_t	padding;
+	uint64_t	ops_mask;
 };
+
+#define FUSE_PASSTHROUGH_OP(op)	(1ULL << ((op) - 1))
+
+/* op bits for fuse_backing_map ops_mask */
+#define FUSE_PASSTHROUGH_OP_READ	FUSE_PASSTHROUGH_OP(FUSE_READ)
+#define FUSE_PASSTHROUGH_OP_WRITE	FUSE_PASSTHROUGH_OP(FUSE_WRITE)
 
 /* Device ioctls: */
 #define FUSE_DEV_IOC_MAGIC		229

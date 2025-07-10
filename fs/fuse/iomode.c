@@ -96,6 +96,11 @@ int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_backing *fb)
 		err = -EBUSY;
 		goto unlock;
 	}
+	/* fuse and backing file types must match */
+	if (fb && ((fb->file->f_inode->i_mode ^ inode->i_mode) & S_IFMT)) {
+		err = -EIO;
+		goto unlock;
+	}
 	/* With FUSE_PASSTHROUGH_INO, fuse and backing ino must match */
 	if (fb && fc->passthrough_ino &&
 	    fb->file->f_inode->i_ino != inode->i_ino) {

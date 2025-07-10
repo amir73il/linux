@@ -221,7 +221,8 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	struct fuse_backing *fb = NULL;
 	int res;
 
-	pr_debug("%s: fd=%d flags=0x%x\n", __func__, map->fd, map->flags);
+	pr_debug("%s: fd=%d flags=0x%x ops_mask=0x%llx\n", __func__,
+		 map->fd, map->flags, map->ops_mask);
 
 	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
 	res = -EPERM;
@@ -229,7 +230,11 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 		goto out;
 
 	res = -EINVAL;
-	if (map->flags || map->padding)
+	if (map->flags || map->ops_mask & ~FUSE_BACKING_MAP_VALID_OPS)
+		goto out;
+
+	/* For now passthough inode operations requires FUSE_PASSTHROUGH_INO */
+	if (!fc->passthrough_ino && map->ops_mask & FUSE_PASSTHROUGH_INODE_OPS)
 		goto out;
 
 	file = fget_raw(map->fd);
@@ -239,7 +244,8 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 
 	/* read/write/splice/mmap passthrough only relevant for regular files */
 	res = d_is_dir(file->f_path.dentry) ? -EISDIR : -EINVAL;
-	if (!d_is_reg(file->f_path.dentry))
+	if (!(map->ops_mask & ~FUSE_PASSTHROUGH_RW_OPS) &&
+	    !d_is_reg(file->f_path.dentry))
 		goto out_fput;
 
 	backing_sb = file_inode(file)->i_sb;
@@ -254,6 +260,7 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 
 	fb->file = file;
 	fb->cred = prepare_creds();
+	fb->ops_mask = map->ops_mask;
 	refcount_set(&fb->count, 1);
 
 	res = fuse_backing_id_alloc(fc, fb);

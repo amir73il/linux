@@ -100,6 +100,7 @@ struct fuse_submount_lookup {
 struct fuse_backing {
 	struct file *file;
 	struct cred *cred;
+	u64 ops_mask;
 
 	/** refcount */
 	refcount_t count;
@@ -226,6 +227,8 @@ enum {
 	FUSE_I_BTIME,
 	/* Wants or already has page cache IO */
 	FUSE_I_CACHE_IO_MODE,
+	/* Has backing file for inode ops passthrough */
+	FUSE_I_PASSTHROUGH,
 };
 
 struct fuse_conn;
@@ -1508,6 +1511,24 @@ void fuse_file_release(struct inode *inode, struct fuse_file *ff,
 		       unsigned int open_flags, fl_owner_t id, bool isdir);
 
 /* passthrough.c */
+
+/* READ/WRITE are implied by FOPEN_PASSTHROUGH, but defined for completeness */
+#define FUSE_PASSTHROUGH_RW_OPS \
+	(FUSE_PASSTHROUGH_OP_READ | FUSE_PASSTHROUGH_OP_WRITE)
+
+/* File passthrough operations require a file opened with FOPEN_PASSTHROUGH */
+#define FUSE_PASSTHROUGH_FILE_OPS \
+	(FUSE_PASSTHROUGH_RW_OPS)
+
+/* Inode passthrough operations for backing file attached to inode */
+#define FUSE_PASSTHROUGH_INODE_OPS (0)
+
+#define FUSE_BACKING_MAP_OP(map, op) \
+	((map)->ops_mask & FUSE_PASSTHROUGH_OP(op))
+
+#define FUSE_BACKING_MAP_VALID_OPS \
+	(FUSE_PASSTHROUGH_FILE_OPS | FUSE_PASSTHROUGH_INODE_OPS)
+
 static inline struct fuse_backing *fuse_inode_backing(struct fuse_inode *fi)
 {
 #ifdef CONFIG_FUSE_PASSTHROUGH
@@ -1570,6 +1591,24 @@ ssize_t fuse_passthrough_splice_write(struct pipe_inode_info *pipe,
 				      struct file *out, loff_t *ppos,
 				      size_t len, unsigned int flags);
 ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
+
+static inline struct fuse_backing *fuse_inode_passthrough(struct fuse_inode *fi)
+{
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	if (test_bit(FUSE_I_PASSTHROUGH, &fi->state))
+		return fuse_inode_backing(fi);
+#endif
+	return NULL;
+}
+
+static inline bool fuse_inode_passthrough_op(struct inode *inode,
+					     enum fuse_opcode op)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_backing *fb = fuse_inode_passthrough(fi);
+
+	return fb && fb->ops_mask & FUSE_PASSTHROUGH_OP(op);
+}
 
 #ifdef CONFIG_SYSCTL
 extern int fuse_sysctl_register(void);
