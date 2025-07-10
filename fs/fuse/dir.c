@@ -1360,7 +1360,11 @@ static int fuse_do_getattr(struct mnt_idmap *idmap, struct inode *inode,
 		    inode_wrong_type(inode, outarg.attr.mode)) {
 			fuse_make_bad(inode);
 			err = -EIO;
-		} else {
+		} else if (fm->fc->passthrough_ino && outarg.backing_id) {
+			err = fuse_inode_set_passthrough(inode,
+							 outarg.backing_id);
+		}
+		if (!err) {
 			fuse_change_attributes(inode, &outarg.attr, NULL,
 					       ATTR_TIMEOUT(&outarg),
 					       attr_version);

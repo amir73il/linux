@@ -239,6 +239,7 @@
  *  7.45
  *  - add FUSE_PASSTHROUGH_INO
  *  - add ops_mask field to struct fuse_backing_map
+ *  - add backing_id field to backing_id
  */
 
 #ifndef _LINUX_FUSE_H
@@ -724,7 +725,7 @@ struct fuse_getattr_in {
 struct fuse_attr_out {
 	uint64_t	attr_valid;	/* Cache timeout for the attributes */
 	uint32_t	attr_valid_nsec;
-	uint32_t	dummy;
+	uint32_t	backing_id;
 	struct fuse_attr attr;
 };
 
