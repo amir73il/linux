@@ -227,7 +227,7 @@ enum {
 	FUSE_I_BTIME,
 	/* Regular file wants or already has page cache IO */
 	FUSE_I_CACHE_IO_MODE,
-	/* Has backing file for inode ops passthrough */
+	/* Has long lived backing file for inode ops passthrough */
 	FUSE_I_PASSTHROUGH,
 };
 
@@ -1498,7 +1498,8 @@ int fuse_fileattr_set(struct mnt_idmap *idmap,
 
 /* iomode.c */
 int fuse_file_cached_io_open(struct inode *inode, struct fuse_file *ff);
-int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_backing *fb);
+int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_file *ff,
+				 struct fuse_backing *fb);
 void fuse_inode_uncached_io_end(struct inode *inode);
 
 int fuse_file_io_open(struct file *file, struct inode *inode);
