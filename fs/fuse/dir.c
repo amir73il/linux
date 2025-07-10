@@ -1701,6 +1701,7 @@ out_err:
 static int fuse_dir_open(struct inode *inode, struct file *file)
 {
 	struct fuse_mount *fm = get_fuse_mount(inode);
+	struct fuse_inode *fi = get_fuse_inode(inode);
 	int err;
 
 	if (fuse_is_bad(inode))
@@ -1713,6 +1714,12 @@ static int fuse_dir_open(struct inode *inode, struct file *file)
 	err = fuse_do_open(fm, get_node_id(inode), file, true);
 	if (!err) {
 		struct fuse_file *ff = file->private_data;
+
+		err = fuse_file_io_open(file, inode);
+		if (err) {
+			fuse_sync_release(fi, ff, file->f_flags, true);
+			return err;
+		}
 
 		/*
 		 * Keep handling FOPEN_STREAM and FOPEN_NONSEEKABLE for

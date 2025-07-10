@@ -161,8 +161,19 @@ struct fuse_file *fuse_file_open(struct fuse_mount *fm, u64 nodeid,
 		}
 	}
 
-	if (isdir)
-		ff->open_flags &= ~FOPEN_DIRECT_IO;
+	/*
+	 * Mark an uncached dir open as FOPEN_DIRECT_IO for fuse_file_io_open().
+	 * The explicit comobination of FOPEN_PASSTHROUGH | FOPEN_DIRECT_IO is
+	 * allowed and it means (similar to regualr files) a request from the
+	 * server for uncached readdir open for an inode that already has files
+	 * open in passthrough readdir mode.
+	 */
+	if (isdir) {
+		if (ff->open_flags & FOPEN_CACHE_DIR)
+			ff->open_flags &= ~FOPEN_DIRECT_IO;
+		else if (!(ff->open_flags & FOPEN_PASSTHROUGH))
+			ff->open_flags |= FOPEN_DIRECT_IO;
+	}
 
 	ff->nodeid = nodeid;
 

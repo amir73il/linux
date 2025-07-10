@@ -1130,6 +1130,7 @@ struct fuse_backing_map {
 /* op bits for fuse_backing_map ops_mask */
 #define FUSE_PASSTHROUGH_OP_READ	FUSE_PASSTHROUGH_OP(FUSE_READ)
 #define FUSE_PASSTHROUGH_OP_WRITE	FUSE_PASSTHROUGH_OP(FUSE_WRITE)
+#define FUSE_PASSTHROUGH_OP_READDIR	FUSE_PASSTHROUGH_OP(FUSE_READDIR)
 
 /* Device ioctls: */
 #define FUSE_DEV_IOC_MAGIC		229

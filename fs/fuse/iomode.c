@@ -201,11 +201,18 @@ static int fuse_file_passthrough_open(struct inode *inode, struct file *file)
 	if (IS_ERR(fb))
 		return PTR_ERR(fb);
 
+	/* Readdir passthrough requires opt-in on backing file setup */
+	err = -EOPNOTSUPP;
+	if (S_ISDIR(inode->i_mode) &&
+	    !(fb->ops_mask & FUSE_PASSTHROUGH_OP(FUSE_READDIR)))
+		goto fail;
+
 	/* First passthrough file open denies caching inode io mode */
 	err = fuse_file_uncached_io_open(inode, ff, fb);
 	if (!err)
 		return 0;
 
+fail:
 	fuse_passthrough_release(ff, fb);
 	fuse_backing_put(fb);
 
@@ -243,6 +250,8 @@ int fuse_file_io_open(struct file *file, struct inode *inode)
 	/*
 	 * First passthrough file open denies caching inode io mode.
 	 * First caching file open enters caching inode io mode.
+	 * A directory opened without FOPEN_CACHE_DIR is marked with
+	 * FOPEN_DIRECT_IO and like regular file dio, does not affect io mode.
 	 *
 	 * Note that if user opens a file open with O_DIRECT, but server did
 	 * not specify FOPEN_DIRECT_IO, a later fcntl() could remove O_DIRECT,
