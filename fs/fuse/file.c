@@ -266,7 +266,7 @@ static int fuse_open(struct inode *inode, struct file *file)
 		ff = file->private_data;
 		err = fuse_finish_open(inode, file);
 		if (err)
-			fuse_sync_release(fi, ff, file->f_flags);
+			fuse_sync_release(fi, ff, file->f_flags, false);
 		else if (is_truncate)
 			fuse_truncate_update_attr(inode, file);
 	}
@@ -383,10 +383,12 @@ static int fuse_release(struct inode *inode, struct file *file)
 }
 
 void fuse_sync_release(struct fuse_inode *fi, struct fuse_file *ff,
-		       unsigned int flags)
+		       unsigned int flags, bool isdir)
 {
+	int opcode = isdir ? FUSE_RELEASEDIR : FUSE_RELEASE;
+
 	WARN_ON(refcount_read(&ff->count) > 1);
-	fuse_prepare_release(fi, ff, flags, FUSE_RELEASE, true);
+	fuse_prepare_release(fi, ff, flags, opcode, true);
 	fuse_file_put(ff, true);
 }
 EXPORT_SYMBOL_GPL(fuse_sync_release);
@@ -1361,13 +1363,12 @@ static void fuse_dio_lock(struct kiocb *iocb, struct iov_iter *from,
 static void fuse_dio_unlock(struct kiocb *iocb, bool exclusive)
 {
 	struct inode *inode = file_inode(iocb->ki_filp);
-	struct fuse_inode *fi = get_fuse_inode(inode);
 
 	if (exclusive) {
 		inode_unlock(inode);
 	} else {
 		/* Allow opens in caching mode after last parallel dio end */
-		fuse_inode_uncached_io_end(fi);
+		fuse_inode_uncached_io_end(inode);
 		inode_unlock_shared(inode);
 	}
 }

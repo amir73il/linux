@@ -154,9 +154,6 @@ struct fuse_inode {
 			 * (FUSE_NOWRITE) means more writes are blocked */
 			int writectr;
 
-			/** Number of files/maps using page cache */
-			int iocachectr;
-
 			/* Waitq for writepage completion */
 			wait_queue_head_t page_waitq;
 
@@ -199,6 +196,9 @@ struct fuse_inode {
 	/** Lock to protect write related fields */
 	spinlock_t lock;
 
+	/** Number of files/maps using page cache (negative for passthrough) */
+	int iocachectr;
+
 #ifdef CONFIG_FUSE_DAX
 	/*
 	 * Dax specific inode data
@@ -225,7 +225,7 @@ enum {
 	FUSE_I_BAD,
 	/* Has btime */
 	FUSE_I_BTIME,
-	/* Wants or already has page cache IO */
+	/* Regular file wants or already has page cache IO */
 	FUSE_I_CACHE_IO_MODE,
 	/* Has backing file for inode ops passthrough */
 	FUSE_I_PASSTHROUGH,
@@ -1165,7 +1165,7 @@ void fuse_file_free(struct fuse_file *ff);
 int fuse_finish_open(struct inode *inode, struct file *file);
 
 void fuse_sync_release(struct fuse_inode *fi, struct fuse_file *ff,
-		       unsigned int flags);
+		       unsigned int flags, bool isdir);
 
 /**
  * Send RELEASE or RELEASEDIR request
@@ -1499,7 +1499,7 @@ int fuse_fileattr_set(struct mnt_idmap *idmap,
 /* iomode.c */
 int fuse_file_cached_io_open(struct inode *inode, struct fuse_file *ff);
 int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_backing *fb);
-void fuse_inode_uncached_io_end(struct fuse_inode *fi);
+void fuse_inode_uncached_io_end(struct inode *inode);
 
 int fuse_file_io_open(struct file *file, struct inode *inode);
 void fuse_file_io_release(struct fuse_file *ff, struct inode *inode);

@@ -146,7 +146,7 @@ static int cuse_release(struct inode *inode, struct file *file)
 	struct fuse_file *ff = file->private_data;
 	struct fuse_mount *fm = ff->fm;
 
-	fuse_sync_release(NULL, ff, file->f_flags);
+	fuse_sync_release(NULL, ff, file->f_flags, false);
 	fuse_conn_put(fm->fc);
 
 	return 0;
