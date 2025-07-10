@@ -1577,6 +1577,7 @@ void fuse_backing_files_free(struct fuse_conn *fc);
 int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map);
 int fuse_backing_close(struct fuse_conn *fc, int backing_id);
 
+struct fuse_backing *fuse_backing_id_get(struct fuse_conn *fc, int backing_id);
 struct fuse_backing *fuse_passthrough_open(struct file *file,
 					   struct inode *inode,
 					   int backing_id);
@@ -1601,6 +1602,8 @@ ssize_t fuse_passthrough_splice_write(struct pipe_inode_info *pipe,
 				      size_t len, unsigned int flags);
 ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
 int fuse_passthrough_readdir(struct file *file, struct dir_context *ctx);
+
+int fuse_inode_set_passthrough(struct inode *inode, int backing_id);
 
 static inline struct fuse_backing *fuse_inode_passthrough(struct fuse_inode *fi)
 {

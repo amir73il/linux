@@ -342,6 +342,26 @@ out:
 }
 
 /*
+ * Get fuse backing object by backing id.
+ *
+ * Returns an fb object with elevated refcount to be stored in fuse inode.
+ */
+struct fuse_backing *fuse_backing_id_get(struct fuse_conn *fc, int backing_id)
+{
+	struct fuse_backing *fb;
+
+	if (backing_id <= 0)
+		return ERR_PTR(-EINVAL);
+
+	rcu_read_lock();
+	fb = idr_find(&fc->backing_files_map, backing_id);
+	fb = fuse_backing_get(fb);
+	rcu_read_unlock();
+
+	return fb;
+}
+
+/*
  * Setup passthrough to a backing file.
  *
  * Returns an fb object with elevated refcount to be stored in fuse inode.
@@ -356,18 +376,12 @@ struct fuse_backing *fuse_passthrough_open(struct file *file,
 	struct file *backing_file;
 	int err;
 
-	err = -EINVAL;
-	if (backing_id <= 0)
+	fb = fuse_backing_id_get(fc, backing_id);
+	if (IS_ERR_OR_NULL(fb)) {
+		err = fb ? PTR_ERR(fb) : -ENOENT;
+		fb = NULL;
 		goto out;
-
-	rcu_read_lock();
-	fb = idr_find(&fc->backing_files_map, backing_id);
-	fb = fuse_backing_get(fb);
-	rcu_read_unlock();
-
-	err = -ENOENT;
-	if (!fb)
-		goto out;
+	}
 
 	/* Allocate backing file per fuse file to store fuse path */
 	backing_file = backing_file_open(&file->f_path, file->f_flags,

@@ -181,6 +181,45 @@ static void fuse_file_uncached_io_release(struct fuse_file *ff,
 	fuse_inode_uncached_io_end(inode);
 }
 
+/* Setup passthrough for inode operations without an open file */
+int fuse_inode_set_passthrough(struct inode *inode, int backing_id)
+{
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_backing *fb;
+	int err;
+
+	if (!IS_ENABLED(CONFIG_FUSE_PASSTHROUGH) || !fc->passthrough_ino)
+		return 0;
+
+	/* backing inode is set once for the lifetime of the inode */
+	if (fuse_inode_passthrough(fi))
+		return 0;
+
+	fb = fuse_backing_id_get(fc, backing_id);
+	if (IS_ERR_OR_NULL(fb)) {
+		err = fb ? PTR_ERR(fb) : -ENOENT;
+		fb = NULL;
+		goto fail;
+	}
+
+	/* Backing inode requires at least GETATTR op passthrough */
+	err = -EOPNOTSUPP;
+	if (!(fb->ops_mask & FUSE_PASSTHROUGH_OP(FUSE_GETATTR)))
+		goto fail;
+
+	err = fuse_inode_uncached_io_start(inode, NULL, fb);
+	if (err)
+		goto fail;
+
+	return 0;
+fail:
+	fuse_backing_put(fb);
+	pr_debug("failed to setup backing inode (ino=%lu, backing_id=%d, err=%i).\n",
+		 inode->i_ino, backing_id, err);
+	return err;
+}
+
 /*
  * Open flags that are allowed in combination with FOPEN_PASSTHROUGH.
  * A combination of FOPEN_PASSTHROUGH and FOPEN_DIRECT_IO means that read/write
