@@ -2473,7 +2473,8 @@ out:
 }
 
 static ssize_t gfs2_writeback_range(struct iomap_writepage_ctx *wpc,
-		struct folio *folio, u64 offset, unsigned int len, u64 end_pos)
+		struct folio *folio, loff_t offset, unsigned int len,
+		loff_t end_pos)
 {
 	if (WARN_ON_ONCE(gfs2_is_stuffed(GFS2_I(wpc->inode))))
 		return -EIO;

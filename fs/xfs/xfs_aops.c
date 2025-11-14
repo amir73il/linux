@@ -480,9 +480,9 @@ static ssize_t
 xfs_writeback_range(
 	struct iomap_writepage_ctx *wpc,
 	struct folio		*folio,
-	u64			offset,
+	loff_t			offset,
 	unsigned int		len,
-	u64			end_pos)
+	loff_t			end_pos)
 {
 	ssize_t			ret;
 
@@ -630,9 +630,9 @@ static ssize_t
 xfs_zoned_writeback_range(
 	struct iomap_writepage_ctx *wpc,
 	struct folio		*folio,
-	u64			offset,
+	loff_t			offset,
 	unsigned int		len,
-	u64			end_pos)
+	loff_t			end_pos)
 {
 	ssize_t			ret;
 
@@ -742,14 +742,15 @@ xfs_vm_read_folio(
 	struct file		*unused,
 	struct folio		*folio)
 {
-	return iomap_read_folio(folio, &xfs_read_iomap_ops);
+	iomap_bio_read_folio(folio, &xfs_read_iomap_ops);
+	return 0;
 }
 
 STATIC void
 xfs_vm_readahead(
 	struct readahead_control	*rac)
 {
-	iomap_readahead(rac, &xfs_read_iomap_ops);
+	iomap_bio_readahead(rac, &xfs_read_iomap_ops);
 }
 
 static int

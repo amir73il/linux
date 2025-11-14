@@ -112,12 +112,13 @@ static const struct iomap_ops zonefs_write_iomap_ops = {
 
 static int zonefs_read_folio(struct file *unused, struct folio *folio)
 {
-	return iomap_read_folio(folio, &zonefs_read_iomap_ops);
+	iomap_bio_read_folio(folio, &zonefs_read_iomap_ops);
+	return 0;
 }
 
 static void zonefs_readahead(struct readahead_control *rac)
 {
-	iomap_readahead(rac, &zonefs_read_iomap_ops);
+	iomap_bio_readahead(rac, &zonefs_read_iomap_ops);
 }
 
 /*
@@ -125,7 +126,8 @@ static void zonefs_readahead(struct readahead_control *rac)
  * which implies that the page range can only be within the fixed inode size.
  */
 static ssize_t zonefs_writeback_range(struct iomap_writepage_ctx *wpc,
-		struct folio *folio, u64 offset, unsigned len, u64 end_pos)
+		struct folio *folio, loff_t offset, unsigned len,
+		loff_t end_pos)
 {
 	struct zonefs_zone *z = zonefs_inode_zone(wpc->inode);
 
