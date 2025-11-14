@@ -611,7 +611,7 @@ DEFINE_CLASS(prepare_creds_ovl,
 	     ovl_prepare_creds(dentry, inode, mode),
 	     struct dentry *dentry, struct inode *inode, umode_t mode)
 
-static const struct cred *ovl_setup_cred_for_create(struct dentry *dentry,
+static const __maybe_unused struct cred *ovl_setup_cred_for_create(struct dentry *dentry,
 						    struct inode *inode,
 						    umode_t mode,
 						    const struct cred *old_cred)
