@@ -659,8 +659,7 @@ static int ovl_create_or_link(struct dentry *dentry, struct inode *inode,
 	int err;
 	struct dentry *parent = dentry->d_parent;
 
-	scoped_class(override_creds_ovl, old_cred, dentry->d_sb) {
-		const struct cred *new_cred __free(put_cred) = NULL;
+	with_ovl_creds(dentry->d_sb) {
 		/*
 		 * When linking a file with copy up origin into a new parent, mark the
 		 * new parent dir "impure".
@@ -688,11 +687,11 @@ static int ovl_create_or_link(struct dentry *dentry, struct inode *inode,
 		if (attr->hardlink)
 			return do_ovl_create_or_link(dentry, inode, attr);
 
-		new_cred = ovl_setup_cred_for_create(dentry, inode, attr->mode, old_cred);
-		if (IS_ERR(new_cred))
-			return PTR_ERR(new_cred);
-
-		return do_ovl_create_or_link(dentry, inode, attr);
+		scoped_class(prepare_creds_ovl, cred, dentry, inode, attr->mode) {
+			if (IS_ERR(cred))
+				return PTR_ERR(cred);
+			return do_ovl_create_or_link(dentry, inode, attr);
+		}
 	}
 	return err;
 }
