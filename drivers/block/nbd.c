@@ -565,24 +565,27 @@ static int __sock_xmit(struct nbd_device *nbd, struct socket *sock, int send,
 	msg.msg_iter = *iter;
 
 	noreclaim_flag = memalloc_noreclaim_save();
-	do {
-		sock->sk->sk_allocation = GFP_NOIO | __GFP_MEMALLOC;
-		sock->sk->sk_use_task_frag = false;
-		msg.msg_flags = msg_flags | MSG_NOSIGNAL;
 
-		if (send)
-			result = sock_sendmsg(sock, &msg);
-		else
-			result = sock_recvmsg(sock, &msg, msg.msg_flags);
+	scoped_with_kernel_creds() {
+		do {
+			sock->sk->sk_allocation = GFP_NOIO | __GFP_MEMALLOC;
+			sock->sk->sk_use_task_frag = false;
+			msg.msg_flags = msg_flags | MSG_NOSIGNAL;
 
-		if (result <= 0) {
-			if (result == 0)
-				result = -EPIPE; /* short read */
-			break;
-		}
-		if (sent)
-			*sent += result;
-	} while (msg_data_left(&msg));
+			if (send)
+				result = sock_sendmsg(sock, &msg);
+			else
+				result = sock_recvmsg(sock, &msg, msg.msg_flags);
+
+			if (result <= 0) {
+				if (result == 0)
+					result = -EPIPE; /* short read */
+				break;
+			}
+			if (sent)
+				*sent += result;
+		} while (msg_data_left(&msg));
+	}
 
 	memalloc_noreclaim_restore(noreclaim_flag);
 
