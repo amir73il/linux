@@ -11,6 +11,7 @@
 #include <linux/namei.h>
 #include <linux/posix_acl.h>
 #include <linux/posix_acl_xattr.h>
+#include <linux/xattr.h>
 #include "ovl_entry.h"
 
 #undef pr_fmt
@@ -908,3 +909,20 @@ int ovl_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 int ovl_getattr(struct mnt_idmap *idmap, const struct path *path,
 		struct kstat *stat, u32 request_mask, unsigned int flags);
 ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size);
+
+#ifdef CONFIG_OVERLAY_FS_WATCH
+/* fsnotify.c */
+int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs);
+void ovl_free_watch(struct ovl_fs *ofs);
+int __init ovl_fsnotify_init(void);
+void ovl_fsnotify_destroy(void);
+#else
+static inline int ovl_get_watch(struct super_block *sb, struct ovl_fs *ofs)
+{
+	return -ENOTSUPP;
+}
+
+static inline void ovl_free_watch(struct ovl_fs *ofs) { }
+static inline int ovl_fsnotify_init(void) { return 0; }
+static inline void ovl_fsnotify_destroy(void) { }
+#endif
