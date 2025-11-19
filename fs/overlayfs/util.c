@@ -91,7 +91,7 @@ struct dentry *ovl_indexdir(struct super_block *sb)
 {
 	struct ovl_fs *ofs = OVL_FS(sb);
 
-	return ofs->config.index ? ofs->workdir : NULL;
+	return ofs->indexdir;
 }
 
 /* Index all files on copy up. For now only enabled for NFS export */
