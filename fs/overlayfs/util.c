@@ -87,29 +87,6 @@ int ovl_can_decode_fh(struct super_block *sb)
 	return sb->s_export_op->encode_fh ? -1 : FILEID_INO32_GEN;
 }
 
-struct dentry *ovl_indexdir(struct super_block *sb)
-{
-	struct ovl_fs *ofs = OVL_FS(sb);
-
-	return ofs->indexdir;
-}
-
-/* Index all files on copy up. For now only enabled for NFS export */
-bool ovl_index_all(struct super_block *sb)
-{
-	struct ovl_fs *ofs = OVL_FS(sb);
-
-	return ofs->config.nfs_export && ofs->config.index;
-}
-
-/* Verify lower origin on lookup. For now only enabled for NFS export */
-bool ovl_verify_lower(struct super_block *sb)
-{
-	struct ovl_fs *ofs = OVL_FS(sb);
-
-	return ofs->config.nfs_export && ofs->config.index;
-}
-
 struct ovl_path *ovl_stack_alloc(unsigned int n)
 {
 	return kcalloc(n, sizeof(struct ovl_path), GFP_KERNEL);
@@ -1050,7 +1027,7 @@ bool ovl_need_index(struct dentry *dentry)
 		return false;
 
 	/* Index all files for NFS export and consistency verification */
-	if (ovl_index_all(dentry->d_sb))
+	if (ovl_index_all(OVL_FS(dentry->d_sb)))
 		return true;
 
 	/* Index only lower hardlinks on copy up */
@@ -1106,7 +1083,7 @@ static void ovl_cleanup_index(struct dentry *dentry)
 	err = PTR_ERR(index);
 	if (IS_ERR(index)) {
 		index = NULL;
-	} else if (ovl_index_all(dentry->d_sb)) {
+	} else if (ovl_index_all(ofs)) {
 		/* Whiteout orphan index to block future open by handle */
 		err = ovl_cleanup_and_whiteout(OVL_FS(dentry->d_sb),
 					       dir, index);

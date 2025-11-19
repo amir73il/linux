@@ -436,9 +436,6 @@ static inline const struct cred *ovl_creds(struct super_block *sb)
 }
 
 int ovl_can_decode_fh(struct super_block *sb);
-struct dentry *ovl_indexdir(struct super_block *sb);
-bool ovl_index_all(struct super_block *sb);
-bool ovl_verify_lower(struct super_block *sb);
 struct ovl_path *ovl_stack_alloc(unsigned int n);
 void ovl_stack_cpy(struct ovl_path *dst, struct ovl_path *src, unsigned int n);
 void ovl_stack_put(struct ovl_path *stack, unsigned int n);
@@ -658,6 +655,23 @@ static inline int ovl_inode_lock_interruptible(struct inode *inode)
 static inline void ovl_inode_unlock(struct inode *inode)
 {
 	mutex_unlock(&OVL_I(inode)->lock);
+}
+
+static inline struct dentry *ovl_indexdir(struct super_block *sb)
+{
+	return OVL_FS(sb)->indexdir;
+}
+
+/* If indexing is enabled, index all files and directories */
+static inline bool ovl_index_all(struct ovl_fs *ofs)
+{
+	return ofs->config.nfs_export;
+}
+
+/* Verify lower origin on lookup */
+static inline bool ovl_verify_lower(struct super_block *sb)
+{
+	return ovl_indexdir(sb) && ovl_index_all(OVL_FS(sb));
 }
 
 
