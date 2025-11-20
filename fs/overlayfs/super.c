@@ -25,6 +25,10 @@ MODULE_AUTHOR("Miklos Szeredi <miklos@szeredi.hu>");
 MODULE_DESCRIPTION("Overlay filesystem");
 MODULE_LICENSE("GPL");
 
+static bool ovl_relax_workdir = false;
+module_param_named(relax_workdir, ovl_relax_workdir, bool, 0644);
+MODULE_PARM_DESC(relax_workdir,
+		 "Allow layer roots to be descendants of the base workdir");
 
 struct ovl_dir_cache;
 
@@ -804,14 +808,18 @@ static int ovl_get_workdir(struct super_block *sb, struct ovl_fs *ofs,
 {
 	int err;
 
-	err = -EINVAL;
-	if (upperpath->mnt != workpath->mnt) {
+	if (!ovl_relax_workdir && upperpath->mnt != workpath->mnt) {
 		pr_err("workdir and upperdir must reside under the same mount\n");
-		return err;
+		return -EINVAL;
+	} else if (upperpath->mnt->mnt_sb != workpath->mnt->mnt_sb) {
+		pr_err("workdir and upperdir must reside under the same filesystem\n");
+		return -EXDEV;
 	}
-	if (!ovl_workdir_ok(workpath->dentry, upperpath->dentry)) {
+
+	if (!ovl_relax_workdir &&
+	    !ovl_workdir_ok(workpath->dentry, upperpath->dentry)) {
 		pr_err("workdir and upperdir must be separate subtrees\n");
-		return err;
+		return -EINVAL;
 	}
 
 	ofs->workbasedir = dget(workpath->dentry);
@@ -829,7 +837,16 @@ static int ovl_get_workdir(struct super_block *sb, struct ovl_fs *ofs,
 	if (err)
 		return err;
 
-	return ovl_make_workdir(sb, ofs, workpath);
+	err = ovl_make_workdir(sb, ofs, workpath);
+	if (err)
+		return err;
+
+	if (ofs->workdir && !ovl_workdir_ok(ofs->workdir, upperpath->dentry)) {
+		pr_err("workdir and upperdir must be separate subtrees\n");
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
@@ -1243,7 +1260,9 @@ static int ovl_check_layer(struct super_block *sb, struct ovl_fs *ofs,
 
 	/* Walk back ancestors to root (inclusive) looking for traps */
 	while (!err && parent != next) {
-		if (is_lower && ovl_lookup_trap_inode(sb, parent)) {
+		if (ovl_relax_workdir && parent == ofs->workbasedir) {
+			/* Allow layer roots to be descendants of workbasedir */
+		} else if (is_lower && ovl_lookup_trap_inode(sb, parent)) {
 			err = -ELOOP;
 			pr_err("overlapping %s path\n", name);
 		} else if (ovl_is_inuse(parent)) {

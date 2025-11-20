@@ -1239,6 +1239,12 @@ int ovl_workdir_cleanup(struct ovl_fs *ofs, struct dentry *parent,
 {
 	int err;
 
+	/* Disallow upperdir under workbasedir/work dir */
+	if (dentry == ovl_upper_mnt(ofs)->mnt_root) {
+		pr_err("overlapping workdir/upperdir path\n");
+		return -ELOOP;
+	}
+
 	if (!d_is_dir(dentry) || level > 1)
 		return ovl_cleanup(ofs, parent, dentry);
 
