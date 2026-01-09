@@ -21,6 +21,7 @@
 #include <linux/user_namespace.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_ipv6.h>
+#include <linux/backing-file.h>
 #include <linux/zstd.h>
 #include <net/sock.h>
 #include <uapi/linux/mount.h>
@@ -590,7 +591,7 @@ static int apparmor_mmap_file(struct file *file, unsigned long reqprot,
 static int apparmor_file_mprotect(struct vm_area_struct *vma,
 				  unsigned long reqprot, unsigned long prot)
 {
-	return common_mmap(OP_FMPROT, vma->vm_file, prot,
+	return common_mmap(OP_FMPROT, file_user_path_file(vma->vm_file), prot,
 			   !(vma->vm_flags & VM_SHARED) ? MAP_PRIVATE : 0,
 			   false);
 }

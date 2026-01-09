@@ -27,6 +27,7 @@
 #include <linux/task_work.h>
 #include <linux/swap.h>
 #include <linux/kmemleak.h>
+#include <linux/backing-file.h>
 
 #include <linux/atomic.h>
 
@@ -43,11 +44,11 @@ static struct kmem_cache *bfilp_cachep __ro_after_init;
 
 static struct percpu_counter nr_files __cacheline_aligned_in_smp;
 
-/* Container for backing file with optional user path */
+/* Container for backing file with optional user path file */
 struct backing_file {
 	struct file file;
 	union {
-		struct path user_path;
+		struct file user_path_file;
 		freeptr_t bf_freeptr;
 	};
 };
@@ -56,15 +57,22 @@ struct backing_file {
 
 const struct path *backing_file_user_path(const struct file *f)
 {
-	return &backing_file(f)->user_path;
+	return &backing_file(f)->user_path_file.f_path;
 }
 EXPORT_SYMBOL_GPL(backing_file_user_path);
 
-void backing_file_set_user_path(struct file *f, const struct path *path)
+struct file *backing_file_user_path_file(struct file *f)
 {
-	backing_file(f)->user_path = *path;
+	return &backing_file(f)->user_path_file;
 }
-EXPORT_SYMBOL_GPL(backing_file_set_user_path);
+EXPORT_SYMBOL_GPL(backing_file_user_path_file);
+
+void backing_file_open_user_path(struct file *f, const struct path *path)
+{
+	/* open an O_PATH file to reference the user path - cannot fail */
+	WARN_ON(vfs_open(path, &backing_file(f)->user_path_file));
+}
+EXPORT_SYMBOL_GPL(backing_file_open_user_path);
 
 static inline void file_free(struct file *f)
 {
@@ -73,7 +81,12 @@ static inline void file_free(struct file *f)
 		percpu_counter_dec(&nr_files);
 	put_cred(f->f_cred);
 	if (unlikely(f->f_mode & FMODE_BACKING)) {
-		path_put(backing_file_user_path(f));
+		struct file *user_path_file = &backing_file(f)->user_path_file;
+
+		/* no refcount on the user_path_file - they die together */
+		security_file_free(user_path_file);
+		put_cred(user_path_file->f_cred);
+		path_put(&user_path_file->__f_path);
 		kmem_cache_free(bfilp_cachep, backing_file(f));
 	} else {
 		kmem_cache_free(filp_cachep, f);
@@ -151,7 +164,7 @@ static int __init init_fs_stat_sysctls(void)
 fs_initcall(init_fs_stat_sysctls);
 #endif
 
-static int init_file(struct file *f, int flags, const struct cred *cred)
+static int init_file_security(struct file *f, const struct cred *cred)
 {
 	int error;
 
@@ -162,6 +175,11 @@ static int init_file(struct file *f, int flags, const struct cred *cred)
 		return error;
 	}
 
+	return 0;
+}
+
+static void init_file(struct file *f, int flags, bool refcounted)
+{
 	spin_lock_init(&f->f_lock);
 	/*
 	 * Note that f_pos_lock is only used for files raising
@@ -187,6 +205,10 @@ static int init_file(struct file *f, int flags, const struct cred *cred)
 	f->private_data = NULL;
 	f->f_inode	= NULL;
 	f->f_owner	= NULL;
+	f->f_cred	= NULL;
+#ifdef CONFIG_SECURITY
+	f->f_security	= NULL;
+#endif
 #ifdef CONFIG_EPOLL
 	f->f_ep		= NULL;
 #endif
@@ -201,8 +223,7 @@ static int init_file(struct file *f, int flags, const struct cred *cred)
 	 * fget-rcu pattern users need to be able to handle spurious
 	 * refcount bumps we should reinitialize the reused file first.
 	 */
-	file_ref_init(&f->f_ref, 1);
-	return 0;
+	file_ref_init(&f->f_ref, refcounted ? 1 : 0);
 }
 
 /* Find an unused file structure and return a pointer to it.
@@ -238,7 +259,8 @@ struct file *alloc_empty_file(int flags, const struct cred *cred)
 	if (unlikely(!f))
 		return ERR_PTR(-ENOMEM);
 
-	error = init_file(f, flags, cred);
+	init_file(f, flags, true);
+	error = init_file_security(f, cred);
 	if (unlikely(error)) {
 		kmem_cache_free(filp_cachep, f);
 		return ERR_PTR(error);
@@ -272,7 +294,8 @@ struct file *alloc_empty_file_noaccount(int flags, const struct cred *cred)
 	if (unlikely(!f))
 		return ERR_PTR(-ENOMEM);
 
-	error = init_file(f, flags, cred);
+	init_file(f, flags, true);
+	error = init_file_security(f, cred);
 	if (unlikely(error)) {
 		kmem_cache_free(filp_cachep, f);
 		return ERR_PTR(error);
@@ -290,7 +313,8 @@ struct file *alloc_empty_file_noaccount(int flags, const struct cred *cred)
  * This is only for kernel internal use, and the allocate file must not be
  * installed into file tables or such.
  */
-struct file *alloc_empty_backing_file(int flags, const struct cred *cred)
+struct file *alloc_empty_backing_file(int flags, const struct cred *cred,
+				      const struct cred *user_cred)
 {
 	struct backing_file *ff;
 	int error;
@@ -299,8 +323,19 @@ struct file *alloc_empty_backing_file(int flags, const struct cred *cred)
 	if (unlikely(!ff))
 		return ERR_PTR(-ENOMEM);
 
-	error = init_file(&ff->file, flags, cred);
+	init_file(&ff->file, flags, true);
+	error = init_file_security(&ff->file, cred);
 	if (unlikely(error)) {
+		kmem_cache_free(bfilp_cachep, ff);
+		return ERR_PTR(error);
+	}
+
+	/* user_path_file is not refcounterd - it dies with the backing file */
+	init_file(&ff->user_path_file, O_PATH, false);
+	error = init_file_security(&ff->user_path_file, user_cred);
+	if (unlikely(error)) {
+		security_file_free(&ff->file);
+		put_cred(ff->file.f_cred);
 		kmem_cache_free(bfilp_cachep, ff);
 		return ERR_PTR(error);
 	}
