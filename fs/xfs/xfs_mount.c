@@ -26,6 +26,7 @@
 #include "xfs_quota.h"
 #include "xfs_fsops.h"
 #include "xfs_icache.h"
+#include "xfs_iunlink_gc.h"
 #include "xfs_sysfs.h"
 #include "xfs_rmap_btree.h"
 #include "xfs_refcount_btree.h"
@@ -1036,6 +1037,12 @@ xfs_mountfs(
 		goto out_inodegc_shrinker;
 	}
 
+	error = xfs_iunlink_gc_mount(mp);
+	if (error) {
+		xfs_warn(mp, "iunlink gc mount failed: %d", error);
+		goto out_log_mount_cancel;
+	}
+
 	/*
 	 * If we're resuming quota status and recovered the log, re-sample the
 	 * qflags from the ondisk superblock now that we've recovered it, just
@@ -1056,6 +1063,7 @@ xfs_mountfs(
 	/* Enable background inode inactivation workers. */
 	xfs_inodegc_start(mp);
 	xfs_blockgc_start(mp);
+	xfs_iunlink_gc_start(mp);
 
 	if (xfs_has_metadir(mp)) {
 		error = xfs_mount_setup_metadir(mp);
@@ -1242,6 +1250,10 @@ xfs_mountfs(
 	if (mp->m_metadirip)
 		xfs_irele(mp->m_metadirip);
 
+	/* If we kicked off the iunlink gc thread, we need to see it through */
+	xfs_iunlink_gc_flush(mp);
+	xfs_iunlink_gc_unmount(mp);
+
 	/*
 	 * Inactivate all inodes that might still be in memory after a log
 	 * intent recovery failure so that reclaim can free them.  Metadata
@@ -1262,6 +1274,7 @@ xfs_mountfs(
 	 * quota inodes.
 	 */
 	xfs_unmount_flush_inodes(mp);
+ out_log_mount_cancel:
 	xfs_log_mount_cancel(mp);
  out_inodegc_shrinker:
 	shrinker_free(mp->m_inodegc_shrinker);
@@ -1296,6 +1309,10 @@ xfs_unmountfs(
 	struct xfs_mount	*mp)
 {
 	int			error;
+
+	/* Complete deferred unlinked cleanup before unmount */
+	xfs_iunlink_gc_flush(mp);
+	xfs_iunlink_gc_unmount(mp);
 
 	/*
 	 * Perform all on-disk metadata updates required to inactivate inodes

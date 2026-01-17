@@ -25,6 +25,7 @@
 #include "xfs_mru_cache.h"
 #include "xfs_inode_item.h"
 #include "xfs_icache.h"
+#include "xfs_iunlink_gc.h"
 #include "xfs_trace.h"
 #include "xfs_icreate_item.h"
 #include "xfs_filestream.h"
@@ -869,6 +870,7 @@ xfs_fs_sync_fs(
 	 * when the state is either SB_FREEZE_FS or SB_FREEZE_COMPLETE.
 	 */
 	if (sb->s_writers.frozen == SB_FREEZE_PAGEFAULT) {
+		xfs_iunlink_gc_stop(mp);
 		xfs_inodegc_stop(mp);
 		xfs_blockgc_stop(mp);
 		xfs_zone_gc_stop(mp);
@@ -1045,6 +1047,7 @@ xfs_fs_freeze(
 	if (ret && !xfs_is_readonly(mp)) {
 		xfs_blockgc_start(mp);
 		xfs_inodegc_start(mp);
+		xfs_iunlink_gc_start(mp);
 		xfs_zone_gc_start(mp);
 	}
 
@@ -1070,6 +1073,7 @@ xfs_fs_unfreeze(
 		xfs_zone_gc_start(mp);
 		xfs_blockgc_start(mp);
 		xfs_inodegc_start(mp);
+		xfs_iunlink_gc_start(mp);
 	}
 
 	return 0;
@@ -2092,6 +2096,10 @@ xfs_remount_ro(
 	error = sync_filesystem(mp->m_super);
 	if (error)
 		return error;
+
+	/* Complete deferred unlinked cleanup before remounting read-only */
+	xfs_iunlink_gc_flush(mp);
+	xfs_iunlink_gc_unmount(mp);
 
 	/*
 	 * Cancel background eofb scanning so it cannot race with the final

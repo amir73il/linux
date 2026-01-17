@@ -89,6 +89,7 @@ xfs-y				+= xfs_aops.o \
 				   xfs_handle.o \
 				   xfs_health.o \
 				   xfs_icache.o \
+				   xfs_iunlink_gc.o \
 				   xfs_ioctl.o \
 				   xfs_iomap.o \
 				   xfs_iops.o \

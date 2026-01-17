@@ -176,6 +176,8 @@ typedef struct xfs_mount {
 	struct workqueue_struct	*m_sync_workqueue;
 	struct workqueue_struct *m_blockgc_wq;
 	struct workqueue_struct *m_inodegc_wq;
+	struct task_struct	*m_iunlinkgc_task;
+	wait_queue_head_t	m_iunlinkgc_wait;
 
 	int			m_bsize;	/* fs logical block size */
 	uint8_t			m_blkbit_log;	/* blocklog + NBBY */
@@ -384,6 +386,7 @@ typedef struct xfs_mount {
 
 /* Mount features */
 #define XFS_FEAT_NOLIFETIME	(1ULL << 47)	/* disable lifetime hints */
+#define XFS_FEAT_DEFER_UNLINKED	(1ULL << 48)	/* defer iunlink cleanup */
 #define XFS_FEAT_NOALIGN	(1ULL << 49)	/* ignore alignment */
 #define XFS_FEAT_ALLOCSIZE	(1ULL << 50)	/* user specified allocation size */
 #define XFS_FEAT_LARGE_IOSIZE	(1ULL << 51)	/* report large preferred
@@ -518,6 +521,7 @@ static inline void xfs_add_attr2(struct xfs_mount *mp)
  * bit inodes and read-only state, are kept as operational state rather than
  * features.
  */
+__XFS_HAS_FEAT(defer_unlinked, DEFER_UNLINKED)
 __XFS_HAS_FEAT(noalign, NOALIGN)
 __XFS_HAS_FEAT(allocsize, ALLOCSIZE)
 __XFS_HAS_FEAT(large_iosize, LARGE_IOSIZE)
@@ -577,6 +581,8 @@ __XFS_HAS_FEAT(nouuid, NOUUID)
 #define XFS_OPSTATE_WARNED_ZONED	19
 /* (Zoned) GC is in progress */
 #define XFS_OPSTATE_ZONEGC_RUNNING	20
+/* Deferred unlinked inode cleanup is pending or running */
+#define XFS_OPSTATE_IUNLINK_CLEANUP	21
 
 #define __XFS_IS_OPSTATE(name, NAME) \
 static inline bool xfs_is_ ## name (struct xfs_mount *mp) \
@@ -599,6 +605,7 @@ __XFS_IS_OPSTATE(inode32, INODE32)
 __XFS_IS_OPSTATE(readonly, READONLY)
 __XFS_IS_OPSTATE(inodegc_enabled, INODEGC_ENABLED)
 __XFS_IS_OPSTATE(blockgc_enabled, BLOCKGC_ENABLED)
+__XFS_IS_OPSTATE(iunlink_cleanup, IUNLINK_CLEANUP)
 #ifdef CONFIG_XFS_QUOTA
 __XFS_IS_OPSTATE(quotacheck_running, QUOTACHECK_RUNNING)
 __XFS_IS_OPSTATE(resuming_quotaon, RESUMING_QUOTAON)

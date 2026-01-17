@@ -28,6 +28,7 @@
 #include "xfs_ag.h"
 #include "xfs_quota.h"
 #include "xfs_reflink.h"
+#include "xfs_iunlink_gc.h"
 
 #define BLK_AVG(blk1, blk2)	((blk1+blk2) >> 1)
 
@@ -2852,6 +2853,11 @@ xlog_recover_process_iunlinks(
 	struct xlog	*log)
 {
 	struct xfs_perag	*pag = NULL;
+
+	if (xfs_has_defer_unlinked(log->l_mp)) {
+		xfs_iunlink_gc_kick(log->l_mp);
+		return;
+	}
 
 	while ((pag = xfs_perag_next(log->l_mp, pag)))
 		xlog_recover_iunlink_ag(pag);
