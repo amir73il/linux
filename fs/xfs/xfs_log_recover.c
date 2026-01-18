@@ -2833,6 +2833,13 @@ xlog_recover_iunlink_ag(
 	xfs_buf_unlock(agibp);
 
 	for (bucket = 0; bucket < XFS_AGI_UNLINKED_BUCKETS; bucket++) {
+		/* Snapshot the unlinked list heads for deferred cleanup */
+		if (xfs_has_defer_unlinked(pag_mount(pag))) {
+			pag->pag_iunlink_snap[bucket] =
+					be32_to_cpu(agi->agi_unlinked[bucket]);
+			continue;
+		}
+
 		error = xlog_recover_iunlink_bucket(pag, agi, bucket);
 		if (error) {
 			/*
@@ -2854,13 +2861,15 @@ xlog_recover_process_iunlinks(
 {
 	struct xfs_perag	*pag = NULL;
 
-	if (xfs_has_defer_unlinked(log->l_mp)) {
-		xfs_iunlink_gc_kick(log->l_mp);
-		return;
-	}
-
 	while ((pag = xfs_perag_next(log->l_mp, pag)))
 		xlog_recover_iunlink_ag(pag);
+
+	/*
+	 * Kick the deferred unlinked inode cleanup worker to process any
+	 * inodes that were unlinked but not freed when the system crashed.
+	 */
+	if (xfs_has_defer_unlinked(log->l_mp))
+		xfs_iunlink_gc_kick(log->l_mp);
 }
 
 STATIC void

@@ -10,10 +10,165 @@
 #include "xfs_trans_resv.h"
 #include "xfs_sb.h"
 #include "xfs_mount.h"
+#include "xfs_ag.h"
+#include "xfs_ialloc.h"
 #include "xfs_iunlink_gc.h"
+#include "xfs_health.h"
+#include "xfs_inode.h"
+#include "xfs_icache.h"
+#include "xfs_log_format.h"
+#include "xfs_trans.h"
+#include "xfs_buf.h"
+#include "xfs_error.h"
 
 #include <linux/freezer.h>
 #include <linux/kthread.h>
+
+/*
+ * This is a variation of xlog_recover_iunlink_bucket that skips the inodes
+ * that were unlinked since mount time.
+ */
+static int
+xfs_iunlink_gc_process_bucket(
+	struct xfs_perag	*pag,
+	int			bucket)
+{
+	struct xfs_mount	*mp = pag_mount(pag);
+	struct xfs_buf		*agibp;
+	struct xfs_agi		*agi;
+	struct xfs_inode	*prev_ip = NULL;
+	xfs_agino_t		prev_agino = NULLAGINO;
+	xfs_agino_t		agino;
+	xfs_agino_t		snap_agino;
+	bool			found_snap = false;
+	int			error = 0;
+
+	snap_agino = pag->pag_iunlink_snap[bucket];
+	if (snap_agino == NULLAGINO)
+		return 0;
+
+	error = xfs_read_agi(pag, NULL, 0, &agibp);
+	if (error)
+		return error;
+
+	agi = agibp->b_addr;
+	agino = be32_to_cpu(agi->agi_unlinked[bucket]);
+	xfs_buf_rele(agibp);
+
+	while (agino != NULLAGINO) {
+		struct xfs_inode	*ip;
+		xfs_agino_t		next_agino;
+
+		error = -ESHUTDOWN;
+		if (xfs_is_shutdown(mp))
+			goto out_error;
+		error = -EINTR;
+		if (kthread_should_stop() || kthread_should_park())
+			goto out_error;
+
+		error = xfs_iget(mp, NULL, xfs_agino_to_ino(pag, agino), 0, 0,
+				&ip);
+		if (error)
+			goto out_warn;
+
+		ASSERT(VFS_I(ip)->i_nlink == 0);
+		ASSERT(VFS_I(ip)->i_mode != 0);
+		xfs_iflags_clear(ip, XFS_IRECOVERY);
+
+		next_agino = ip->i_next_unlinked;
+
+		if (!found_snap) {
+			if (agino == snap_agino) {
+				found_snap = true;
+				prev_agino = agino;
+				prev_ip = ip;
+			} else {
+				xfs_irele(ip);
+				prev_agino = agino;
+			}
+			agino = next_agino;
+			cond_resched();
+			continue;
+		}
+
+		ip->i_prev_unlinked = prev_agino;
+		xfs_irele(prev_ip);
+		error = xfs_inodegc_flush(mp);
+		if (error) {
+			xfs_irele(ip);
+			goto out_warn;
+		}
+		pag->pag_iunlink_snap[bucket] = agino;
+
+		prev_agino = agino;
+		prev_ip = ip;
+		agino = next_agino;
+		cond_resched();
+	}
+
+	if (prev_ip) {
+		xfs_irele(prev_ip);
+		error = xfs_inodegc_flush(mp);
+		if (error)
+			goto out_error;
+	}
+
+	pag->pag_iunlink_snap[bucket] = NULLAGINO;
+	return 0;
+
+out_warn:
+	xfs_warn(mp, "%s: failed to clean agi %u bucket %d. Continuing.",
+		 __func__, pag_agno(pag), bucket);
+	pag->pag_iunlink_snap[bucket] = NULLAGINO;
+	error = 0;
+out_error:
+	if (prev_ip)
+		xfs_irele(prev_ip);
+	return error;
+}
+
+static int
+xfs_iunlink_gc_process_ag(
+	struct xfs_perag	*pag)
+{
+	int			bucket;
+	int			error;
+
+	for (bucket = 0; bucket < XFS_AGI_UNLINKED_BUCKETS; bucket++) {
+		error = xfs_iunlink_gc_process_bucket(pag, bucket);
+		if (error)
+			return error;
+		if (error)
+			goto corrupt;
+		cond_resched();
+	}
+
+	return 0;
+
+corrupt:
+	return -EFSCORRUPTED;
+}
+
+static int
+xfs_iunlink_gc_run(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag = NULL;
+	int			error = 0;
+
+	while ((pag = xfs_perag_next(mp, pag))) {
+		if (xfs_is_shutdown(mp))
+			return -ESHUTDOWN;
+		if (kthread_should_stop() || kthread_should_park())
+			return -EINTR;
+
+		error = xfs_iunlink_gc_process_ag(pag);
+		if (error)
+			return error;
+		cond_resched();
+	}
+	return 0;
+}
 
 static int
 xfs_iunlink_gcd(
@@ -39,10 +194,8 @@ xfs_iunlink_gcd(
 		if (!xfs_is_iunlink_cleanup(mp))
 			continue;
 
-		/*
-		 * Placeholder: real cleanup work will be added in later patches.
-		 */
-		xfs_clear_iunlink_cleanup(mp);
+		if (xfs_iunlink_gc_run(mp) != -EINTR)
+			xfs_clear_iunlink_cleanup(mp);
 		wake_up(&mp->m_iunlinkgc_wait);
 	}
 
