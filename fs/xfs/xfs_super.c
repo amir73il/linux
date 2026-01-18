@@ -106,7 +106,8 @@ enum {
 	Op_deprecated, Opt_logbufs, Opt_logbsize, Opt_logdev, Opt_rtdev,
 	Opt_wsync, Opt_noalign, Opt_swalloc, Opt_sunit, Opt_swidth, Opt_nouuid,
 	Opt_grpid, Opt_nogrpid, Opt_bsdgroups, Opt_sysvgroups,
-	Opt_allocsize, Opt_norecovery, Opt_inode64, Opt_inode32,
+	Opt_allocsize, Opt_norecovery, Opt_deferunlinked,
+	Opt_inode64, Opt_inode32,
 	Opt_largeio, Opt_nolargeio,
 	Opt_filestreams, Opt_quota, Opt_noquota, Opt_usrquota, Opt_grpquota,
 	Opt_prjquota, Opt_uquota, Opt_gquota, Opt_pquota,
@@ -146,6 +147,7 @@ static const struct fs_parameter_spec xfs_fs_parameters[] = {
 	fsparam_flag("sysvgroups",	Opt_sysvgroups),
 	fsparam_string("allocsize",	Opt_allocsize),
 	fsparam_flag("norecovery",	Opt_norecovery),
+	fsparam_flag("deferunlinked",	Opt_deferunlinked),
 	fsparam_flag("inode64",		Opt_inode64),
 	fsparam_flag("inode32",		Opt_inode32),
 	fsparam_flag("largeio",		Opt_largeio),
@@ -191,6 +193,7 @@ xfs_fs_show_options(
 		{ XFS_FEAT_SWALLOC,		",swalloc" },
 		{ XFS_FEAT_NOUUID,		",nouuid" },
 		{ XFS_FEAT_NORECOVERY,		",norecovery" },
+		{ XFS_FEAT_DEFER_UNLINKED,	",deferunlinked" },
 		{ XFS_FEAT_FILESTREAMS,		",filestreams" },
 		{ XFS_FEAT_GRPID,		",grpid" },
 		{ XFS_FEAT_DISCARD,		",discard" },
@@ -1482,6 +1485,9 @@ xfs_fs_parse_param(
 		return 0;
 	case Opt_norecovery:
 		parsing_mp->m_features |= XFS_FEAT_NORECOVERY;
+		return 0;
+	case Opt_deferunlinked:
+		parsing_mp->m_features |= XFS_FEAT_DEFER_UNLINKED;
 		return 0;
 	case Opt_noalign:
 		parsing_mp->m_features |= XFS_FEAT_NOALIGN;
