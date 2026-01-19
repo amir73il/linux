@@ -2929,6 +2929,10 @@ next_inode:
 		next_agino = next_ip->i_next_unlinked;
 	}
 
+	/* Reset the zombie head if we completed the list recovery */
+	if (!error)
+		pag->pag_iunlink_zombie[bucket] = NULLAGINO;
+
 out_agibp:
 	xfs_trans_brelse(tp, agibp);
 	/* Should have found this inode somewhere in the iunlinked bucket. */

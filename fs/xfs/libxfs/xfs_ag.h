@@ -91,8 +91,8 @@ struct xfs_perag {
 	/* background prealloc block trimming */
 	struct delayed_work	pag_blockgc_work;
 
-	/* Snapshot head for unlinked inode lists from log recovery. */
-	xfs_agino_t		pag_iunlink_snap[XFS_AGI_UNLINKED_BUCKETS];
+	/* heads of unlinked zombie inode lists from log recovery. */
+	xfs_agino_t		pag_iunlink_zombie[XFS_AGI_UNLINKED_BUCKETS];
 #endif /* __KERNEL__ */
 };
 

@@ -39,12 +39,12 @@ xfs_iunlink_gc_process_bucket(
 	struct xfs_inode	*prev_ip = NULL;
 	xfs_agino_t		prev_agino = NULLAGINO;
 	xfs_agino_t		agino;
-	xfs_agino_t		snap_agino;
-	bool			found_snap = false;
+	xfs_agino_t		zombie_agino;
+	bool			found_zombie = false;
 	int			error = 0;
 
-	snap_agino = pag->pag_iunlink_snap[bucket];
-	if (snap_agino == NULLAGINO)
+	zombie_agino = pag->pag_iunlink_zombie[bucket];
+	if (zombie_agino == NULLAGINO)
 		return 0;
 
 	error = xfs_read_agi(pag, NULL, 0, &agibp);
@@ -77,9 +77,9 @@ xfs_iunlink_gc_process_bucket(
 
 		next_agino = ip->i_next_unlinked;
 
-		if (!found_snap) {
-			if (agino == snap_agino) {
-				found_snap = true;
+		if (!found_zombie) {
+			if (agino == zombie_agino) {
+				found_zombie = true;
 				prev_agino = agino;
 				prev_ip = ip;
 			} else {
@@ -98,7 +98,7 @@ xfs_iunlink_gc_process_bucket(
 			xfs_irele(ip);
 			goto out_warn;
 		}
-		pag->pag_iunlink_snap[bucket] = agino;
+		pag->pag_iunlink_zombie[bucket] = agino;
 
 		prev_agino = agino;
 		prev_ip = ip;
@@ -113,13 +113,13 @@ xfs_iunlink_gc_process_bucket(
 			goto out_error;
 	}
 
-	pag->pag_iunlink_snap[bucket] = NULLAGINO;
+	pag->pag_iunlink_zombie[bucket] = NULLAGINO;
 	return 0;
 
 out_warn:
 	xfs_warn(mp, "%s: failed to clean agi %u bucket %d. Continuing.",
 		 __func__, pag_agno(pag), bucket);
-	pag->pag_iunlink_snap[bucket] = NULLAGINO;
+	pag->pag_iunlink_zombie[bucket] = NULLAGINO;
 	error = 0;
 out_error:
 	if (prev_ip)

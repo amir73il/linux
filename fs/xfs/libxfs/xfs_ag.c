@@ -234,7 +234,7 @@ xfs_perag_alloc(
 	INIT_DELAYED_WORK(&pag->pag_blockgc_work, xfs_blockgc_worker);
 	INIT_RADIX_TREE(&pag->pag_ici_root, GFP_ATOMIC);
 	for (int i = 0; i < XFS_AGI_UNLINKED_BUCKETS; i++)
-		pag->pag_iunlink_snap[i] = NULLAGINO;
+		pag->pag_iunlink_zombie[i] = NULLAGINO;
 #endif /* __KERNEL__ */
 
 	error = xfs_buf_cache_init(&pag->pag_bcache);

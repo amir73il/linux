@@ -553,6 +553,7 @@ xfs_iunlink_remove_inode(
 	struct xfs_agi		*agi = agibp->b_addr;
 	xfs_agino_t		agino = XFS_INO_TO_AGINO(mp, ip->i_ino);
 	xfs_agino_t		head_agino;
+	xfs_agino_t		next_agino;
 	short			bucket_index = agino % XFS_AGI_UNLINKED_BUCKETS;
 	int			error;
 
@@ -583,8 +584,9 @@ xfs_iunlink_remove_inode(
 	 * Update the prev pointer in the next inode to point back to previous
 	 * inode in the chain.
 	 */
+	next_agino = ip->i_next_unlinked;
 	error = xfs_iunlink_update_backref(pag, ip->i_prev_unlinked,
-			ip->i_next_unlinked);
+			next_agino);
 	if (error == -ENOLINK)
 		error = xfs_iunlink_reload_next(tp, agibp, ip->i_prev_unlinked,
 				ip->i_next_unlinked);
@@ -600,14 +602,18 @@ xfs_iunlink_remove_inode(
 			return -EFSCORRUPTED;
 		}
 
-		error = xfs_iunlink_log_inode(tp, prev_ip, pag,
-				ip->i_next_unlinked);
-		prev_ip->i_next_unlinked = ip->i_next_unlinked;
+		error = xfs_iunlink_log_inode(tp, prev_ip, pag, next_agino);
+		prev_ip->i_next_unlinked = next_agino;
 	} else {
 		/* Point the head of the list to the next unlinked inode. */
 		error = xfs_iunlink_update_bucket(tp, pag, agibp, bucket_index,
-				ip->i_next_unlinked);
+				next_agino);
 	}
+	if (error)
+		return error;
+
+	if (!error && pag->pag_iunlink_zombie[bucket_index] == agino)
+		pag->pag_iunlink_zombie[bucket_index] = next_agino;
 
 	ip->i_next_unlinked = NULLAGINO;
 	ip->i_prev_unlinked = 0;

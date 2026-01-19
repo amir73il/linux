@@ -2833,9 +2833,9 @@ xlog_recover_iunlink_ag(
 	xfs_buf_unlock(agibp);
 
 	for (bucket = 0; bucket < XFS_AGI_UNLINKED_BUCKETS; bucket++) {
-		/* Snapshot the unlinked list heads for deferred cleanup */
+		/* Store the unlinked zombie inode list for cleanup */
 		if (xfs_has_defer_unlinked(pag_mount(pag))) {
-			pag->pag_iunlink_snap[bucket] =
+			pag->pag_iunlink_zombie[bucket] =
 					be32_to_cpu(agi->agi_unlinked[bucket]);
 			continue;
 		}
