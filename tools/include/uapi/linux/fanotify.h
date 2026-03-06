@@ -69,6 +69,9 @@
 /* "Strong typed" mount events - may be mixed with other namespace events */
 #define FAN_NS_MNT_ATTACH	0x0101000000ULL	/* Mount was attached */
 #define FAN_NS_MNT_DETACH	0x0102000000ULL	/* Mount was detached */
+/* namespace tree monitoring events */
+#define FAN_NS_CREATE		0x0100000100ULL	/* Sub namespace was created */
+#define FAN_NS_DELETE		0x0100000200ULL	/* Sub namespace was deleted */
 
 /* flags used for fanotify_init() */
 #define FAN_CLOEXEC		0x00000001
@@ -97,6 +100,7 @@
 #define FAN_REPORT_FD_ERROR	0x00002000	/* event->fd can report error */
 #define FAN_REPORT_MNT		0x00004000	/* Report FAN_MNT_ events */
 #define FAN_REPORT_MNTID	0x00008000	/* Report FAN_NS_MNT_ events */
+#define FAN_REPORT_NSID		0x00010000	/* Report namespace id info */
 
 /* Convenience macro - FAN_REPORT_NAME requires FAN_REPORT_DIR_FID */
 #define FAN_REPORT_DFID_NAME	(FAN_REPORT_DIR_FID | FAN_REPORT_NAME)
@@ -128,6 +132,7 @@
 #define FAN_MARK_MOUNT		0x00000010
 #define FAN_MARK_FILESYSTEM	0x00000100
 #define FAN_MARK_MNTNS		0x00000110
+#define FAN_MARK_USERNS		0x00001000
 
 /*
  * Convenience macro - FAN_MARK_IGNORE requires FAN_MARK_IGNORED_SURV_MODIFY
@@ -182,6 +187,7 @@ struct fanotify_event_metadata {
 #define FAN_EVENT_INFO_TYPE_ERROR	5
 #define FAN_EVENT_INFO_TYPE_RANGE	6
 #define FAN_EVENT_INFO_TYPE_MNT		7
+#define FAN_EVENT_INFO_TYPE_NS		8
 
 /* Special info types for FAN_RENAME */
 #define FAN_EVENT_INFO_TYPE_OLD_DFID_NAME	10
@@ -238,6 +244,12 @@ struct fanotify_event_info_range {
 struct fanotify_event_info_mnt {
 	struct fanotify_event_info_header hdr;
 	__u64 mnt_id;
+};
+
+struct fanotify_event_info_ns {
+	struct fanotify_event_info_header hdr;
+	__u64 self_nsid;	/* ns_id of the namespace */
+	__u64 owner_nsid;	/* ns_id of its owning user namespace */
 };
 
 /*
