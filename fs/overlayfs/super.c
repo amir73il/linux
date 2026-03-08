@@ -1308,8 +1308,8 @@ static struct dentry *ovl_get_root(struct super_block *sb,
 	struct dentry *root;
 	struct ovl_fs *ofs = OVL_FS(sb);
 	struct ovl_path *lowerpath = ovl_lowerstack(oe);
-	unsigned long ino = d_inode(lowerpath->dentry)->i_ino;
-	int fsid = lowerpath->layer->fsid;
+	unsigned long ino;
+	int fsid;
 	struct ovl_inode_params oip = {
 		.upperdentry = upperdentry,
 		.oe = oe,
@@ -1326,10 +1326,13 @@ static struct dentry *ovl_get_root(struct super_block *sb,
 		ovl_dentry_set_upper_alias(root);
 		if (ovl_is_impuredir(sb, upperdentry))
 			ovl_set_flag(OVL_IMPURE, d_inode(root));
+	} else {
+		ino = d_inode(lowerpath->dentry)->i_ino;
+		fsid = lowerpath->layer->fsid;
 	}
 
 	/* Look for xwhiteouts marker except in the lowermost layer */
-	for (int i = 0; i < ovl_numlower(oe) - 1; i++, lowerpath++) {
+	for (int i = 0; i + 1 < ovl_numlower(oe); i++, lowerpath++) {
 		struct path path = {
 			.mnt = lowerpath->layer->mnt,
 			.dentry = lowerpath->dentry,
@@ -1470,7 +1473,7 @@ static int ovl_fill_super_creds(struct fs_context *fc, struct super_block *sb)
 		ovl_init_uuid_xattr(sb, ofs, &ctx->upper);
 	}
 
-	if (!ovl_force_readonly(ofs) && ofs->config.index) {
+	if (!ovl_force_readonly(ofs) && ofs->workdir && ofs->config.index) {
 		err = ovl_get_indexdir(sb, ofs, oe, &ctx->upper);
 		if (err)
 			goto out_free_oe;

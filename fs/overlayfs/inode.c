@@ -525,10 +525,10 @@ int ovl_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 {
 	int err;
 	struct inode *inode = d_inode(dentry);
-	struct dentry *workdir = ovl_workdir(dentry);
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	struct inode *realinode = ovl_inode_real(inode);
 
-	if (!IS_POSIXACL(d_inode(workdir)))
+	if (!IS_POSIXACL(d_inode(ovl_upper_mnt(ofs)->mnt_root)))
 		return -EOPNOTSUPP;
 	if (!realinode->i_op->set_acl)
 		return -EOPNOTSUPP;
