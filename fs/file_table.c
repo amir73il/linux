@@ -69,10 +69,20 @@ EXPORT_SYMBOL_GPL(backing_file_user_path_file);
 
 int backing_file_open_user_path(struct file *f, const struct path *path)
 {
-	/* open an O_PATH file to reference the user path - should not fail */
-	return WARN_ON(vfs_open(path, &backing_file(f)->user_path_file));
+	if (WARN_ON(!(f->f_mode & FMODE_BACKING)))
+		return -EIO;
+	kernel_path_file_open(&backing_file(f)->user_path_file, path);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(backing_file_open_user_path);
+
+void backing_file_set_user_path_inode(struct file *f)
+{
+	if (WARN_ON(!(f->f_mode & FMODE_BACKING)))
+		return;
+	file_set_d_inode(&backing_file(f)->user_path_file);
+}
+EXPORT_SYMBOL_GPL(backing_file_set_user_path_inode);
 
 static void destroy_file(struct file *f)
 {
