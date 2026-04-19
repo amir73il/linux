@@ -1586,13 +1586,17 @@ static struct hlist_head *fanotify_alloc_merge_hash(void)
 DEFINE_CLASS(fsnotify_group,
 	     struct fsnotify_group *,
 	     if (!IS_ERR_OR_NULL(_T)) fsnotify_destroy_group(_T),
-	     fsnotify_alloc_group(ops, flags),
-	     const struct fsnotify_ops *ops, int flags)
+	     __fsnotify_alloc_group(ops, group_type,
+				    FSNOTIFY_GROUP_FLAG_USER,
+				    GFP_KERNEL_ACCOUNT),
+	     const struct fsnotify_ops *ops,
+	     enum fsnotify_group_type group_type)
 
 /* fanotify syscalls */
 SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 {
 	struct user_namespace *user_ns = current_user_ns();
+	enum fsnotify_group_type group_type;
 	int f_flags, fd;
 	unsigned int fid_mode = flags & FANOTIFY_FID_BITS;
 	unsigned int class = flags & FANOTIFY_CLASS_BITS;
@@ -1681,8 +1685,11 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if (flags & FAN_NONBLOCK)
 		f_flags |= O_NONBLOCK;
 
-	CLASS(fsnotify_group, group)(&fanotify_fsnotify_ops,
-				     FSNOTIFY_GROUP_FLAG_USER);
+	/* A group is either for watching filesystems or mount namespaces */
+	group_type = (flags & FAN_REPORT_MNT) ? FSNOTIFY_GROUP_TYPE_NAMESPACE :
+						FSNOTIFY_GROUP_TYPE_FILESYSTEM;
+
+	CLASS(fsnotify_group, group)(&fanotify_fsnotify_ops, group_type);
 	/* fsnotify_alloc_group takes a ref.  Dropped in fanotify_release */
 	if (IS_ERR(group))
 		return PTR_ERR(group);
@@ -1961,7 +1968,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	group = fd_file(f)->private_data;
 
 	/* Only report mount events on mnt namespace */
-	if (FAN_GROUP_FLAG(group, FAN_REPORT_MNT)) {
+	if (fsnotify_is_ns_watcher(group)) {
 		if (mask & ~FANOTIFY_MOUNT_EVENTS)
 			return -EINVAL;
 		if (mark_type != FAN_MARK_MNTNS)
