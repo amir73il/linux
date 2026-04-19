@@ -657,7 +657,7 @@ static struct fsnotify_group *inotify_new_group(unsigned int max_events)
 	struct inotify_event_info *oevent;
 
 	group = fsnotify_alloc_group(&inotify_fsnotify_ops,
-				     FSNOTIFY_GROUP_USER);
+				     FSNOTIFY_GROUP_FLAG_USER);
 	if (IS_ERR(group))
 		return group;
 

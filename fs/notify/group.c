@@ -145,8 +145,8 @@ static struct fsnotify_group *__fsnotify_alloc_group(
 struct fsnotify_group *fsnotify_alloc_group(const struct fsnotify_ops *ops,
 					    int flags)
 {
-	gfp_t gfp = (flags & FSNOTIFY_GROUP_USER) ? GFP_KERNEL_ACCOUNT :
-						    GFP_KERNEL;
+	gfp_t gfp = (flags & FSNOTIFY_GROUP_FLAG_USER) ?
+		    GFP_KERNEL_ACCOUNT : GFP_KERNEL;
 
 	return __fsnotify_alloc_group(ops, flags, gfp);
 }
