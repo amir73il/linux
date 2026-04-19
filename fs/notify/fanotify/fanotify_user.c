@@ -1586,8 +1586,11 @@ static struct hlist_head *fanotify_alloc_merge_hash(void)
 DEFINE_CLASS(fsnotify_group,
 	     struct fsnotify_group *,
 	     if (!IS_ERR_OR_NULL(_T)) fsnotify_destroy_group(_T),
-	     fsnotify_alloc_group(ops, flags),
-	     const struct fsnotify_ops *ops, int flags)
+	     __fsnotify_alloc_group(ops, type,
+				    FSNOTIFY_GROUP_FLAG_USER,
+				    GFP_KERNEL_ACCOUNT),
+	     const struct fsnotify_ops *ops,
+	     enum fsnotify_group_type type)
 
 /* fanotify syscalls */
 SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
@@ -1597,18 +1600,22 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	unsigned int fid_mode = flags & FANOTIFY_FID_BITS;
 	unsigned int class = flags & FANOTIFY_CLASS_BITS;
 	unsigned int internal_flags = 0;
+	/* A group is either for watching filesystems or namespaces */
+	enum fsnotify_group_type type = (flags & FANOTIFY_NS_INIT_FLAGS) ?
+					FSNOTIFY_GROUP_TYPE_NS :
+					FSNOTIFY_GROUP_TYPE_FS;
 
 	pr_debug("%s: flags=%x event_f_flags=%x\n",
 		 __func__, flags, event_f_flags);
 
 	/*
 	 * An unprivileged user can setup an fanotify group with limited
-	 * functionality - an unprivileged group is limited to notification
-	 * events with file handles or mount ids and it cannot use unlimited
+	 * functionality - an unprivileged group cannot receive filesystem
+	 * notification events with file descriptors and cannot use unlimited
 	 * queue/marks.
 	 */
 	if (((flags & FANOTIFY_ADMIN_INIT_FLAGS) ||
-	     !(flags & (FANOTIFY_FID_BITS | FAN_REPORT_MNT))) &&
+	     !(flags & (FANOTIFY_FID_BITS | FANOTIFY_NS_INIT_FLAGS))) &&
 	    !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
@@ -1636,8 +1643,11 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if ((flags & FAN_REPORT_PIDFD) && (flags & FAN_REPORT_TID))
 		return -EINVAL;
 
-	/* Don't allow mixing mnt events with inode events for now */
-	if (flags & FAN_REPORT_MNT) {
+	/*
+	 * Namespace watchers do not support priority classes and do not
+	 * support reporting file info event extensions.
+	 */
+	if (type == FSNOTIFY_GROUP_TYPE_NS) {
 		if (class != FAN_CLASS_NOTIF)
 			return -EINVAL;
 		if (flags & (FANOTIFY_FID_BITS | FAN_REPORT_FD_ERROR))
@@ -1681,8 +1691,7 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if (flags & FAN_NONBLOCK)
 		f_flags |= O_NONBLOCK;
 
-	CLASS(fsnotify_group, group)(&fanotify_fsnotify_ops,
-				     FSNOTIFY_GROUP_FLAG_USER);
+	CLASS(fsnotify_group, group)(&fanotify_fsnotify_ops, type);
 	/* fsnotify_alloc_group takes a ref.  Dropped in fanotify_release */
 	if (IS_ERR(group))
 		return PTR_ERR(group);
@@ -1885,6 +1894,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	unsigned int mark_type = flags & FANOTIFY_MARK_TYPE_BITS;
 	unsigned int mark_cmd = flags & FANOTIFY_MARK_CMD_BITS;
 	unsigned int ignore = flags & FANOTIFY_MARK_IGNORE_BITS;
+	enum fsnotify_group_type group_type;
 	unsigned int obj_type, fid_mode;
 	void *obj = NULL;
 	u32 umask = 0;
@@ -1903,15 +1913,19 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	switch (mark_type) {
 	case FAN_MARK_INODE:
 		obj_type = FSNOTIFY_OBJ_TYPE_INODE;
+		group_type = FSNOTIFY_GROUP_TYPE_FS;
 		break;
 	case FAN_MARK_MOUNT:
 		obj_type = FSNOTIFY_OBJ_TYPE_VFSMOUNT;
+		group_type = FSNOTIFY_GROUP_TYPE_FS;
 		break;
 	case FAN_MARK_FILESYSTEM:
 		obj_type = FSNOTIFY_OBJ_TYPE_SB;
+		group_type = FSNOTIFY_GROUP_TYPE_FS;
 		break;
 	case FAN_MARK_MNTNS:
 		obj_type = FSNOTIFY_OBJ_TYPE_MNTNS;
+		group_type = FSNOTIFY_GROUP_TYPE_NS;
 		break;
 	default:
 		return -EINVAL;
@@ -1960,6 +1974,9 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		return -EINVAL;
 	group = fd_file(f)->private_data;
 
+	if (group->type != group_type)
+		return -EINVAL;
+
 	/* Only report mount events on mnt namespace */
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_MNT)) {
 		if (mask & ~FANOTIFY_MOUNT_EVENTS)
@@ -2005,14 +2022,15 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		return -EINVAL;
 
 	/*
-	 * Events that do not carry enough information to report
+	 * Filesystem events that do not carry enough information to report
 	 * event->fd require a group that supports reporting fid.  Those
 	 * events are not supported on a mount mark, because they do not
 	 * carry enough information (i.e. path) to be filtered by mount
 	 * point.
 	 */
 	fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
-	if (mask & ~(FANOTIFY_FD_EVENTS|FANOTIFY_MOUNT_EVENTS|FANOTIFY_EVENT_FLAGS) &&
+	if (fsnotify_is_fs_watcher(group) &&
+	    mask & ~(FANOTIFY_FD_EVENTS|FANOTIFY_EVENT_FLAGS) &&
 	    (!fid_mode || mark_type == FAN_MARK_MOUNT))
 		return -EINVAL;
 
