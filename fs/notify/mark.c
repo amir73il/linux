@@ -875,7 +875,7 @@ restart:
 
 		if ((lmark->group == mark->group) &&
 		    (lmark->flags & FSNOTIFY_MARK_FLAG_ATTACHED) &&
-		    !(mark->group->flags & FSNOTIFY_GROUP_DUPS)) {
+		    !(mark->group->flags & FSNOTIFY_GROUP_FLAG_DUPS)) {
 			err = -EEXIST;
 			goto out_err;
 		}
