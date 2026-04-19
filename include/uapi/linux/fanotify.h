@@ -28,8 +28,10 @@
 /* #define FAN_DIR_MODIFY	0x00080000 */	/* Deprecated (reserved) */
 
 #define FAN_PRE_ACCESS		0x00100000	/* Pre-content access hook */
-#define FAN_MNT_ATTACH		0x01000000	/* Mount was attached */
-#define FAN_MNT_DETACH		0x02000000	/* Mount was detached */
+
+/* backward compat mount events */
+#define FAN_MNT_ATTACH_OLD	0x01000000	/* Mount was attached */
+#define FAN_MNT_DETACH_OLD	0x02000000	/* Mount was detached */
 
 #define FAN_EVENT_ON_CHILD	0x08000000	/* Interested in child events */
 
@@ -40,6 +42,14 @@
 /* helper events */
 #define FAN_CLOSE		(FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE) /* close */
 #define FAN_MOVE		(FAN_MOVED_FROM | FAN_MOVED_TO) /* moves */
+
+/* event types defined in upper 32bit of mask */
+#define FAN_EVENT_TYPE_NS	0x100000000UL
+#define FAN_NS(mask)		(FAN_EVENT_TYPE_NS | (mask))
+
+/* events that user can register for when watching namespace objects */
+#define FAN_MNT_ATTACH		FAN_NS(0x01000000)	/* Mount was attached */
+#define FAN_MNT_DETACH		FAN_NS(0x02000000)	/* Mount was detached */
 
 /* flags used for fanotify_init() */
 #define FAN_CLOEXEC		0x00000001

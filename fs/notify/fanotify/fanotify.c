@@ -303,7 +303,7 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 				     struct inode *dir)
 {
 	__u32 marks_mask = 0, marks_ignore_mask = 0;
-	__u32 test_mask, user_mask = FANOTIFY_OUTGOING_EVENTS |
+	__u32 test_mask, user_mask = FANOTIFY_OUTGOING_FS_EVENTS |
 				     FANOTIFY_EVENT_FLAGS;
 	const struct path *path = fsnotify_data_path(data, data_type);
 	unsigned int fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
@@ -315,6 +315,7 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 		 __func__, iter_info->report_mask, event_mask, data, data_type);
 
 	if (fsnotify_is_ns_watcher(group)) {
+		user_mask = FANOTIFY_OUTGOING_NS_EVENTS;
 		if (data_type != FSNOTIFY_EVENT_MNT)
 			return 0;
 	} else if (WARN_ON_ONCE(!fsnotify_is_fs_watcher(group))) {
