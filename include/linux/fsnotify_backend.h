@@ -232,8 +232,8 @@ struct fsnotify_group {
 	enum fsnotify_group_prio priority;	/* priority for sending events */
 	bool shutdown;		/* group is being shut down, don't queue more events */
 
-#define FSNOTIFY_GROUP_USER	0x01 /* user allocated group */
-#define FSNOTIFY_GROUP_DUPS	0x02 /* allow multiple marks per object */
+#define FSNOTIFY_GROUP_FLAG_USER	0x01 /* user allocated group */
+#define FSNOTIFY_GROUP_FLAG_DUPS	0x02 /* allow multiple marks per object */
 	int flags;
 	unsigned int owner_flags;	/* stored flags of mark_mutex owner */
 
