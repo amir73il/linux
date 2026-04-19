@@ -314,9 +314,11 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	pr_debug("%s: report_mask=%x mask=%x data=%p data_type=%d\n",
 		 __func__, iter_info->report_mask, event_mask, data, data_type);
 
-	if (FAN_GROUP_FLAG(group, FAN_REPORT_MNT)) {
+	if (fsnotify_is_ns_watcher(group)) {
 		if (data_type != FSNOTIFY_EVENT_MNT)
 			return 0;
+	} else if (WARN_ON_ONCE(!fsnotify_is_fs_watcher(group))) {
+		return 0;
 	} else if (!fid_mode) {
 		/* Do we have path to open a file descriptor? */
 		if (!path)

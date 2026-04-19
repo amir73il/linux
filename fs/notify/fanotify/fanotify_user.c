@@ -1586,13 +1586,17 @@ static struct hlist_head *fanotify_alloc_merge_hash(void)
 DEFINE_CLASS(fsnotify_group,
 	     struct fsnotify_group *,
 	     if (!IS_ERR_OR_NULL(_T)) fsnotify_destroy_group(_T),
-	     fsnotify_alloc_group(ops, flags),
-	     const struct fsnotify_ops *ops, int flags)
+	     __fsnotify_alloc_group(ops, type,
+				    FSNOTIFY_GROUP_FLAG_USER,
+				    GFP_KERNEL_ACCOUNT),
+	     const struct fsnotify_ops *ops,
+	     enum fsnotify_group_type type)
 
 /* fanotify syscalls */
 SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 {
 	struct user_namespace *user_ns = current_user_ns();
+	enum fsnotify_group_type type;
 	int f_flags, fd;
 	unsigned int fid_mode = flags & FANOTIFY_FID_BITS;
 	unsigned int class = flags & FANOTIFY_CLASS_BITS;
@@ -1681,8 +1685,11 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	if (flags & FAN_NONBLOCK)
 		f_flags |= O_NONBLOCK;
 
-	CLASS(fsnotify_group, group)(&fanotify_fsnotify_ops,
-				     FSNOTIFY_GROUP_FLAG_USER);
+	/* A group is either for watching filesystems or mount namespaces */
+	type = (flags & FAN_REPORT_MNT) ? FSNOTIFY_GROUP_TYPE_NS :
+					  FSNOTIFY_GROUP_TYPE_FS;
+
+	CLASS(fsnotify_group, group)(&fanotify_fsnotify_ops, type);
 	/* fsnotify_alloc_group takes a ref.  Dropped in fanotify_release */
 	if (IS_ERR(group))
 		return PTR_ERR(group);
@@ -1885,6 +1892,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	unsigned int mark_type = flags & FANOTIFY_MARK_TYPE_BITS;
 	unsigned int mark_cmd = flags & FANOTIFY_MARK_CMD_BITS;
 	unsigned int ignore = flags & FANOTIFY_MARK_IGNORE_BITS;
+	enum fsnotify_group_type group_type;
 	unsigned int obj_type, fid_mode;
 	void *obj = NULL;
 	u32 umask = 0;
@@ -1903,15 +1911,19 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	switch (mark_type) {
 	case FAN_MARK_INODE:
 		obj_type = FSNOTIFY_OBJ_TYPE_INODE;
+		group_type = FSNOTIFY_GROUP_TYPE_FS;
 		break;
 	case FAN_MARK_MOUNT:
 		obj_type = FSNOTIFY_OBJ_TYPE_VFSMOUNT;
+		group_type = FSNOTIFY_GROUP_TYPE_FS;
 		break;
 	case FAN_MARK_FILESYSTEM:
 		obj_type = FSNOTIFY_OBJ_TYPE_SB;
+		group_type = FSNOTIFY_GROUP_TYPE_FS;
 		break;
 	case FAN_MARK_MNTNS:
 		obj_type = FSNOTIFY_OBJ_TYPE_MNTNS;
+		group_type = FSNOTIFY_GROUP_TYPE_NS;
 		break;
 	default:
 		return -EINVAL;
@@ -1960,16 +1972,15 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		return -EINVAL;
 	group = fd_file(f)->private_data;
 
+	if (group->type != group_type)
+		return -EINVAL;
+
 	/* Only report mount events on mnt namespace */
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_MNT)) {
 		if (mask & ~FANOTIFY_MOUNT_EVENTS)
 			return -EINVAL;
-		if (mark_type != FAN_MARK_MNTNS)
-			return -EINVAL;
 	} else {
 		if (mask & FANOTIFY_MOUNT_EVENTS)
-			return -EINVAL;
-		if (mark_type == FAN_MARK_MNTNS)
 			return -EINVAL;
 	}
 

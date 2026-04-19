@@ -111,9 +111,9 @@ void fsnotify_put_group(struct fsnotify_group *group)
 }
 EXPORT_SYMBOL_GPL(fsnotify_put_group);
 
-static struct fsnotify_group *__fsnotify_alloc_group(
-				const struct fsnotify_ops *ops,
-				int flags, gfp_t gfp)
+struct fsnotify_group *__fsnotify_alloc_group(const struct fsnotify_ops *ops,
+					      enum fsnotify_group_type type,
+					      int flags, gfp_t gfp)
 {
 	struct fsnotify_group *group;
 
@@ -135,9 +135,11 @@ static struct fsnotify_group *__fsnotify_alloc_group(
 
 	group->ops = ops;
 	group->flags = flags;
+	group->type = type;
 
 	return group;
 }
+EXPORT_SYMBOL_GPL(__fsnotify_alloc_group);
 
 /*
  * Create a new fsnotify_group and hold a reference for the group returned.
@@ -148,7 +150,7 @@ struct fsnotify_group *fsnotify_alloc_group(const struct fsnotify_ops *ops,
 	gfp_t gfp = (flags & FSNOTIFY_GROUP_FLAG_USER) ?
 		    GFP_KERNEL_ACCOUNT : GFP_KERNEL;
 
-	return __fsnotify_alloc_group(ops, flags, gfp);
+	return __fsnotify_alloc_group(ops, FSNOTIFY_GROUP_TYPE_FS, flags, gfp);
 }
 EXPORT_SYMBOL_GPL(fsnotify_alloc_group);
 
