@@ -178,7 +178,7 @@ int fsnotify_pre_content(const struct path *path, const loff_t *ppos,
  * Notify only the child without name info if parent is not watching and
  * inode/sb/mount are not interested in events with parent and name info.
  */
-int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
+int __fsnotify_parent(struct dentry *dentry, __u64 mask, const void *data,
 		      int data_type)
 {
 	const struct path *path = fsnotify_data_path(data, data_type);
@@ -247,7 +247,7 @@ EXPORT_SYMBOL_GPL(__fsnotify_parent);
 
 static int fsnotify_handle_inode_event(struct fsnotify_group *group,
 				       struct fsnotify_mark *inode_mark,
-				       u32 mask, const void *data, int data_type,
+				       u64 mask, const void *data, int data_type,
 				       struct inode *dir, const struct qstr *name,
 				       u32 cookie)
 {
@@ -266,13 +266,15 @@ static int fsnotify_handle_inode_event(struct fsnotify_group *group,
 		return 0;
 
 	/* Check interest of this mark in case event was sent with two marks */
-	if (!(mask & inode_mark->mask & ALL_FSNOTIFY_FS_EVENTS))
+	if (WARN_ON_ONCE(upper_32_bits(mask)) ||
+	    !(mask & inode_mark->mask & ALL_FSNOTIFY_FS_EVENTS))
 		return 0;
 
-	return ops->handle_inode_event(inode_mark, mask, inode, dir, name, cookie);
+	return ops->handle_inode_event(inode_mark, (u32)mask, inode, dir, name,
+				       cookie);
 }
 
-static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
+static int fsnotify_handle_event(struct fsnotify_group *group, __u64 mask,
 				 const void *data, int data_type,
 				 struct inode *dir, const struct qstr *name,
 				 u32 cookie, struct fsnotify_iter_info *iter_info)
@@ -328,7 +330,7 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 					   dir, name, cookie);
 }
 
-static int send_to_group(__u32 mask, const void *data, int data_type,
+static int send_to_group(__u64 mask, const void *data, int data_type,
 			 struct inode *dir, const struct qstr *file_name,
 			 u32 cookie, struct fsnotify_iter_info *iter_info)
 {
@@ -360,7 +362,7 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 			fsnotify_effective_ignore_mask(mark, is_dir, type);
 	}
 
-	pr_debug("%s: group=%p mask=%x marks_mask=%x marks_ignore_mask=%x data=%p data_type=%d dir=%p cookie=%d\n",
+	pr_debug("%s: group=%p mask=%llx marks_mask=%x marks_ignore_mask=%x data=%p data_type=%d dir=%p cookie=%d\n",
 		 __func__, group, mask, marks_mask, marks_ignore_mask,
 		 data, data_type, dir, cookie);
 
@@ -489,7 +491,7 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
  *		reported to both.
  * @cookie:	inotify rename cookie
  */
-int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
+int fsnotify(__u64 mask, const void *data, int data_type, struct inode *dir,
 	     const struct qstr *file_name, struct inode *inode, u32 cookie)
 {
 	const struct path *path = fsnotify_data_path(data, data_type);
@@ -691,7 +693,7 @@ open_perm:
 }
 #endif
 
-void fsnotify_mnt(__u32 mask, struct mnt_namespace *ns, struct vfsmount *mnt)
+void fsnotify_mnt(__u64 mask, struct mnt_namespace *ns, struct vfsmount *mnt)
 {
 	struct fsnotify_mnt data = {
 		.ns = ns,
@@ -715,7 +717,7 @@ static __init int fsnotify_init(void)
 {
 	int ret;
 
-	BUILD_BUG_ON(HWEIGHT32(ALL_FSNOTIFY_BITS) != 26);
+	BUILD_BUG_ON(HWEIGHT64(ALL_FSNOTIFY_BITS) != 26);
 
 	ret = init_srcu_struct(&fsnotify_mark_srcu);
 	if (ret)

@@ -296,9 +296,9 @@ out:
  * been included within the event mask, but have not been explicitly
  * requested by the user, will not be present in the returned mask.
  */
-static u32 fanotify_group_event_mask(struct fsnotify_group *group,
+static u64 fanotify_group_event_mask(struct fsnotify_group *group,
 				     struct fsnotify_iter_info *iter_info,
-				     u32 *match_mask, u32 event_mask,
+				     u32 *match_mask, u64 event_mask,
 				     const void *data, int data_type,
 				     struct inode *dir)
 {
@@ -311,7 +311,7 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 	bool ondir = event_mask & FAN_ONDIR;
 	int type;
 
-	pr_debug("%s: report_mask=%x mask=%x data=%p data_type=%d\n",
+	pr_debug("%s: report_mask=%x mask=%llx data=%p data_type=%d\n",
 		 __func__, iter_info->report_mask, event_mask, data, data_type);
 
 	if (fsnotify_is_ns_watcher(group)) {
@@ -498,7 +498,7 @@ out_err:
  * also in create/delete/move events in addition to the fid of the parent
  * and the name of the child.
  */
-static inline bool fanotify_report_child_fid(unsigned int fid_mode, u32 mask)
+static inline bool fanotify_report_child_fid(unsigned int fid_mode, u64 mask)
 {
 	if (mask & ALL_FSNOTIFY_DIRENT_EVENTS)
 		return (fid_mode & FAN_REPORT_TARGET_FID);
@@ -520,7 +520,7 @@ static inline bool fanotify_report_child_fid(unsigned int fid_mode, u32 mask)
  * FS_CREATE reports the modified dir fid without FAN_REPORT_TARGET_FID.
  *       and reports the created child fid with FAN_REPORT_TARGET_FID.
  */
-static struct inode *fanotify_fid_inode(u32 event_mask, const void *data,
+static struct inode *fanotify_fid_inode(u64 event_mask, const void *data,
 					int data_type, struct inode *dir,
 					unsigned int fid_mode)
 {
@@ -539,7 +539,7 @@ static struct inode *fanotify_fid_inode(u32 event_mask, const void *data,
  * reported to parent.
  * Otherwise, do not report dir fid.
  */
-static struct inode *fanotify_dfid_inode(u32 event_mask, const void *data,
+static struct inode *fanotify_dfid_inode(u64 event_mask, const void *data,
 					 int data_type, struct inode *dir)
 {
 	struct inode *inode = fsnotify_data_inode(data, data_type);
@@ -746,7 +746,7 @@ static struct fanotify_event *fanotify_alloc_error_event(
 
 static struct fanotify_event *fanotify_alloc_event(
 				struct fsnotify_group *group,
-				u32 mask, const void *data, int data_type,
+				u64 mask, const void *data, int data_type,
 				struct inode *dir, const struct qstr *file_name,
 				__kernel_fsid_t *fsid, u32 match_mask)
 {
@@ -872,7 +872,7 @@ static struct fanotify_event *fanotify_alloc_event(
 
 	/* Mix event info, FAN_ONDIR flag and pid into event merge key */
 	hash ^= hash_long((unsigned long)pid | ondir, FANOTIFY_EVENT_HASH_BITS);
-	fanotify_init_event(event, hash, mask);
+	fanotify_init_event(event, hash, (u32)mask);
 	event->pid = pid;
 
 out:
@@ -924,7 +924,7 @@ static void fanotify_insert_event(struct fsnotify_group *group,
 	hlist_add_head(&event->merge_list, hlist);
 }
 
-static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
+static int fanotify_handle_event(struct fsnotify_group *group, u64 mask,
 				 const void *data, int data_type,
 				 struct inode *dir,
 				 const struct qstr *file_name, u32 cookie,
@@ -963,10 +963,10 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 
 	mask = fanotify_group_event_mask(group, iter_info, &match_mask,
 					 mask, data, data_type, dir);
-	if (!mask)
+	if (!mask || WARN_ON_ONCE(upper_32_bits(mask)))
 		return 0;
 
-	pr_debug("%s: group=%p mask=%x report_mask=%x\n", __func__,
+	pr_debug("%s: group=%p mask=%llx report_mask=%x\n", __func__,
 		 group, mask, match_mask);
 
 	bool is_perm = fanotify_is_fs_perm_event(group, mask);

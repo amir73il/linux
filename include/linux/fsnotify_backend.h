@@ -176,7 +176,7 @@ struct mem_cgroup;
  *		userspace messages that marks have been removed.
  */
 struct fsnotify_ops {
-	int (*handle_event)(struct fsnotify_group *group, u32 mask,
+	int (*handle_event)(struct fsnotify_group *group, u64 mask,
 			    const void *data, int data_type, struct inode *dir,
 			    const struct qstr *file_name, u32 cookie,
 			    struct fsnotify_iter_info *iter_info);
@@ -671,10 +671,10 @@ struct fsnotify_mark {
 /* called from the vfs helpers */
 
 /* main fsnotify call to send events */
-extern int fsnotify(__u32 mask, const void *data, int data_type,
+extern int fsnotify(__u64 mask, const void *data, int data_type,
 		    struct inode *dir, const struct qstr *name,
 		    struct inode *inode, u32 cookie);
-extern int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
+extern int __fsnotify_parent(struct dentry *dentry, __u64 mask, const void *data,
 			   int data_type);
 extern void __fsnotify_inode_delete(struct inode *inode);
 extern void __fsnotify_vfsmount_delete(struct vfsmount *mnt);
@@ -682,7 +682,7 @@ extern void fsnotify_sb_delete(struct super_block *sb);
 extern void __fsnotify_mntns_delete(struct mnt_namespace *mntns);
 extern void fsnotify_sb_free(struct super_block *sb);
 extern u32 fsnotify_get_cookie(void);
-extern void fsnotify_mnt(__u32 mask, struct mnt_namespace *ns, struct vfsmount *mnt);
+extern void fsnotify_mnt(__u64 mask, struct mnt_namespace *ns, struct vfsmount *mnt);
 
 static inline __u32 fsnotify_parent_needed_mask(__u32 mask)
 {
@@ -959,14 +959,14 @@ static inline int fsnotify_pre_content(const struct path *path,
 	return 0;
 }
 
-static inline int fsnotify(__u32 mask, const void *data, int data_type,
+static inline int fsnotify(__u64 mask, const void *data, int data_type,
 			   struct inode *dir, const struct qstr *name,
 			   struct inode *inode, u32 cookie)
 {
 	return 0;
 }
 
-static inline int __fsnotify_parent(struct dentry *dentry, __u32 mask,
+static inline int __fsnotify_parent(struct dentry *dentry, __u64 mask,
 				  const void *data, int data_type)
 {
 	return 0;
@@ -998,7 +998,7 @@ static inline u32 fsnotify_get_cookie(void)
 static inline void fsnotify_unmount_inodes(struct super_block *sb)
 {}
 
-static inline void fsnotify_mnt(__u32 mask, struct mnt_namespace *ns, struct vfsmount *mnt)
+static inline void fsnotify_mnt(__u64 mask, struct mnt_namespace *ns, struct vfsmount *mnt)
 {}
 
 #endif	/* CONFIG_FSNOTIFY */
