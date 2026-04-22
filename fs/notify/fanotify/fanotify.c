@@ -195,7 +195,7 @@ static int fanotify_merge(struct fsnotify_group *group,
 	 * the event structure we have created in fanotify_handle_event() is the
 	 * one we should check for permission response.
 	 */
-	if (fanotify_is_perm_event(new->mask))
+	if (fanotify_is_perm_event(new))
 		return 0;
 
 	hlist_for_each_entry(old, hlist, merge_list) {
@@ -204,7 +204,7 @@ static int fanotify_merge(struct fsnotify_group *group,
 		if (fanotify_should_merge(old, new)) {
 			old->mask |= new->mask;
 
-			if (fanotify_is_error_event(old->mask))
+			if (fanotify_is_error_event(old))
 				FANOTIFY_EE(old)->err_count++;
 
 			return 1;
@@ -711,11 +711,9 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *dir,
 static struct fanotify_event *fanotify_alloc_error_event(
 						struct fsnotify_group *group,
 						__kernel_fsid_t *fsid,
-						const void *data, int data_type,
+						struct fs_error_report *report,
 						unsigned int *hash)
 {
-	struct fs_error_report *report =
-			fsnotify_data_error_report(data, data_type);
 	struct inode *inode;
 	struct fanotify_error_event *fee;
 	int fh_len;
@@ -759,6 +757,8 @@ static struct fanotify_event *fanotify_alloc_event(
 					      fid_mode);
 	struct inode *dirid = fanotify_dfid_inode(mask, data, data_type, dir);
 	const struct path *path = fsnotify_data_path(data, data_type);
+	struct fs_error_report *fs_error =
+		fsnotify_data_error_report(data, data_type);
 	u64 mnt_id = fsnotify_data_mnt_id(data, data_type);
 	struct mem_cgroup *old_memcg;
 	struct dentry *moved = NULL;
@@ -845,11 +845,10 @@ static struct fanotify_event *fanotify_alloc_event(
 	/* Whoever is interested in the event, pays for the allocation. */
 	old_memcg = set_active_memcg(group->memcg);
 
-	if (fanotify_is_perm_event(mask)) {
+	if (fanotify_is_fs_perm_event(group, mask)) {
 		event = fanotify_alloc_perm_event(data, data_type, gfp);
-	} else if (fanotify_is_error_event(mask)) {
-		event = fanotify_alloc_error_event(group, fsid, data,
-						   data_type, &hash);
+	} else if (fs_error) {
+		event = fanotify_alloc_error_event(group, fsid, fs_error, &hash);
 	} else if (name_event && (file_name || moved || child)) {
 		event = fanotify_alloc_name_event(dirid, fsid, file_name, child,
 						  moved, &hash, gfp);
@@ -916,7 +915,7 @@ static void fanotify_insert_event(struct fsnotify_group *group,
 
 	assert_spin_locked(&group->notification_lock);
 
-	if (!fanotify_is_hashed_event(event->mask))
+	if (!fanotify_is_hashed_event(event))
 		return;
 
 	pr_debug("%s: group=%p event=%p bucket=%u\n", __func__,
@@ -970,7 +969,8 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	pr_debug("%s: group=%p mask=%x report_mask=%x\n", __func__,
 		 group, mask, match_mask);
 
-	if (fanotify_is_perm_event(mask)) {
+	bool is_perm = fanotify_is_fs_perm_event(group, mask);
+	if (is_perm) {
 		/*
 		 * fsnotify_prepare_user_wait() fails if we race with mark
 		 * deletion.  Just let the operation pass in that case.
@@ -990,7 +990,7 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 		 * We don't queue overflow events for permission events as
 		 * there the access is denied and so no event is in fact lost.
 		 */
-		if (!fanotify_is_perm_event(mask))
+		if (!is_perm)
 			fsnotify_queue_overflow(group);
 		goto finish;
 	}
@@ -1000,17 +1000,17 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 				    fanotify_insert_event);
 	if (ret) {
 		/* Permission events shouldn't be merged */
-		BUG_ON(ret == 1 && mask & FANOTIFY_PERM_EVENTS);
+		WARN_ON(ret == 1 && is_perm);
 		/* Our event wasn't used in the end. Free it. */
 		fsnotify_destroy_event(group, fsn_event);
 
 		ret = 0;
-	} else if (fanotify_is_perm_event(mask)) {
+	} else if (is_perm) {
 		ret = fanotify_get_response(group, FANOTIFY_PERM(event),
 					    iter_info);
 	}
 finish:
-	if (fanotify_is_perm_event(mask))
+	if (is_perm)
 		fsnotify_finish_user_wait(iter_info);
 
 	return ret;

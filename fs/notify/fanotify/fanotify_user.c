@@ -257,7 +257,7 @@ static size_t fanotify_event_len(unsigned int info_mode,
 	int fh_len;
 	int dot_len = 0;
 
-	if (fanotify_is_error_event(event->mask))
+	if (fanotify_is_error_event(event))
 		event_len += FANOTIFY_ERROR_INFO_LEN;
 
 	if (fanotify_event_has_any_dir_fh(event)) {
@@ -275,7 +275,7 @@ static size_t fanotify_event_len(unsigned int info_mode,
 		fh_len = fanotify_event_object_fh_len(event);
 		event_len += fanotify_fid_info_len(fh_len, dot_len);
 	}
-	if (fanotify_is_mnt_event(event->mask))
+	if (fanotify_is_mnt_event(event))
 		event_len += FANOTIFY_MNT_INFO_LEN;
 
 	if (info_mode & FAN_REPORT_PIDFD)
@@ -338,9 +338,9 @@ static struct fanotify_event *get_one_event(struct fsnotify_group *group,
 	 * same event we peeked above.
 	 */
 	fsnotify_remove_first_event(group);
-	if (fanotify_is_perm_event(event->mask))
+	if (fanotify_is_perm_event(event))
 		FANOTIFY_PERM(event)->state = FAN_EVENT_REPORTED;
-	if (fanotify_is_hashed_event(event->mask))
+	if (fanotify_is_hashed_event(event))
 		fanotify_unhash_event(group, event);
 out:
 	spin_unlock(&group->notification_lock);
@@ -800,7 +800,7 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 		total_bytes += ret;
 	}
 
-	if (fanotify_is_error_event(event->mask)) {
+	if (fanotify_is_error_event(event)) {
 		ret = copy_error_info_to_user(event, buf, count);
 		if (ret < 0)
 			return ret;
@@ -818,7 +818,7 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 		total_bytes += ret;
 	}
 
-	if (fanotify_is_mnt_event(event->mask)) {
+	if (fanotify_is_mnt_event(event)) {
 		ret = copy_mnt_info_to_user(event, buf, count);
 		if (ret < 0)
 			return ret;
@@ -965,7 +965,7 @@ static ssize_t copy_event_to_user(struct fsnotify_group *group,
 	if (pidfd_file)
 		fd_install(pidfd, pidfd_file);
 
-	if (fanotify_is_perm_event(event->mask))
+	if (fanotify_is_perm_event(event))
 		FANOTIFY_PERM(event)->fd = fd;
 
 	return metadata.event_len;
@@ -1048,7 +1048,7 @@ static ssize_t fanotify_read(struct file *file, char __user *buf,
 		 * Permission events get queued to wait for response.  Other
 		 * events can be destroyed now.
 		 */
-		if (!fanotify_is_perm_event(event->mask)) {
+		if (!fanotify_is_perm_event(event)) {
 			fsnotify_destroy_event(group, &event->fse);
 		} else {
 			if (ret <= 0 || FANOTIFY_PERM(event)->fd < 0) {
@@ -1145,7 +1145,7 @@ static int fanotify_release(struct inode *ignored, struct file *file)
 	while ((fsn_event = fsnotify_remove_first_event(group))) {
 		struct fanotify_event *event = FANOTIFY_E(fsn_event);
 
-		if (!(event->mask & FANOTIFY_PERM_EVENTS)) {
+		if (!fanotify_is_perm_event(event)) {
 			spin_unlock(&group->notification_lock);
 			fsnotify_destroy_event(group, fsn_event);
 		} else {

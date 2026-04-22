@@ -775,11 +775,6 @@ static inline void fsnotify_queue_overflow(struct fsnotify_group *group)
 	fsnotify_add_event(group, group->overflow_event, NULL);
 }
 
-static inline bool fsnotify_is_overflow_event(u32 mask)
-{
-	return mask & FS_Q_OVERFLOW;
-}
-
 static inline bool fsnotify_notify_queue_is_empty(struct fsnotify_group *group)
 {
 	assert_spin_locked(&group->notification_lock);

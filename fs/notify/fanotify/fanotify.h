@@ -265,6 +265,7 @@ struct fanotify_event {
 	struct pid *pid;
 };
 
+
 static inline void fanotify_init_event(struct fanotify_event *event,
 				       unsigned int hash, u32 mask)
 {
@@ -457,10 +458,22 @@ FANOTIFY_PERM(struct fanotify_event *event)
 	return container_of(event, struct fanotify_perm_event, fae);
 }
 
-static inline bool fanotify_is_perm_event(u32 mask)
+static inline bool fanotify_is_fs_perm_event(struct fsnotify_group *group,
+					     u32 mask)
 {
 	return IS_ENABLED(CONFIG_FANOTIFY_ACCESS_PERMISSIONS) &&
+		fsnotify_is_fs_watcher(group) &&
 		mask & FANOTIFY_PERM_EVENTS;
+}
+
+static inline bool fanotify_is_perm_event(struct fanotify_event *event)
+{
+	return event->type == FANOTIFY_EVENT_TYPE_PATH_PERM;
+}
+
+static inline bool fsnotify_is_overflow_event(struct fanotify_event *event)
+{
+	return event->type == FANOTIFY_EVENT_TYPE_OVERFLOW;
 }
 
 static inline bool fanotify_event_has_access_range(struct fanotify_event *event)
@@ -476,14 +489,14 @@ static inline struct fanotify_event *FANOTIFY_E(struct fsnotify_event *fse)
 	return container_of(fse, struct fanotify_event, fse);
 }
 
-static inline bool fanotify_is_error_event(u32 mask)
+static inline bool fanotify_is_error_event(struct fanotify_event *event)
 {
-	return mask & FAN_FS_ERROR;
+	return event->type == FANOTIFY_EVENT_TYPE_FS_ERROR;
 }
 
-static inline bool fanotify_is_mnt_event(u32 mask)
+static inline bool fanotify_is_mnt_event(struct fanotify_event *event)
 {
-	return mask & (FAN_MNT_ATTACH | FAN_MNT_DETACH);
+	return event->type == FANOTIFY_EVENT_TYPE_MNT;
 }
 
 static inline const struct path *fanotify_event_path(struct fanotify_event *event)
@@ -506,10 +519,10 @@ static inline const struct path *fanotify_event_path(struct fanotify_event *even
 /*
  * Permission events and overflow event do not get merged - don't hash them.
  */
-static inline bool fanotify_is_hashed_event(u32 mask)
+static inline bool fanotify_is_hashed_event(struct fanotify_event *event)
 {
-	return !(fanotify_is_perm_event(mask) ||
-		 fsnotify_is_overflow_event(mask));
+	return !(fanotify_is_perm_event(event) ||
+		 fsnotify_is_overflow_event(event));
 }
 
 static inline unsigned int fanotify_event_hash_bucket(
