@@ -78,8 +78,10 @@
 
 /* 64bit kernel internal event hint flags */
 #define FS_EVENT_IS_PERM	BIT_ULL(33)	/* Wait for user response */
+#define FS_EVENT_ON_NS		BIT_ULL(34)	/* For namespace watchers */
 
 #define FS_PERM_EVENT(mask)	(FS_EVENT_IS_PERM | (mask))
+#define FS_NS_EVENT(mask)	(FS_EVENT_ON_NS | (mask))
 
 /*
  * Directory entry modification events - reported only to directory
@@ -136,7 +138,7 @@
 #define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT)
 
 /* Kernel internal 64bit flags */
-#define ALL_FSNOTIFY_KERN_FLAGS  (FS_EVENT_IS_PERM)
+#define ALL_FSNOTIFY_KERN_FLAGS  (FS_EVENT_IS_PERM | FS_EVENT_ON_NS)
 
 #define ALL_FSNOTIFY_BITS   (ALL_FSNOTIFY_KERN_FLAGS | \
 			     ALL_FSNOTIFY_EVENTS | \

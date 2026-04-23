@@ -710,14 +710,15 @@ void fsnotify_mnt(__u64 mask, struct mnt_namespace *ns, struct vfsmount *mnt)
 	if (!ns->n_fsnotify_marks)
 		return;
 
-	fsnotify(mask, &data, FSNOTIFY_EVENT_MNT, NULL, NULL, NULL, 0);
+	fsnotify(FS_NS_EVENT(mask), &data, FSNOTIFY_EVENT_MNT,
+		 NULL, NULL, NULL, 0);
 }
 
 static __init int fsnotify_init(void)
 {
 	int ret;
 
-	BUILD_BUG_ON(HWEIGHT64(ALL_FSNOTIFY_BITS) != 27);
+	BUILD_BUG_ON(HWEIGHT64(ALL_FSNOTIFY_BITS) != 28);
 
 	ret = init_srcu_struct(&fsnotify_mark_srcu);
 	if (ret)
