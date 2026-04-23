@@ -113,13 +113,19 @@
  */
 #define FS_EVENTS_POSS_TO_PARENT (FS_EVENTS_POSS_ON_CHILD)
 
-/* Events that can be reported to backends */
-#define ALL_FSNOTIFY_EVENTS (ALL_FSNOTIFY_DIRENT_EVENTS | \
-			     FSNOTIFY_MNT_EVENTS | \
+/* Events that can be reported to backends on filesystem watchers */
+#define ALL_FSNOTIFY_FS_EVENTS (ALL_FSNOTIFY_DIRENT_EVENTS | \
 			     FS_EVENTS_POSS_ON_CHILD | \
 			     FS_DELETE_SELF | FS_MOVE_SELF | \
 			     FS_UNMOUNT | FS_Q_OVERFLOW | FS_IN_IGNORED | \
 			     FS_ERROR)
+
+/* Events that can be reported to backends on namepsace watchers */
+#define ALL_FSNOTIFY_NS_EVENTS (FSNOTIFY_MNT_EVENTS | \
+			        FS_Q_OVERFLOW)
+
+/* Events that can be reported to backends */
+#define ALL_FSNOTIFY_EVENTS (ALL_FSNOTIFY_FS_EVENTS | ALL_FSNOTIFY_NS_EVENTS)
 
 /* Extra flags that may be reported with event or control handling of events */
 #define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT)

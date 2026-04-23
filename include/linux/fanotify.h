@@ -111,25 +111,32 @@
 
 #define FANOTIFY_MOUNT_EVENTS	(FAN_MNT_ATTACH | FAN_MNT_DETACH)
 
-/* Events that user can request to be notified on */
-#define FANOTIFY_EVENTS		(FANOTIFY_PATH_EVENTS | \
+/* Events that user can request to be notified on filesystem watchers */
+#define FANOTIFY_FS_EVENTS		(FANOTIFY_PATH_EVENTS | \
 				 FANOTIFY_INODE_EVENTS | \
-				 FANOTIFY_ERROR_EVENTS | \
-				 FANOTIFY_MOUNT_EVENTS)
+				 FANOTIFY_ERROR_EVENTS)
+
+/* Events that user can request to be notified on namepsace watchers */
+#define FANOTIFY_NS_EVENTS	(FANOTIFY_MOUNT_EVENTS)
 
 /* Extra flags that may be reported with event or control handling of events */
 #define FANOTIFY_EVENT_FLAGS	(FAN_EVENT_ON_CHILD | FAN_ONDIR)
 
-/* Events that may be reported to user */
-#define FANOTIFY_OUTGOING_EVENTS	(FANOTIFY_EVENTS | \
+/* Events that may be reported to user on filesystem watchers */
+#define FANOTIFY_OUTGOING_FS_EVENTS	(FANOTIFY_FS_EVENTS | \
 					 FANOTIFY_PERM_EVENTS | \
 					 FAN_Q_OVERFLOW | FAN_ONDIR)
+
+/* Events that may be reported to user on namepsace watchers */
+#define FANOTIFY_OUTGOING_NS_EVENTS	(FANOTIFY_NS_EVENTS | \
+					 FAN_Q_OVERFLOW)
 
 /* Events and flags relevant only for directories */
 #define FANOTIFY_DIRONLY_EVENT_BITS	(FANOTIFY_DIRENT_EVENTS | \
 					 FAN_EVENT_ON_CHILD | FAN_ONDIR)
 
-#define ALL_FANOTIFY_EVENT_BITS		(FANOTIFY_OUTGOING_EVENTS | \
+#define ALL_FANOTIFY_EVENT_BITS		(FANOTIFY_OUTGOING_FS_EVENTS | \
+					 FANOTIFY_OUTGOING_NS_EVENTS | \
 					 FANOTIFY_EVENT_FLAGS)
 
 /* These masks check for invalid bits in permission responses. */

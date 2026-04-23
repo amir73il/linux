@@ -830,6 +830,19 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 	return total_bytes;
 }
 
+static __u64 fanotify_event_mask(struct fsnotify_group *group,
+				 struct fanotify_event *event)
+{
+	switch (group->type) {
+	case FSNOTIFY_GROUP_TYPE_FS:
+		return event->mask & FANOTIFY_OUTGOING_FS_EVENTS;
+	case FSNOTIFY_GROUP_TYPE_NS:
+		return event->mask & FANOTIFY_OUTGOING_NS_EVENTS;
+	}
+
+	return 0;
+}
+
 static ssize_t copy_event_to_user(struct fsnotify_group *group,
 				  struct fanotify_event *event,
 				  char __user *buf, size_t count)
@@ -848,7 +861,7 @@ static ssize_t copy_event_to_user(struct fsnotify_group *group,
 	metadata.metadata_len = FAN_EVENT_METADATA_LEN;
 	metadata.vers = FANOTIFY_METADATA_VERSION;
 	metadata.reserved = 0;
-	metadata.mask = event->mask & FANOTIFY_OUTGOING_EVENTS;
+	metadata.mask = fanotify_event_mask(group, event);
 	metadata.pid = pid_vnr(event->pid);
 	/*
 	 * For an unprivileged listener, event->pid can be used to identify the
@@ -1879,6 +1892,23 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 	return 0;
 }
 
+static bool fanotify_is_valid_mask(struct fsnotify_group *group, __u64 mask)
+{
+	u32 valid_mask = 0;
+
+	switch (group->type) {
+	case FSNOTIFY_GROUP_TYPE_FS:
+		valid_mask = FANOTIFY_FS_EVENTS | FANOTIFY_EVENT_FLAGS;
+		if (IS_ENABLED(CONFIG_FANOTIFY_ACCESS_PERMISSIONS))
+			valid_mask |= FANOTIFY_PERM_EVENTS;
+		break;
+	case FSNOTIFY_GROUP_TYPE_NS:
+		valid_mask = FANOTIFY_NS_EVENTS;
+	}
+
+	return !(mask & ~valid_mask);
+}
+
 static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 			    int dfd, const char  __user *pathname)
 {
@@ -1888,7 +1918,6 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	struct fan_fsid __fsid, *fsid = NULL;
 	struct user_namespace *user_ns = NULL;
 	struct mnt_namespace *mntns;
-	u32 valid_mask = FANOTIFY_EVENTS | FANOTIFY_EVENT_FLAGS;
 	unsigned int mark_type = flags & FANOTIFY_MARK_TYPE_BITS;
 	unsigned int mark_cmd = flags & FANOTIFY_MARK_CMD_BITS;
 	unsigned int ignore = flags & FANOTIFY_MARK_IGNORE_BITS;
@@ -1943,13 +1972,6 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		return -EINVAL;
 	}
 
-	if (IS_ENABLED(CONFIG_FANOTIFY_ACCESS_PERMISSIONS))
-		valid_mask |= FANOTIFY_PERM_EVENTS;
-
-	if (mask & ~valid_mask)
-		return -EINVAL;
-
-
 	/* We don't allow FAN_MARK_IGNORE & FAN_MARK_IGNORED_MASK together */
 	if (ignore == (FAN_MARK_IGNORE | FAN_MARK_IGNORED_MASK))
 		return -EINVAL;
@@ -1972,17 +1994,14 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		return -EINVAL;
 	group = fd_file(f)->private_data;
 
-	if (group->type != group_type)
+	if (group->type != group_type ||
+	    !fanotify_is_valid_mask(group, mask))
 		return -EINVAL;
 
-	/* Only report mount events on mnt namespace */
-	if (FAN_GROUP_FLAG(group, FAN_REPORT_MNT)) {
-		if (mask & ~FANOTIFY_MOUNT_EVENTS)
+	/* Mount events require FAN_REPORT_MNT */
+	if (mask & FANOTIFY_MOUNT_EVENTS &&
+	    !FAN_GROUP_FLAG(group, FAN_REPORT_MNT))
 			return -EINVAL;
-	} else {
-		if (mask & FANOTIFY_MOUNT_EVENTS)
-			return -EINVAL;
-	}
 
 	/*
 	 * A user is allowed to setup sb/mount/mntns marks only if it is
