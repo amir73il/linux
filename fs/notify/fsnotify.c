@@ -160,14 +160,14 @@ int fsnotify_pre_content(const struct path *path, const loff_t *ppos,
 
 	/* Report page aligned range only when pos is known */
 	if (!ppos)
-		return fsnotify_path(path, FS_PRE_ACCESS);
+		return fsnotify_perm(path, FS_PRE_ACCESS);
 
 	range.path = path;
 	range.pos = PAGE_ALIGN_DOWN(*ppos);
 	range.count = PAGE_ALIGN(*ppos + count) - range.pos;
 
-	return fsnotify_parent(path->dentry, FS_PRE_ACCESS, &range,
-			       FSNOTIFY_EVENT_FILE_RANGE);
+	return fsnotify_parent(path->dentry, FS_PERM_EVENT(FS_PRE_ACCESS),
+			       &range, FSNOTIFY_EVENT_FILE_RANGE);
 }
 
 /*
@@ -594,7 +594,7 @@ int fsnotify(__u64 mask, const void *data, int data_type, struct inode *dir,
 		ret = send_to_group(mask, data, data_type, dir, file_name,
 				    cookie, &iter_info);
 
-		if (ret && (mask & ALL_FSNOTIFY_PERM_EVENTS))
+		if (ret && (mask & FS_EVENT_IS_PERM))
 			goto out;
 
 		fsnotify_iter_next(&iter_info);
@@ -680,14 +680,14 @@ open_perm:
 	 * FMODE_NONOTIFY_PERM.
 	 */
 	if (file->f_flags & __FMODE_EXEC && p_mask & FS_OPEN_EXEC_PERM) {
-		int ret = fsnotify_path(&file->f_path, FS_OPEN_EXEC_PERM);
+		int ret = fsnotify_perm(&file->f_path, FS_OPEN_EXEC_PERM);
 
 		if (ret)
 			return ret;
 	}
 
 	if (p_mask & FS_OPEN_PERM)
-		return fsnotify_path(&file->f_path, FS_OPEN_PERM);
+		return fsnotify_perm(&file->f_path, FS_OPEN_PERM);
 
 	return 0;
 }
@@ -717,7 +717,7 @@ static __init int fsnotify_init(void)
 {
 	int ret;
 
-	BUILD_BUG_ON(HWEIGHT64(ALL_FSNOTIFY_BITS) != 26);
+	BUILD_BUG_ON(HWEIGHT64(ALL_FSNOTIFY_BITS) != 27);
 
 	ret = init_srcu_struct(&fsnotify_mark_srcu);
 	if (ret)

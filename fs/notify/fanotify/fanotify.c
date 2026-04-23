@@ -375,7 +375,9 @@ static u64 fanotify_group_event_mask(struct fsnotify_group *group,
 		user_mask &= ~FANOTIFY_EVENT_FLAGS;
 	}
 
-	return test_mask & user_mask;
+	/* Preserve the internal hint flags */
+	return (event_mask & ALL_FSNOTIFY_KERN_FLAGS) |
+		(test_mask & user_mask);
 }
 
 /*
@@ -963,7 +965,7 @@ static int fanotify_handle_event(struct fsnotify_group *group, u64 mask,
 
 	mask = fanotify_group_event_mask(group, iter_info, &match_mask,
 					 mask, data, data_type, dir);
-	if (!mask || WARN_ON_ONCE(upper_32_bits(mask)))
+	if (!(u32)mask)
 		return 0;
 
 	pr_debug("%s: group=%p mask=%llx report_mask=%x\n", __func__,
@@ -971,6 +973,7 @@ static int fanotify_handle_event(struct fsnotify_group *group, u64 mask,
 
 	bool is_perm = fanotify_is_fs_perm_event(group, mask);
 	if (is_perm) {
+		WARN_ON_ONCE(!(mask & FS_EVENT_IS_PERM));
 		/*
 		 * fsnotify_prepare_user_wait() fails if we race with mark
 		 * deletion.  Just let the operation pass in that case.

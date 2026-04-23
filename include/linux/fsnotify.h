@@ -113,6 +113,11 @@ static inline int fsnotify_path(const struct path *path, __u64 mask)
 	return fsnotify_parent(path->dentry, mask, path, FSNOTIFY_EVENT_PATH);
 }
 
+static inline int fsnotify_perm(const struct path *path, __u64 mask)
+{
+	return fsnotify_path(path, FS_PERM_EVENT(mask));
+}
+
 static inline int fsnotify_file(struct file *file, __u64 mask)
 {
 	/*
@@ -165,7 +170,7 @@ static inline int fsnotify_file_area_perm(struct file *file, int perm_mask,
 	 * read() also generates the legacy FS_ACCESS_PERM event, so content
 	 * scanners can inspect the content filled by pre-content event.
 	 */
-	return fsnotify_path(&file->f_path, FS_ACCESS_PERM);
+	return fsnotify_perm(&file->f_path, FS_ACCESS_PERM);
 }
 
 /*
