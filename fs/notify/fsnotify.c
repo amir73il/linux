@@ -33,6 +33,11 @@ void __fsnotify_mntns_delete(struct mnt_namespace *mntns)
 	fsnotify_clear_marks_by_mntns(mntns);
 }
 
+void __fsnotify_userns_delete(struct user_namespace *userns)
+{
+	fsnotify_clear_marks_by_userns(userns);
+}
+
 void fsnotify_sb_delete(struct super_block *sb)
 {
 	struct fsnotify_sb_info *sbinfo = fsnotify_sb_info(sb);
@@ -702,12 +707,15 @@ open_perm:
 static int send_to_ns_groups(__u32 mask, const void *data, int data_type)
 {
 	const struct fsnotify_mnt *mnt_data = fsnotify_data_mnt(data, data_type);
+	const struct fsnotify_ns *ns_data = fsnotify_data_ns(data, data_type);
 	struct fsnotify_iter_info iter_info = {};
 	__u32 test_mask, marks_mask = 0;
 	int ret;
 
 	if (mnt_data)
 		marks_mask |= READ_ONCE(mnt_data->ns->n_fsnotify_mask);
+	if (ns_data)
+		marks_mask |= READ_ONCE(ns_data->userns->n_fsnotify_mask);
 
 	test_mask = mask & FSNOTIFY_EVENTS_ON_NS;
 	if (!(test_mask & marks_mask))
@@ -718,6 +726,10 @@ static int send_to_ns_groups(__u32 mask, const void *data, int data_type)
 	if (mnt_data) {
 		iter_info.marks[FSNOTIFY_ITER_TYPE_MNTNS] =
 			fsnotify_first_mark(&mnt_data->ns->n_fsnotify_marks);
+	}
+	if (ns_data) {
+		iter_info.marks[FSNOTIFY_ITER_TYPE_USERNS] =
+			fsnotify_first_mark(&ns_data->userns->n_fsnotify_marks);
 	}
 
 	ret = send_to_groups(mask, data, data_type, NULL, NULL, 0, &iter_info,
@@ -746,6 +758,24 @@ void fsnotify_mnt(__u32 mask, struct mnt_namespace *ns, struct vfsmount *mnt)
 		return;
 
 	send_to_ns_groups(mask, &data, FSNOTIFY_EVENT_MNT);
+}
+
+void fsnotify_ns(__u32 mask, struct user_namespace *userns,
+		 u64 self_nsid, u64 owner_nsid)
+{
+	struct fsnotify_ns data = {
+		.userns = userns,
+		.self_nsid = self_nsid,
+		.owner_nsid = owner_nsid,
+	};
+
+	if (WARN_ON_ONCE(!userns))
+		return;
+
+	if (!READ_ONCE(userns->n_fsnotify_marks))
+		return;
+
+	send_to_ns_groups(mask, &data, FSNOTIFY_EVENT_NS);
 }
 
 static __init int fsnotify_init(void)

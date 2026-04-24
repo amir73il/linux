@@ -74,6 +74,7 @@
 #include <linux/atomic.h>
 
 #include <linux/fsnotify_backend.h>
+#include <linux/user_namespace.h>
 #include "fsnotify.h"
 
 #define FSNOTIFY_REAPER_DELAY	(1)	/* 1 jiffy */
@@ -110,6 +111,8 @@ static fsnotify_connp_t *fsnotify_object_connp(void *obj,
 		return fsnotify_sb_marks(obj);
 	case FSNOTIFY_OBJ_TYPE_MNTNS:
 		return &((struct mnt_namespace *)obj)->n_fsnotify_marks;
+	case FSNOTIFY_OBJ_TYPE_USERNS:
+		return &((struct user_namespace *)obj)->n_fsnotify_marks;
 	default:
 		return NULL;
 	}
@@ -125,6 +128,8 @@ static __u32 *fsnotify_conn_mask_p(struct fsnotify_mark_connector *conn)
 		return &fsnotify_conn_sb(conn)->s_fsnotify_mask;
 	else if (conn->type == FSNOTIFY_OBJ_TYPE_MNTNS)
 		return &fsnotify_conn_mntns(conn)->n_fsnotify_mask;
+	else if (conn->type == FSNOTIFY_OBJ_TYPE_USERNS)
+		return &fsnotify_conn_userns(conn)->n_fsnotify_mask;
 	return NULL;
 }
 
@@ -389,6 +394,8 @@ static void *fsnotify_detach_connector_from_object(
 		fsnotify_conn_sb(conn)->s_fsnotify_mask = 0;
 	} else if (conn->type == FSNOTIFY_OBJ_TYPE_MNTNS) {
 		fsnotify_conn_mntns(conn)->n_fsnotify_mask = 0;
+	} else if (conn->type == FSNOTIFY_OBJ_TYPE_USERNS) {
+		fsnotify_conn_userns(conn)->n_fsnotify_mask = 0;
 	}
 
 	rcu_assign_pointer(*connp, NULL);

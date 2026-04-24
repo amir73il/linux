@@ -248,4 +248,6 @@ static inline struct pid_namespace *proc_pid_ns(struct super_block *sb)
 
 bool proc_ns_file(const struct file *file);
 
+struct user_namespace *userns_from_dentry(struct dentry *dentry);
+
 #endif /* _LINUX_PROC_FS_H */

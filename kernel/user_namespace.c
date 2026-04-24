@@ -22,6 +22,7 @@
 #include <linux/bsearch.h>
 #include <linux/sort.h>
 #include <linux/nstree.h>
+#include <linux/fsnotify.h>
 
 static struct kmem_cache *user_ns_cachep __ro_after_init;
 static DEFINE_MUTEX(userns_state_mutex);
@@ -221,6 +222,7 @@ static void free_user_ns(struct work_struct *work)
 		retire_userns_sysctls(ns);
 		key_free_user_ns(ns);
 		ns_common_free(ns);
+		fsnotify_userns_delete(ns);
 		/* Concurrent nstree traversal depends on a grace period. */
 		kfree_rcu(ns, ns.ns_rcu);
 		dec_user_namespaces(ucounts);

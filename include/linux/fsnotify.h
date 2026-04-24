@@ -300,6 +300,11 @@ static inline void fsnotify_mntns_delete(struct mnt_namespace *mntns)
 	__fsnotify_mntns_delete(mntns);
 }
 
+static inline void fsnotify_userns_delete(struct user_namespace *userns)
+{
+	__fsnotify_userns_delete(userns);
+}
+
 /*
  * fsnotify_inoderemove - an inode is going away
  */

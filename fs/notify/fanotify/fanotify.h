@@ -11,6 +11,7 @@ extern struct kmem_cache *fanotify_fid_event_cachep;
 extern struct kmem_cache *fanotify_path_event_cachep;
 extern struct kmem_cache *fanotify_perm_event_cachep;
 extern struct kmem_cache *fanotify_mnt_event_cachep;
+extern struct kmem_cache *fanotify_ns_event_cachep;
 
 /* Possible states of the permission event */
 enum {
@@ -246,6 +247,7 @@ enum fanotify_event_type {
 	FANOTIFY_EVENT_TYPE_OVERFLOW, /* struct fanotify_event */
 	FANOTIFY_EVENT_TYPE_FS_ERROR, /* struct fanotify_error_event */
 	FANOTIFY_EVENT_TYPE_MNT,
+	FANOTIFY_EVENT_TYPE_NS,
 	__FANOTIFY_EVENT_TYPE_NUM
 };
 
@@ -417,6 +419,12 @@ struct fanotify_mnt_event {
 	u64 mnt_id;
 };
 
+struct fanotify_ns_event {
+	struct fanotify_event fae;
+	u64 self_nsid;
+	u64 owner_nsid;
+};
+
 static inline struct fanotify_path_event *
 FANOTIFY_PE(struct fanotify_event *event)
 {
@@ -427,6 +435,12 @@ static inline struct fanotify_mnt_event *
 FANOTIFY_ME(struct fanotify_event *event)
 {
 	return container_of(event, struct fanotify_mnt_event, fae);
+}
+
+static inline struct fanotify_ns_event *
+FANOTIFY_NSE(struct fanotify_event *event)
+{
+	return container_of(event, struct fanotify_ns_event, fae);
 }
 
 /*
@@ -509,6 +523,11 @@ static inline bool fanotify_is_error_event(struct fanotify_event *event)
 static inline bool fanotify_is_mnt_event(struct fanotify_event *event)
 {
 	return event->type == FANOTIFY_EVENT_TYPE_MNT;
+}
+
+static inline bool fanotify_is_ns_event(const struct fanotify_event *event)
+{
+	return event->type == FANOTIFY_EVENT_TYPE_NS;
 }
 
 static inline const struct path *fanotify_event_path(struct fanotify_event *event)

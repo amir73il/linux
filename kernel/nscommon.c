@@ -6,6 +6,7 @@
 #include <linux/proc_ns.h>
 #include <linux/user_namespace.h>
 #include <linux/vfsdebug.h>
+#include <linux/fsnotify_backend.h>
 
 #ifdef CONFIG_DEBUG_VFS
 static void ns_debug(struct ns_common *ns, const struct proc_ns_operations *ops)
@@ -112,6 +113,44 @@ struct ns_common *__must_check ns_owner(struct ns_common *ns)
 }
 
 /*
+ * Return the owning user_namespace of @ns, including init_user_ns.
+ * Unlike ns_owner(), which returns NULL for namespaces owned by
+ * init_user_ns (to serve as a propagation terminator), this gives us
+ * the real owner for notification routing.
+ */
+static struct user_namespace *ns_direct_owner(struct ns_common *ns)
+{
+	if (unlikely(!ns->ops || !ns->ops->owner))
+		return NULL;
+	return ns->ops->owner(ns);
+}
+
+static void ns_common_notify(__u32 mask, struct ns_common *ns)
+{
+	struct user_namespace *owner_userns;
+
+	if (!IS_ENABLED(CONFIG_FSNOTIFY))
+		return;
+
+	owner_userns = ns_direct_owner(ns);
+	if (!owner_userns)
+		return;
+
+#ifdef CONFIG_FSNOTIFY
+	/*
+	 * READ_ONCE macro expansion does not understand that this code
+	 * is not reachable without CONFIG_FSNOTIFY.
+	 */
+	if (!READ_ONCE(owner_userns->n_fsnotify_marks))
+		return;
+#endif
+
+	/* Report child namespace events to owner userns watchers */
+	fsnotify_ns(mask, owner_userns, ns->ns_id,
+		    to_ns_common(owner_userns)->ns_id);
+}
+
+/*
  * The active reference count works by having each namespace that gets
  * created take a single active reference on its owning user namespace.
  * That single reference is only released once the child namespace's
@@ -172,6 +211,8 @@ void __ns_ref_active_put(struct ns_common *ns)
 		return;
 	}
 
+	ns_common_notify(FS_NS_DELETE, ns);
+
 	VFS_WARN_ON_ONCE(is_ns_init_id(ns));
 	VFS_WARN_ON_ONCE(!__ns_ref_read(ns));
 
@@ -184,6 +225,8 @@ void __ns_ref_active_put(struct ns_common *ns)
 			VFS_WARN_ON_ONCE(__ns_ref_active_read(ns) < 0);
 			return;
 		}
+
+		ns_common_notify(FS_NS_DELETE, ns);
 	}
 }
 
@@ -293,6 +336,8 @@ void __ns_ref_active_get(struct ns_common *ns)
 	if (likely(prev))
 		return;
 
+	ns_common_notify(FS_NS_CREATE, ns);
+
 	/*
 	 * We did resurrect it. Walk the ownership hierarchy upwards
 	 * until we found an owning user namespace that is active.
@@ -307,6 +352,8 @@ void __ns_ref_active_get(struct ns_common *ns)
 		VFS_WARN_ON_ONCE(prev < 0);
 		if (likely(prev))
 			return;
+
+		ns_common_notify(FS_NS_CREATE, ns);
 	}
 }
 
