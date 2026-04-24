@@ -1509,7 +1509,9 @@ static int fanotify_may_update_existing_mark(struct fsnotify_mark *fsn_mark,
 
 	/* For now pre-content events are not generated for directories */
 	mask |= fsn_mark->mask;
-	if (mask & FANOTIFY_PRE_CONTENT_EVENTS && mask & FAN_ONDIR)
+	if (mask & FAN_ONDIR &&
+	    fanotify_test_fs_watcher_event(fsn_mark->group, mask,
+					   FANOTIFY_PRE_CONTENT_EVENTS))
 		return -EEXIST;
 
 	return 0;
@@ -1546,8 +1548,8 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 	 * Error events are pre-allocated per group, only if strictly
 	 * needed (i.e. FAN_FS_ERROR was requested).
 	 */
-	if (!(fan_flags & FANOTIFY_MARK_IGNORE_BITS) &&
-	    (mask & FAN_FS_ERROR)) {
+	if (fanotify_test_fs_watcher_event(group, mask, FAN_FS_ERROR) &&
+	    !(fan_flags & FANOTIFY_MARK_IGNORE_BITS)) {
 		ret = fanotify_group_init_error_pool(group);
 		if (ret)
 			goto out;
@@ -1562,7 +1564,8 @@ out:
 
 	fsnotify_put_mark(fsn_mark);
 
-	if (!ret && (mask & FANOTIFY_PERM_EVENTS))
+	if (!ret && fanotify_test_fs_watcher_event(group, mask,
+						   FANOTIFY_PERM_EVENTS))
 		fanotify_perm_watchdog_group_add(group);
 
 	return ret;
@@ -1842,14 +1845,15 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 	bool is_dir = d_is_dir(path->dentry);
 	/* Strict validation of events in non-dir inode mask with v5.17+ APIs */
 	bool strict_dir_events = FAN_GROUP_FLAG(group, FAN_REPORT_TARGET_FID) ||
-				 (mask & FAN_RENAME) ||
-				 (flags & FAN_MARK_IGNORE);
+		 fanotify_test_fs_watcher_event(group, mask, FAN_RENAME) ||
+		 (flags & FAN_MARK_IGNORE);
 
 	/*
 	 * Filesystems need to opt-into pre-content evnets (a.k.a HSM)
 	 * and they are only supported on regular files and directories.
 	 */
-	if (mask & FANOTIFY_PRE_CONTENT_EVENTS) {
+	if (fanotify_test_fs_watcher_event(group, mask,
+					   FANOTIFY_PRE_CONTENT_EVENTS)) {
 		if (!(path->mnt->mnt_sb->s_iflags & SB_I_ALLOW_HSM))
 			return -EOPNOTSUPP;
 		if (!is_dir && !d_is_reg(path->dentry))
@@ -1864,7 +1868,7 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 	 * waits for fanotify permission event to be answered. Just disallow
 	 * permission events for such filesystems.
 	 */
-	if (mask & FANOTIFY_PERM_EVENTS &&
+	if (fanotify_test_fs_watcher_event(group, mask, FANOTIFY_PERM_EVENTS) &&
 	    path->mnt->mnt_sb->s_type->fs_flags & FS_DISALLOW_NOTIFY_PERM)
 		return -EINVAL;
 
@@ -1887,8 +1891,9 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 	 * flags FAN_ONDIR and FAN_EVENT_ON_CHILD in mask of non-dir inode,
 	 * but because we always allowed it, error only when using new APIs.
 	 */
-	if (strict_dir_events && mark_type == FAN_MARK_INODE &&
-	    !is_dir && (mask & FANOTIFY_DIRONLY_EVENT_BITS))
+	if (strict_dir_events && mark_type == FAN_MARK_INODE && !is_dir &&
+	    fanotify_test_fs_watcher_event(group, mask,
+					   FANOTIFY_DIRONLY_EVENT_BITS))
 		return -ENOTDIR;
 
 	return 0;
@@ -2024,14 +2029,15 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 * Permission events are not allowed for FAN_CLASS_NOTIF.
 	 * Pre-content permission events are not allowed for FAN_CLASS_CONTENT.
 	 */
-	if (mask & FANOTIFY_PERM_EVENTS &&
+	if (fanotify_test_fs_watcher_event(group, mask, FANOTIFY_PERM_EVENTS) &&
 	    group->priority == FSNOTIFY_PRIO_NORMAL)
 		return -EINVAL;
-	else if (mask & FANOTIFY_PRE_CONTENT_EVENTS &&
+	else if (fanotify_test_fs_watcher_event(group, mask,
+						FANOTIFY_PRE_CONTENT_EVENTS) &&
 		 group->priority == FSNOTIFY_PRIO_CONTENT)
 		return -EINVAL;
 
-	if (mask & FAN_FS_ERROR &&
+	if (fanotify_test_fs_watcher_event(group, mask, FAN_FS_ERROR) &&
 	    mark_type != FAN_MARK_FILESYSTEM)
 		return -EINVAL;
 
@@ -2061,11 +2067,14 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 * new parent+name.  Reporting only old and new parent id is less
 	 * useful and was not implemented.
 	 */
-	if (mask & FAN_RENAME && !(fid_mode & FAN_REPORT_NAME))
+	if (fanotify_test_fs_watcher_event(group, mask, FAN_RENAME) &&
+	    !(fid_mode & FAN_REPORT_NAME))
 		return -EINVAL;
 
 	/* Pre-content events are not currently generated for directories. */
-	if (mask & FANOTIFY_PRE_CONTENT_EVENTS && mask & FAN_ONDIR)
+	if (mask & FAN_ONDIR &&
+	    fanotify_test_fs_watcher_event(group, mask,
+					   FANOTIFY_PRE_CONTENT_EVENTS))
 		return -EINVAL;
 
 	if (mark_cmd == FAN_MARK_FLUSH) {

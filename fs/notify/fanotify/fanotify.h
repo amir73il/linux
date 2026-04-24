@@ -458,12 +458,24 @@ FANOTIFY_PERM(struct fanotify_event *event)
 	return container_of(event, struct fanotify_perm_event, fae);
 }
 
+static inline bool fanotify_test_fs_watcher_event(struct fsnotify_group *group,
+						  u32 mask, u32 test_mask)
+{
+	return fsnotify_is_fs_watcher(group) && (mask & test_mask);
+}
+
+static inline bool fanotify_test_ns_watcher_event(struct fsnotify_group *group,
+						  u32 mask, u32 test_mask)
+{
+	return fsnotify_is_ns_watcher(group) && (mask & test_mask);
+}
+
 static inline bool fanotify_is_fs_perm_event(struct fsnotify_group *group,
 					     u32 mask)
 {
 	return IS_ENABLED(CONFIG_FANOTIFY_ACCESS_PERMISSIONS) &&
-		fsnotify_is_fs_watcher(group) &&
-		mask & FANOTIFY_PERM_EVENTS;
+		fanotify_test_fs_watcher_event(group, mask,
+					       FANOTIFY_PERM_EVENTS);
 }
 
 static inline bool fanotify_is_perm_event(struct fanotify_event *event)
