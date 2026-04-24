@@ -59,22 +59,30 @@
 
 #define FS_PRE_ACCESS		0x00100000	/* Pre-content access hook */
 
+#define FS_RENAME		0x10000000	/* File was renamed */
+
+#define FS_MOVE			(FS_MOVED_FROM | FS_MOVED_TO)
+
+/*
+ * Filter flags for watching filesystems
+ *
+ * NOTE: The ON_CHILD flag is set on inode mark that cares about things that
+ * happen to its children.  Always set for dnotify and inotify.
+ * Set on inode/sb/mount marks that care about parent/name info.
+ */
+#define FS_EVENT_ON_CHILD	0x08000000
+#define FS_DN_MULTISHOT		0x20000000	/* dnotify multishot */
+#define FS_ISDIR		0x40000000	/* event occurred against dir */
+
+/*
+ * Events that user-space can request when watching namespaces
+ *
+ * NOTE: These values may overload filesystem events, but not event flags
+ */
 #define FS_MNT_ATTACH		0x01000000	/* Mount was attached */
 #define FS_MNT_DETACH		0x02000000	/* Mount was detached */
 #define FS_MNT_MOVE		(FS_MNT_ATTACH | FS_MNT_DETACH)
 
-/*
- * Set on inode mark that cares about things that happen to its children.
- * Always set for dnotify and inotify.
- * Set on inode/sb/mount marks that care about parent/name info.
- */
-#define FS_EVENT_ON_CHILD	0x08000000
-
-#define FS_RENAME		0x10000000	/* File was renamed */
-#define FS_DN_MULTISHOT		0x20000000	/* dnotify multishot */
-#define FS_ISDIR		0x40000000	/* event occurred against dir */
-
-#define FS_MOVE			(FS_MOVED_FROM | FS_MOVED_TO)
 
 /*
  * Directory entry modification events - reported only to directory
@@ -83,9 +91,6 @@
  * when a directory entry inside a child subdir changes.
  */
 #define ALL_FSNOTIFY_DIRENT_EVENTS (FS_CREATE | FS_DELETE | FS_MOVE | FS_RENAME)
-
-/* Mount namespace events */
-#define FSNOTIFY_MNT_EVENTS (FS_MNT_ATTACH | FS_MNT_DETACH)
 
 /* Content events can be used to inspect file content */
 #define FSNOTIFY_CONTENT_PERM_EVENTS (FS_OPEN_PERM | FS_OPEN_EXEC_PERM | \
@@ -113,13 +118,22 @@
  */
 #define FS_EVENTS_POSS_TO_PARENT (FS_EVENTS_POSS_ON_CHILD)
 
-/* Events that can be reported to backends */
-#define ALL_FSNOTIFY_EVENTS (ALL_FSNOTIFY_DIRENT_EVENTS | \
-			     FSNOTIFY_MNT_EVENTS | \
+/* Events that can be reported to backends on filesystem watchers */
+#define FSNOTIFY_EVENTS_ON_FS (ALL_FSNOTIFY_DIRENT_EVENTS | \
 			     FS_EVENTS_POSS_ON_CHILD | \
 			     FS_DELETE_SELF | FS_MOVE_SELF | \
 			     FS_UNMOUNT | FS_Q_OVERFLOW | FS_IN_IGNORED | \
 			     FS_ERROR)
+
+/* Mount tree monitoring events */
+#define FSNOTIFY_MNT_EVENTS (FS_MNT_ATTACH | FS_MNT_DETACH)
+
+/* Events that can be reported to backends on namepsace watchers */
+#define FSNOTIFY_EVENTS_ON_NS (FSNOTIFY_MNT_EVENTS | \
+			       FS_Q_OVERFLOW)
+
+/* Events that can be reported to backends */
+#define ALL_FSNOTIFY_EVENTS (FSNOTIFY_EVENTS_ON_FS | FSNOTIFY_EVENTS_ON_NS)
 
 /* Extra flags that may be reported with event or control handling of events */
 #define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT)

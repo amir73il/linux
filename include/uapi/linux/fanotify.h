@@ -4,7 +4,9 @@
 
 #include <linux/types.h>
 
-/* the following events that user-space can register for */
+/*
+ * Events that user-space can request when watching filesystems
+ */
 #define FAN_ACCESS		0x00000001	/* File was accessed */
 #define FAN_MODIFY		0x00000002	/* File was modified */
 #define FAN_ATTRIB		0x00000004	/* Metadata changed */
@@ -28,18 +30,27 @@
 /* #define FAN_DIR_MODIFY	0x00080000 */	/* Deprecated (reserved) */
 
 #define FAN_PRE_ACCESS		0x00100000	/* Pre-content access hook */
-#define FAN_MNT_ATTACH		0x01000000	/* Mount was attached */
-#define FAN_MNT_DETACH		0x02000000	/* Mount was detached */
-
-#define FAN_EVENT_ON_CHILD	0x08000000	/* Interested in child events */
 
 #define FAN_RENAME		0x10000000	/* File was renamed */
-
-#define FAN_ONDIR		0x40000000	/* Event occurred against dir */
 
 /* helper events */
 #define FAN_CLOSE		(FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE) /* close */
 #define FAN_MOVE		(FAN_MOVED_FROM | FAN_MOVED_TO) /* moves */
+
+/*
+ * Filter flags for watching filesystems
+ */
+#define FAN_EVENT_ON_CHILD	0x08000000	/* Interested in child events */
+#define FAN_ONDIR		0x40000000	/* Event occurred against dir */
+
+/*
+ * Events that user-space can request when watching namespaces
+ *
+ * NOTE: These values may overload filesystem events, but not event flags
+ */
+#define FAN_MNT_ATTACH		0x01000000	/* Mount was attached */
+#define FAN_MNT_DETACH		0x02000000	/* Mount was detached */
+
 
 /* flags used for fanotify_init() */
 #define FAN_CLOEXEC		0x00000001
