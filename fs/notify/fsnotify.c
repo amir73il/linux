@@ -330,7 +330,8 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 
 static int send_to_group(__u32 mask, const void *data, int data_type,
 			 struct inode *dir, const struct qstr *file_name,
-			 u32 cookie, struct fsnotify_iter_info *iter_info)
+			 u32 cookie, struct fsnotify_iter_info *iter_info,
+			 enum fsnotify_group_type group_type)
 {
 	struct fsnotify_group *group = NULL;
 	__u32 test_mask = (mask & ALL_FSNOTIFY_EVENTS);
@@ -344,7 +345,7 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 		return 0;
 
 	/* clear ignored on inode modification */
-	if (mask & FS_MODIFY) {
+	if (group_type ==  FSNOTIFY_GROUP_TYPE_FS && mask & FS_MODIFY) {
 		fsnotify_foreach_iter_mark_type(iter_info, mark, type) {
 			if (!(mark->flags &
 			      FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY))
@@ -360,9 +361,12 @@ static int send_to_group(__u32 mask, const void *data, int data_type,
 			fsnotify_effective_ignore_mask(mark, is_dir, type);
 	}
 
-	pr_debug("%s: group=%p mask=%x marks_mask=%x marks_ignore_mask=%x data=%p data_type=%d dir=%p cookie=%d\n",
-		 __func__, group, mask, marks_mask, marks_ignore_mask,
+	pr_debug("%s: group=%p type=%d mask=%x marks_mask=%x marks_ignore_mask=%x data=%p data_type=%d dir=%p cookie=%d\n",
+		 __func__, group, group_type, mask, marks_mask, marks_ignore_mask,
 		 data, data_type, dir, cookie);
+
+	if (WARN_ON_ONCE(group->type != group_type))
+		return 0;
 
 	if (!(test_mask & marks_mask & ~marks_ignore_mask))
 		return 0;
@@ -469,6 +473,26 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
 	}
 }
 
+static int send_to_groups(__u32 mask, const void *data, int data_type,
+			  struct inode *dir, const struct qstr *file_name,
+			  u32 cookie, struct fsnotify_iter_info *iter_info,
+			  enum fsnotify_group_type group_type)
+{
+	int ret;
+
+	while (fsnotify_iter_select_report_types(iter_info)) {
+		ret = send_to_group(mask, data, data_type, dir, file_name,
+				    cookie, iter_info, group_type);
+
+		if (ret && group_type == FSNOTIFY_GROUP_TYPE_FS &&
+		    (mask & ALL_FSNOTIFY_PERM_EVENTS))
+			return ret;
+
+		fsnotify_iter_next(iter_info);
+	}
+	return 0;
+}
+
 /*
  * fsnotify - This is the main call to fsnotify.
  *
@@ -494,7 +518,6 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 {
 	const struct path *path = fsnotify_data_path(data, data_type);
 	struct super_block *sb = fsnotify_data_sb(data, data_type);
-	const struct fsnotify_mnt *mnt_data = fsnotify_data_mnt(data, data_type);
 	struct fsnotify_sb_info *sbinfo = sb ? fsnotify_sb_info(sb) : NULL;
 	struct fsnotify_iter_info iter_info = {};
 	struct mount *mnt = NULL;
@@ -535,8 +558,7 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	if ((!sbinfo || !sbinfo->sb_marks) &&
 	    (!mnt || !mnt->mnt_fsnotify_marks) &&
 	    (!inode || !inode->i_fsnotify_marks) &&
-	    (!inode2 || !inode2->i_fsnotify_marks) &&
-	    (!mnt_data || !mnt_data->ns->n_fsnotify_marks))
+	    (!inode2 || !inode2->i_fsnotify_marks))
 		return 0;
 
 	if (sb)
@@ -547,8 +569,6 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		marks_mask |= READ_ONCE(inode->i_fsnotify_mask);
 	if (inode2)
 		marks_mask |= READ_ONCE(inode2->i_fsnotify_mask);
-	if (mnt_data)
-		marks_mask |= READ_ONCE(mnt_data->ns->n_fsnotify_mask);
 
 	/*
 	 * If this is a modify event we may need to clear some ignore masks.
@@ -556,7 +576,7 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 	 * event in its mask.
 	 * Otherwise, return if none of the marks care about this type of event.
 	 */
-	test_mask = (mask & ALL_FSNOTIFY_EVENTS);
+	test_mask = (mask & FSNOTIFY_EVENTS_ON_FS);
 	if (!(test_mask & marks_mask))
 		return 0;
 
@@ -578,27 +598,15 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		iter_info.marks[inode2_type] =
 			fsnotify_first_mark(&inode2->i_fsnotify_marks);
 	}
-	if (mnt_data) {
-		iter_info.marks[FSNOTIFY_ITER_TYPE_MNTNS] =
-			fsnotify_first_mark(&mnt_data->ns->n_fsnotify_marks);
-	}
 
 	/*
 	 * We need to merge inode/vfsmount/sb mark lists so that e.g. inode mark
 	 * ignore masks are properly reflected for mount/sb mark notifications.
 	 * That's why this traversal is so complicated...
 	 */
-	while (fsnotify_iter_select_report_types(&iter_info)) {
-		ret = send_to_group(mask, data, data_type, dir, file_name,
-				    cookie, &iter_info);
+	ret = send_to_groups(mask, data, data_type, dir, file_name,
+			     cookie, &iter_info, FSNOTIFY_GROUP_TYPE_FS);
 
-		if (ret && (mask & ALL_FSNOTIFY_PERM_EVENTS))
-			goto out;
-
-		fsnotify_iter_next(&iter_info);
-	}
-	ret = 0;
-out:
 	srcu_read_unlock(&fsnotify_mark_srcu, iter_info.srcu_idx);
 
 	return ret;
@@ -691,6 +699,35 @@ open_perm:
 }
 #endif
 
+static int send_to_ns_groups(__u32 mask, const void *data, int data_type)
+{
+	const struct fsnotify_mnt *mnt_data = fsnotify_data_mnt(data, data_type);
+	struct fsnotify_iter_info iter_info = {};
+	__u32 test_mask, marks_mask = 0;
+	int ret;
+
+	if (mnt_data)
+		marks_mask |= READ_ONCE(mnt_data->ns->n_fsnotify_mask);
+
+	test_mask = mask & FSNOTIFY_EVENTS_ON_NS;
+	if (!(test_mask & marks_mask))
+		return 0;
+
+	iter_info.srcu_idx = srcu_read_lock(&fsnotify_mark_srcu);
+
+	if (mnt_data) {
+		iter_info.marks[FSNOTIFY_ITER_TYPE_MNTNS] =
+			fsnotify_first_mark(&mnt_data->ns->n_fsnotify_marks);
+	}
+
+	ret = send_to_groups(mask, data, data_type, NULL, NULL, 0, &iter_info,
+			     FSNOTIFY_GROUP_TYPE_NS);
+
+	srcu_read_unlock(&fsnotify_mark_srcu, iter_info.srcu_idx);
+
+	return ret;
+}
+
 void fsnotify_mnt(__u32 mask, struct mnt_namespace *ns, struct vfsmount *mnt)
 {
 	struct fsnotify_mnt data = {
@@ -708,7 +745,7 @@ void fsnotify_mnt(__u32 mask, struct mnt_namespace *ns, struct vfsmount *mnt)
 	if (!ns->n_fsnotify_marks)
 		return;
 
-	fsnotify(mask, &data, FSNOTIFY_EVENT_MNT, NULL, NULL, NULL, 0);
+	send_to_ns_groups(mask, &data, FSNOTIFY_EVENT_MNT);
 }
 
 static __init int fsnotify_init(void)
