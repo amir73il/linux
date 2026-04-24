@@ -744,11 +744,12 @@ static struct fanotify_event *fanotify_alloc_error_event(
 	return &fee->fae;
 }
 
-static struct fanotify_event *fanotify_alloc_event(
+static struct fanotify_event *fanotify_alloc_fs_watcher_event(
 				struct fsnotify_group *group,
 				u32 mask, const void *data, int data_type,
 				struct inode *dir, const struct qstr *file_name,
-				__kernel_fsid_t *fsid, u32 match_mask)
+				__kernel_fsid_t *fsid, u32 match_mask,
+				unsigned int *hash)
 {
 	struct fanotify_event *event = NULL;
 	gfp_t gfp = GFP_KERNEL_ACCOUNT;
@@ -759,14 +760,11 @@ static struct fanotify_event *fanotify_alloc_event(
 	const struct path *path = fsnotify_data_path(data, data_type);
 	struct fs_error_report *fs_error =
 		fsnotify_data_error_report(data, data_type);
-	u64 mnt_id = fsnotify_data_mnt_id(data, data_type);
 	struct mem_cgroup *old_memcg;
 	struct dentry *moved = NULL;
 	struct inode *child = NULL;
 	bool name_event = false;
-	unsigned int hash = 0;
 	bool ondir = mask & FAN_ONDIR;
-	struct pid *pid;
 
 	if ((fid_mode & FAN_REPORT_DIR_FID) && dirid) {
 		/*
@@ -848,22 +846,69 @@ static struct fanotify_event *fanotify_alloc_event(
 	if (fanotify_is_fs_perm_event(group, mask)) {
 		event = fanotify_alloc_perm_event(data, data_type, gfp);
 	} else if (fs_error) {
-		event = fanotify_alloc_error_event(group, fsid, fs_error, &hash);
+		event = fanotify_alloc_error_event(group, fsid, fs_error, hash);
 	} else if (name_event && (file_name || moved || child)) {
 		event = fanotify_alloc_name_event(dirid, fsid, file_name, child,
-						  moved, &hash, gfp);
+						  moved, hash, gfp);
 	} else if (fid_mode) {
-		event = fanotify_alloc_fid_event(id, fsid, &hash, gfp);
+		event = fanotify_alloc_fid_event(id, fsid, hash, gfp);
 	} else if (path) {
-		event = fanotify_alloc_path_event(path, &hash, gfp);
-	} else if (mnt_id) {
+		event = fanotify_alloc_path_event(path, hash, gfp);
+	} else {
+		WARN_ON_ONCE(1);
+	}
+
+	set_active_memcg(old_memcg);
+	return event;
+}
+
+static struct fanotify_event *fanotify_alloc_ns_watcher_event(
+				struct fsnotify_group *group, u64 mask,
+				const void *data, int data_type)
+{
+	u64 mnt_id = fsnotify_data_mnt_id(data, data_type);
+	struct mem_cgroup *old_memcg;
+	struct fanotify_event *event = NULL;
+	gfp_t gfp = GFP_KERNEL_ACCOUNT;
+
+	if (group->max_events == UINT_MAX)
+		gfp |= __GFP_NOFAIL;
+	else
+		gfp |= __GFP_RETRY_MAYFAIL;
+
+	old_memcg = set_active_memcg(group->memcg);
+
+	if (mnt_id) {
 		event = fanotify_alloc_mnt_event(mnt_id, gfp);
 	} else {
 		WARN_ON_ONCE(1);
 	}
 
+	set_active_memcg(old_memcg);
+	return event;
+}
+
+static struct fanotify_event *fanotify_alloc_event(
+				struct fsnotify_group *group, u64 mask,
+				const void *data, int data_type,
+				struct inode *dir, const struct qstr *name,
+				__kernel_fsid_t *fsid, u32 match_mask)
+{
+	struct fanotify_event *event;
+	unsigned int hash = 0;
+	bool ondir = mask & FAN_ONDIR;
+	struct pid *pid;
+
+	if (fsnotify_is_ns_watcher(group)) {
+		event = fanotify_alloc_ns_watcher_event(group, mask, data,
+							data_type);
+	} else {
+		event = fanotify_alloc_fs_watcher_event(group, mask, data,
+						data_type, dir, name, fsid,
+						match_mask, &hash);
+	}
 	if (!event)
-		goto out;
+		return NULL;
 
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_TID))
 		pid = get_pid(task_pid(current));
@@ -875,8 +920,6 @@ static struct fanotify_event *fanotify_alloc_event(
 	fanotify_init_event(event, hash, mask);
 	event->pid = pid;
 
-out:
-	set_active_memcg(old_memcg);
 	return event;
 }
 
@@ -966,8 +1009,8 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	if (!mask)
 		return 0;
 
-	pr_debug("%s: group=%p mask=%x report_mask=%x\n", __func__,
-		 group, mask, match_mask);
+	pr_debug("%s: group=%p type=%d mask=%x report_mask=%x\n", __func__,
+		 group, group->type, mask, match_mask);
 
 	bool is_perm = fanotify_is_fs_perm_event(group, mask);
 	if (is_perm) {
