@@ -596,6 +596,15 @@ void ovl_inode_update(struct inode *inode, struct dentry *upperdentry)
 	WARN_ON(OVL_I(inode)->__upperdentry);
 
 	/*
+	 * For a directory being copied up, set OVL_WHITEOUTS before publishing
+	 * the upper dentry, so a concurrent open() that observes __upperdentry
+	 * via the smp_wmb/rmb pair is guaranteed to also observe OVL_WHITEOUTS
+	 * and ovl_dir_is_real() returns false.
+	 */
+	if (S_ISDIR(inode->i_mode))
+		ovl_set_flag(OVL_WHITEOUTS, inode);
+
+	/*
 	 * Make sure upperdentry is consistent before making it visible
 	 */
 	smp_wmb();
