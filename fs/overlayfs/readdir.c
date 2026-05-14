@@ -36,6 +36,7 @@ struct ovl_cache_entry {
 struct ovl_dir_cache {
 	long refcount;
 	u64 version;
+	bool is_refcounted;
 	struct list_head entries;
 	struct rb_root root;
 };
@@ -486,7 +487,8 @@ static struct ovl_dir_cache *ovl_cache_get(struct dentry *dentry)
 	struct inode *inode = d_inode(dentry);
 
 	cache = ovl_dir_cache(inode);
-	if (cache && ovl_inode_version_get(inode) == cache->version) {
+	if (cache && ovl_inode_version_get(inode) == cache->version &&
+	    !WARN_ON(!cache->is_refcounted)) {
 		WARN_ON(!cache->refcount);
 		cache->refcount++;
 		return cache;
@@ -498,6 +500,7 @@ static struct ovl_dir_cache *ovl_cache_get(struct dentry *dentry)
 		return ERR_PTR(-ENOMEM);
 
 	cache->refcount = 1;
+	cache->is_refcounted = true;
 	INIT_LIST_HEAD(&cache->entries);
 	cache->root = RB_ROOT;
 
@@ -699,17 +702,21 @@ static struct ovl_dir_cache *ovl_cache_get_impure(const struct path *path)
 	struct ovl_dir_cache *cache;
 
 	cache = ovl_dir_cache(inode);
-	if (cache && ovl_inode_version_get(inode) == cache->version)
+	if (cache && ovl_inode_version_get(inode) == cache->version &&
+	    !WARN_ON(cache->is_refcounted)) {
 		return cache;
+	}
 
 	/* Impure cache is not refcounted, free it here */
-	ovl_dir_cache_free(inode);
+	if (cache && !WARN_ON(cache->is_refcounted))
+		ovl_dir_cache_free(inode);
 	ovl_set_dir_cache(inode, NULL);
 
 	cache = kzalloc_obj(struct ovl_dir_cache);
 	if (!cache)
 		return ERR_PTR(-ENOMEM);
 
+	cache->is_refcounted = false;
 	res = ovl_dir_read_impure(path, &cache->entries, &cache->root);
 	if (res) {
 		ovl_cache_free(&cache->entries);
