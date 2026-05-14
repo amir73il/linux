@@ -13,6 +13,11 @@
 #include <linux/posix_acl_xattr.h>
 #include "ovl_entry.h"
 
+#include <linux/err_ptr.h>
+
+#undef ERR_PTR
+#define ERR_PTR(err) ERR_PTR_SAFE(err)
+
 #undef pr_fmt
 #define pr_fmt(fmt) "overlayfs: " fmt
 
