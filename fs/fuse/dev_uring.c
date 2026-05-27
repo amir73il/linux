@@ -702,10 +702,12 @@ static int fuse_uring_prepare_send(struct fuse_ring_ent *ent,
 	int err;
 
 	err = fuse_uring_copy_to_ring(ent, req);
-	if (!err)
+	if (!err) {
 		set_bit(FR_SENT, &req->flags);
-	else
+		trace_fuse_request_sent(req);
+	} else {
 		fuse_uring_req_end(ent, req, err);
+	}
 
 	return err;
 }
