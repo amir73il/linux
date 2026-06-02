@@ -116,6 +116,7 @@ enum {
 	Opt_uqnoenforce, Opt_gqnoenforce, Opt_pqnoenforce, Opt_qnoenforce,
 	Opt_discard, Opt_nodiscard, Opt_dax, Opt_dax_enum, Opt_max_open_zones,
 	Opt_lifetime, Opt_nolifetime, Opt_max_atomic_write, Opt_errortag,
+	Opt_acl,
 };
 
 #define fsparam_dead(NAME) \
@@ -175,6 +176,7 @@ static const struct fs_parameter_spec xfs_fs_parameters[] = {
 	fsparam_flag("nolifetime",	Opt_nolifetime),
 	fsparam_string("max_atomic_write",	Opt_max_atomic_write),
 	fsparam_string("errortag",	Opt_errortag),
+	fsparam_flag_no("acl",		Opt_acl),
 	{}
 };
 
@@ -252,6 +254,13 @@ xfs_fs_show_options(
 
 	if (!(mp->m_qflags & XFS_ALL_QUOTA_ACCT))
 		seq_puts(m, ",noquota");
+
+#ifdef CONFIG_XFS_POSIX_ACL
+	if (xfs_has_noacl(mp))
+		seq_puts(m, ",noacl");
+	else
+		seq_puts(m, ",acl");
+#endif
 
 	if (mp->m_max_open_zones)
 		seq_printf(m, ",max_open_zones=%u", mp->m_max_open_zones);
@@ -1559,6 +1568,19 @@ xfs_fs_parse_param(
 		return 0;
 	case Opt_errortag:
 		return xfs_errortag_add_name(parsing_mp, param->string);
+	case Opt_acl:
+		if (result.negated) {
+			parsing_mp->m_features |= XFS_FEAT_NOACL;
+		} else {
+#ifdef CONFIG_XFS_POSIX_ACL
+			parsing_mp->m_features &= ~XFS_FEAT_NOACL;
+#else
+			xfs_warn(parsing_mp,
+				 "ACL support not available in this kernel.");
+			return -EINVAL;
+#endif
+		}
+		return 0;
 	default:
 		xfs_warn(parsing_mp, "unknown mount option [%s].", param->key);
 		return -EINVAL;
@@ -1876,7 +1898,7 @@ xfs_fs_fill_super(
 	trace_xfs_inode_timestamp_range(mp, sb->s_time_min, sb->s_time_max);
 	sb->s_iflags |= SB_I_CGROUPWB | SB_I_ALLOW_HSM;
 
-	set_posix_acl_flag(sb);
+	set_posix_acl_flag(sb, !xfs_has_noacl(mp));
 
 	/* version 5 superblocks support inode version counters. */
 	if (xfs_has_crc(mp))
@@ -2170,6 +2192,18 @@ xfs_fs_reconfigure(
 	if (!xfs_has_small_inums(mp) && xfs_has_small_inums(new_mp)) {
 		mp->m_features |= XFS_FEAT_SMALL_INUMS;
 		mp->m_maxagi = xfs_set_inode_alloc(mp, mp->m_sb.sb_agcount);
+	}
+
+	/* acl -> noacl */
+	if (!xfs_has_noacl(mp) && xfs_has_noacl(new_mp)) {
+		mp->m_features |= XFS_FEAT_NOACL;
+		set_posix_acl_flag(fc->root->d_sb, false);
+	}
+
+	/* noacl -> acl */
+	if (xfs_has_noacl(mp) && !xfs_has_noacl(new_mp)) {
+		mp->m_features &= ~XFS_FEAT_NOACL;
+		set_posix_acl_flag(fc->root->d_sb, true);
 	}
 
 	/*

@@ -20,10 +20,12 @@ extern void xfs_qm_exit(void);
 
 #ifdef CONFIG_XFS_POSIX_ACL
 # define XFS_ACL_STRING		"ACLs, "
-# define set_posix_acl_flag(sb)	((sb)->s_flags |= SB_POSIXACL)
+# define set_posix_acl_flag(sb, on)				\
+	((sb)->s_flags = ((sb)->s_flags & ~SB_POSIXACL) |	\
+	 ((on) ? SB_POSIXACL : 0))
 #else
 # define XFS_ACL_STRING
-# define set_posix_acl_flag(sb)	do { } while (0)
+# define set_posix_acl_flag(sb, on)	do { } while (0)
 #endif
 
 #define XFS_SECURITY_STRING	"security attributes, "
