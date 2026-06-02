@@ -116,7 +116,7 @@ enum {
 	Opt_uqnoenforce, Opt_gqnoenforce, Opt_pqnoenforce, Opt_qnoenforce,
 	Opt_discard, Opt_nodiscard, Opt_dax, Opt_dax_enum, Opt_max_open_zones,
 	Opt_lifetime, Opt_nolifetime, Opt_max_atomic_write, Opt_errortag,
-	Opt_acl,
+	Opt_acl, Opt_aclnoenforce,
 };
 
 #define fsparam_dead(NAME) \
@@ -177,6 +177,7 @@ static const struct fs_parameter_spec xfs_fs_parameters[] = {
 	fsparam_string("max_atomic_write",	Opt_max_atomic_write),
 	fsparam_string("errortag",	Opt_errortag),
 	fsparam_flag_no("acl",		Opt_acl),
+	fsparam_flag("aclnoenforce",	Opt_aclnoenforce),
 	{}
 };
 
@@ -258,6 +259,8 @@ xfs_fs_show_options(
 #ifdef CONFIG_XFS_POSIX_ACL
 	if (xfs_has_noacl(mp))
 		seq_puts(m, ",noacl");
+	else if (xfs_has_aclnoenforce(mp))
+		seq_puts(m, ",aclnoenforce");
 	else
 		seq_puts(m, ",acl");
 #endif
@@ -1571,6 +1574,7 @@ xfs_fs_parse_param(
 	case Opt_acl:
 		if (result.negated) {
 			parsing_mp->m_features |= XFS_FEAT_NOACL;
+			parsing_mp->m_features &= ~XFS_FEAT_ACLNOENFORCE;
 		} else {
 #ifdef CONFIG_XFS_POSIX_ACL
 			parsing_mp->m_features &= ~XFS_FEAT_NOACL;
@@ -1580,6 +1584,16 @@ xfs_fs_parse_param(
 			return -EINVAL;
 #endif
 		}
+		return 0;
+	case Opt_aclnoenforce:
+#ifdef CONFIG_XFS_POSIX_ACL
+		parsing_mp->m_features |= XFS_FEAT_ACLNOENFORCE;
+		parsing_mp->m_features &= ~XFS_FEAT_NOACL;
+#else
+		xfs_warn(parsing_mp,
+			 "ACL support not available in this kernel.");
+		return -EINVAL;
+#endif
 		return 0;
 	default:
 		xfs_warn(parsing_mp, "unknown mount option [%s].", param->key);
@@ -1593,6 +1607,11 @@ static int
 xfs_fs_validate_params(
 	struct xfs_mount	*mp)
 {
+	if (xfs_has_noacl(mp) && xfs_has_aclnoenforce(mp)) {
+		xfs_warn(mp, "noacl and aclnoenforce are mutually exclusive.");
+		return -EINVAL;
+	}
+
 	/* No recovery flag requires a read-only mount */
 	if (xfs_has_norecovery(mp) && !xfs_is_readonly(mp)) {
 		xfs_warn(mp, "no-recovery mounts must be read-only.");
@@ -2194,16 +2213,27 @@ xfs_fs_reconfigure(
 		mp->m_maxagi = xfs_set_inode_alloc(mp, mp->m_sb.sb_agcount);
 	}
 
-	/* acl -> noacl */
+	/* acl/aclnoenforce -> noacl */
 	if (!xfs_has_noacl(mp) && xfs_has_noacl(new_mp)) {
 		mp->m_features |= XFS_FEAT_NOACL;
+		mp->m_features &= ~XFS_FEAT_ACLNOENFORCE;
 		set_posix_acl_flag(fc->root->d_sb, false);
 	}
 
-	/* noacl -> acl */
+	/* noacl -> acl or aclnoenforce */
 	if (xfs_has_noacl(mp) && !xfs_has_noacl(new_mp)) {
 		mp->m_features &= ~XFS_FEAT_NOACL;
+		if (xfs_has_aclnoenforce(new_mp))
+			mp->m_features |= XFS_FEAT_ACLNOENFORCE;
 		set_posix_acl_flag(fc->root->d_sb, true);
+	}
+
+	/* acl <-> aclnoenforce (SB_POSIXACL stays set, only enforcement changes) */
+	if (!xfs_has_noacl(mp) && !xfs_has_noacl(new_mp)) {
+		if (!xfs_has_aclnoenforce(mp) && xfs_has_aclnoenforce(new_mp))
+			mp->m_features |= XFS_FEAT_ACLNOENFORCE;
+		else if (xfs_has_aclnoenforce(mp) && !xfs_has_aclnoenforce(new_mp))
+			mp->m_features &= ~XFS_FEAT_ACLNOENFORCE;
 	}
 
 	/*

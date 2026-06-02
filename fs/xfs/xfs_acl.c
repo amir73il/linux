@@ -125,6 +125,42 @@ xfs_acl_to_disk(struct xfs_acl *aclp, const struct posix_acl *acl)
 	}
 }
 
+/*
+ * xfs_get_inode_acl - enforcement path (.get_inode_acl)
+ *
+ * Called by the VFS for permission checks and ACL inheritance/chmod.
+ * Returns NULL when aclnoenforce is active so that the kernel does not
+ * consult ACLs for access decisions, posix_acl_create(), or
+ * posix_acl_chmod() — mirroring what FUSE does for daemons that handle
+ * permission checking themselves.
+ */
+struct posix_acl *
+xfs_get_inode_acl(struct inode *inode, int type, bool rcu)
+{
+	if (xfs_has_aclnoenforce(XFS_M(inode->i_sb))) {
+		/*
+		 * Prevent __get_acl() from caching the NULL result.  Without
+		 * this, a cached real ACL left by a prior setfacl() or
+		 * getfacl() call would be returned directly by get_cached_acl()
+		 * before our hook is ever reached.  Calling forget_cached_acl()
+		 * here keeps the cache in ACL_NOT_CACHED state so that every
+		 * permission check goes through this function.  The pattern is
+		 * documented in fs/posix_acl.c ("A filesystem can prevent [ACL
+		 * caching] by calling forget_cached_acl() in ->get_inode_acl").
+		 */
+		forget_cached_acl(inode, type);
+		return NULL;
+	}
+	return xfs_get_acl(inode, type, rcu);
+}
+
+/*
+ * xfs_get_acl - explicit ACL retrieval path (.get_acl)
+ *
+ * Called by vfs_get_acl() and hence by getfacl(1).  Always returns the
+ * real on-disk ACL regardless of the aclnoenforce mount option, so that
+ * userspace ACL tools can still read and write ACL data.
+ */
 struct posix_acl *
 xfs_get_acl(struct inode *inode, int type, bool rcu)
 {
@@ -171,6 +207,35 @@ xfs_get_acl(struct inode *inode, int type, bool rcu)
 	return acl;
 }
 
+/*
+ * xfs_get_dentry_acl - .get_acl wrapper with the dentry-based signature.
+ *
+ * The VFS calls this (rather than .get_inode_acl) when the caller explicitly
+ * requests an ACL via vfs_get_acl(), e.g. from getfacl(1).  We always return
+ * the real on-disk value here — the aclnoenforce check belongs only in the
+ * enforcement path (xfs_get_inode_acl).
+ */
+struct posix_acl *
+xfs_get_dentry_acl(struct mnt_idmap *idmap, struct dentry *dentry, int type)
+{
+	struct inode		*inode = d_inode(dentry);
+	struct posix_acl	*acl;
+
+	acl = xfs_get_acl(inode, type, false);
+
+	/*
+	 * With aclnoenforce the enforcement path (xfs_get_inode_acl) always
+	 * returns NULL and keeps the inode ACL cache empty.  If we let
+	 * __get_acl() cache the real ACL here the next permission check would
+	 * find it in the cache and enforce it, defeating aclnoenforce.
+	 * Prevent caching so the two paths never interfere.
+	 */
+	if (xfs_has_aclnoenforce(XFS_M(inode->i_sb)))
+		forget_cached_acl(inode, type);
+
+	return acl;
+}
+
 int
 __xfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 {
@@ -212,8 +277,18 @@ __xfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 			error = 0;
 	}
 
-	if (!error)
-		set_cached_acl(inode, type, acl);
+	if (!error) {
+		/*
+		 * With aclnoenforce the ACL is stored on disk for getfacl(1)
+		 * but must never appear in the inode's ACL cache, otherwise
+		 * check_acl() will enforce it by reading the cache directly,
+		 * before our get_inode_acl hook gets a chance to return NULL.
+		 */
+		if (xfs_has_aclnoenforce(XFS_M(inode->i_sb)))
+			forget_cached_acl(inode, type);
+		else
+			set_cached_acl(inode, type, acl);
+	}
 	return error;
 }
 

@@ -392,6 +392,7 @@ typedef struct xfs_mount {
 /* Mount features */
 #define XFS_FEAT_NOLIFETIME	(1ULL << 47)	/* disable lifetime hints */
 #define XFS_FEAT_NOACL		(1ULL << 48)	/* disable POSIX ACL enforcement */
+#define XFS_FEAT_ACLNOENFORCE	(1ULL << 57)	/* store ACLs but do not enforce */
 #define XFS_FEAT_NOALIGN	(1ULL << 49)	/* ignore alignment */
 #define XFS_FEAT_ALLOCSIZE	(1ULL << 50)	/* user specified allocation size */
 #define XFS_FEAT_LARGE_IOSIZE	(1ULL << 51)	/* report large preferred
@@ -541,6 +542,7 @@ __XFS_HAS_FEAT(dax_never, DAX_NEVER)
 __XFS_HAS_FEAT(norecovery, NORECOVERY)
 __XFS_HAS_FEAT(nouuid, NOUUID)
 __XFS_HAS_FEAT(noacl, NOACL)
+__XFS_HAS_FEAT(aclnoenforce, ACLNOENFORCE)
 
 /*
  * Operational mount state flags
