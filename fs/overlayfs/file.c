@@ -533,6 +533,13 @@ static loff_t ovl_copyfile(struct file *file_in, loff_t pos_in,
 	struct file *realfile_in, *realfile_out;
 	loff_t ret;
 
+	/*
+	 * Overlayfs may be able to copy to a non overlayfs dst which is on the
+	 * same sb or same fs type as real file_in fs, but not implemented yet.
+	 */
+	if (WARN_ON_ONCE(!is_ovl_fs(inode_out->i_sb)))
+		return -EXDEV;
+
 	inode_lock(inode_out);
 	if (op != OVL_DEDUPE) {
 		/* Update mode */
@@ -546,6 +553,19 @@ static loff_t ovl_copyfile(struct file *file_in, loff_t pos_in,
 	ret = PTR_ERR(realfile_out);
 	if (IS_ERR(realfile_out))
 		goto out_unlock;
+
+	/*
+	 * Overlayfs may be able to copy from a non overlayfs src which is on
+	 * the same sb or same fs type as upper fs.
+	 */
+	if (unlikely(!is_ovl_fs(inode_in->i_sb))) {
+		if (WARN_ON_ONCE(op != OVL_COPY)) {
+			ret = -EXDEV;
+			goto out_unlock;
+		}
+		realfile_in = file_in;
+		goto do_copy;
+	}
 
 	realfile_in = ovl_real_file(file_in);
 	ret = PTR_ERR(realfile_in);
@@ -565,6 +585,7 @@ static loff_t ovl_copyfile(struct file *file_in, loff_t pos_in,
 		}
 	}
 
+do_copy:
 	with_ovl_creds(inode_out->i_sb) {
 		switch (op) {
 		case OVL_COPY:
@@ -660,6 +681,7 @@ const struct file_operations ovl_file_operations = {
 	.splice_read    = ovl_splice_read,
 	.splice_write   = ovl_splice_write,
 
+	.fop_flags		= FOP_CROSS_FS_COPY,
 	.copy_file_range	= ovl_copy_file_range,
 	.remap_file_range	= ovl_remap_file_range,
 	.setlease		= generic_setlease,

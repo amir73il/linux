@@ -112,10 +112,15 @@ static inline struct mnt_idmap *ovl_upper_mnt_idmap(struct ovl_fs *ofs)
 
 extern struct file_system_type ovl_fs_type;
 
+static inline bool is_ovl_fs(const struct super_block *sb)
+{
+	return sb->s_type == &ovl_fs_type;
+}
+
 static inline struct ovl_fs *OVL_FS(struct super_block *sb)
 {
 	if (IS_ENABLED(CONFIG_OVERLAY_FS_DEBUG))
-		WARN_ON_ONCE(sb->s_type != &ovl_fs_type);
+		WARN_ON_ONCE(!is_ovl_fs(sb));
 
 	return (struct ovl_fs *)sb->s_fs_info;
 }
