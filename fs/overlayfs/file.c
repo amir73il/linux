@@ -535,10 +535,23 @@ static loff_t ovl_copyfile(struct file *file_in, loff_t pos_in,
 
 	/*
 	 * Overlayfs may be able to copy to a non overlayfs dst which is on the
-	 * same sb or same fs type as real file_in fs, but not implemented yet.
+	 * same sb or same fs type as real file_in fs, but we must avoid taking
+	 * the locks on the foreign fs.
 	 */
-	if (WARN_ON_ONCE(!is_ovl_fs(inode_out->i_sb)))
-		return -EXDEV;
+	if (unlikely(!is_ovl_fs(inode_out->i_sb))) {
+		if (WARN_ON_ONCE(op != OVL_COPY) ||
+		    WARN_ON_ONCE(!is_ovl_fs(file_inode(file_in)->i_sb)))
+			return -EXDEV;
+
+		realfile_in = ovl_real_file(file_in);
+		if (IS_ERR(realfile_in))
+			return PTR_ERR(realfile_in);
+
+		with_ovl_creds(file_inode(file_in)->i_sb)
+			return vfs_copy_file_range(realfile_in, pos_in,
+						   file_out, pos_out, len,
+						   flags);
+	}
 
 	inode_lock(inode_out);
 	if (op != OVL_DEDUPE) {
