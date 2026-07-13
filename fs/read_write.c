@@ -1472,6 +1472,35 @@ COMPAT_SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd,
 }
 #endif
 
+enum {
+	FS_COPY_SPLICE = 0,
+	FS_COPY_SAME_SB = 1,
+	FS_COPY_SAME_FS = 2,
+	FS_COPY_CROSS_FS = 3,
+};
+
+/*
+ * Check if src and dst file are on the same filesystem.
+ * nfs and cifs define several different file_system_type structures
+ * and several different sets of file_operations, but they all end up
+ * using the same ->copy_file_range() function pointer.
+ * COPY_FILE_SPLICE is an opt-in flag for cross-fs copy (e.g. from nfsd),
+ * so do not compare src<->dst filesystems in this case.
+ */
+static int copy_file_fs_cmp(struct file *f_in, struct file *f_out,
+			    unsigned int flags)
+{
+	if (flags & COPY_FILE_SPLICE)
+		return FS_COPY_SPLICE;
+	else if (f_out->f_op->copy_file_range &&
+		 f_out->f_op->copy_file_range == f_in->f_op->copy_file_range)
+		return FS_COPY_SAME_FS;
+	else if (file_inode(f_in)->i_sb == file_inode(f_out)->i_sb)
+		return FS_COPY_SAME_SB;
+	else
+		return FS_COPY_CROSS_FS;
+}
+
 /*
  * Performs necessary checks before doing a file copy
  *
@@ -1481,7 +1510,7 @@ COMPAT_SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd,
  */
 static int generic_copy_file_checks(struct file *file_in, loff_t pos_in,
 				    struct file *file_out, loff_t pos_out,
-				    size_t *req_count, unsigned int flags)
+				    size_t *req_count, int fscmp)
 {
 	struct inode *inode_in = file_inode(file_in);
 	struct inode *inode_out = file_inode(file_out);
@@ -1498,18 +1527,13 @@ static int generic_copy_file_checks(struct file *file_in, loff_t pos_in,
 	 * a file of the wrong filesystem type to filesystem driver can result
 	 * in an attempt to dereference the wrong type of ->private_data, so
 	 * avoid doing that until we really have a good reason.
-	 *
-	 * nfs and cifs define several different file_system_type structures
-	 * and several different sets of file_operations, but they all end up
-	 * using the same ->copy_file_range() function pointer.
 	 */
-	if (flags & COPY_FILE_SPLICE) {
+	if (fscmp == FS_COPY_SPLICE) {
 		/* cross sb splice is allowed */
 	} else if (file_out->f_op->copy_file_range) {
-		if (file_in->f_op->copy_file_range !=
-		    file_out->f_op->copy_file_range)
+		if (fscmp != FS_COPY_SAME_FS)
 			return -EXDEV;
-	} else if (file_inode(file_in)->i_sb != file_inode(file_out)->i_sb) {
+	} else if (fscmp != FS_COPY_SAME_SB) {
 		return -EXDEV;
 	}
 
@@ -1556,13 +1580,13 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 {
 	ssize_t ret;
 	bool splice = flags & COPY_FILE_SPLICE;
-	bool samesb = file_inode(file_in)->i_sb == file_inode(file_out)->i_sb;
+	int fscmp = copy_file_fs_cmp(file_in, file_out, flags);
 
 	if (flags & ~COPY_FILE_SPLICE)
 		return -EINVAL;
 
 	ret = generic_copy_file_checks(file_in, pos_in, file_out, pos_out, &len,
-				       flags);
+				       fscmp);
 	if (unlikely(ret))
 		return ret;
 
@@ -1591,19 +1615,27 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	 * same sb using clone, but for filesystems where both clone and copy
 	 * are supported (e.g. nfs,cifs), we only call the copy method.
 	 */
-	if (!splice && file_out->f_op->copy_file_range) {
+	switch (fscmp) {
+	case FS_COPY_SPLICE:
+		break;
+	case FS_COPY_SAME_FS:
 		ret = file_out->f_op->copy_file_range(file_in, pos_in,
 						      file_out, pos_out,
 						      len, flags);
-	} else if (!splice && file_in->f_op->remap_file_range && samesb) {
-		ret = file_in->f_op->remap_file_range(file_in, pos_in,
-				file_out, pos_out, len, REMAP_FILE_CAN_SHORTEN);
-		/* fallback to splice */
+		break;
+	case FS_COPY_SAME_SB:
+		if (file_in->f_op->remap_file_range)
+			ret = file_in->f_op->remap_file_range(file_in, pos_in,
+							file_out, pos_out, len,
+							REMAP_FILE_CAN_SHORTEN);
+		/* Fallback to splice for same sb copy for backward compat */
 		if (ret <= 0)
 			splice = true;
-	} else if (samesb) {
-		/* Fallback to splice for same sb copy for backward compat */
-		splice = true;
+		break;
+	case FS_COPY_CROSS_FS:
+		/* This should have failed in generic_copy_file_checks() */
+		ret = -EXDEV;
+		break;
 	}
 
 	file_end_write(file_out);
