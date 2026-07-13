@@ -1478,6 +1478,7 @@ enum {
 	FS_COPY_SAME_FS = 2,
 	FS_COPY_CROSS_FS = 3,
 	FS_COPY_FROM_OTHER_FS = 4,
+	FS_COPY_TO_OTHER_FS = 5,
 };
 
 /*
@@ -1498,6 +1499,8 @@ static int copy_file_fs_cmp(struct file *f_in, struct file *f_out,
 		return FS_COPY_SAME_FS;
 	else if (f_out->f_op->fop_flags & FOP_CROSS_FS_COPY)
 		return FS_COPY_FROM_OTHER_FS;
+	else if (f_in->f_op->fop_flags & FOP_CROSS_FS_COPY)
+		return FS_COPY_TO_OTHER_FS;
 	else if (file_inode(f_in)->i_sb == file_inode(f_out)->i_sb)
 		return FS_COPY_SAME_SB;
 	else
@@ -1534,8 +1537,9 @@ static int generic_copy_file_checks(struct file *file_in, loff_t pos_in,
 	 */
 	if (fscmp == FS_COPY_SPLICE) {
 		/* cross sb splice is allowed */
-	} else if (fscmp == FS_COPY_FROM_OTHER_FS) {
-		/* Copy from other fs is allowed */
+	} else if (fscmp == FS_COPY_FROM_OTHER_FS ||
+		   fscmp == FS_COPY_TO_OTHER_FS) {
+		/* Copy from/to other fs is allowed */
 	} else if (file_out->f_op->copy_file_range) {
 		if (fscmp != FS_COPY_SAME_FS)
 			return -EXDEV;
@@ -1587,6 +1591,8 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	ssize_t ret;
 	bool splice = flags & COPY_FILE_SPLICE;
 	int fscmp = copy_file_fs_cmp(file_in, file_out, flags);
+	const struct file_operations *fop =
+		(fscmp == FS_COPY_TO_OTHER_FS) ? file_in->f_op : file_out->f_op;
 
 	if (flags & ~COPY_FILE_SPLICE)
 		return -EINVAL;
@@ -1611,30 +1617,33 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	 * Make sure return value doesn't overflow in 32bit compat mode.  Also
 	 * limit the size for all cases except when calling ->copy_file_range().
 	 */
-	if (splice || !file_out->f_op->copy_file_range || in_compat_syscall())
+	if (splice || !fop->copy_file_range || in_compat_syscall())
 		len = min_t(size_t, MAX_RW_COUNT, len);
 
-	file_start_write(file_out);
+	if (fscmp != FS_COPY_TO_OTHER_FS)
+		file_start_write(file_out);
 
 	/*
 	 * Cloning is supported by more file systems, so we implement copy on
 	 * same sb using clone, but for filesystems where both clone and copy
 	 * are supported (e.g. nfs,cifs), we only call the copy method.
+	 * Cross-fs copy (FROM_OTHER_FS / TO_OTHER_FS) is handled by whichever
+	 * side declared FOP_CROSS_FS_COPY.
 	 */
 	switch (fscmp) {
 	case FS_COPY_SPLICE:
 		break;
 	case FS_COPY_SAME_FS:
+	case FS_COPY_TO_OTHER_FS:
 	case FS_COPY_FROM_OTHER_FS:
-		ret = file_out->f_op->copy_file_range(file_in, pos_in,
-						      file_out, pos_out,
-						      len, flags);
+		ret = fop->copy_file_range(file_in, pos_in, file_out, pos_out,
+					   len, flags);
 		break;
 	case FS_COPY_SAME_SB:
-		if (file_in->f_op->remap_file_range)
-			ret = file_in->f_op->remap_file_range(file_in, pos_in,
-							file_out, pos_out, len,
-							REMAP_FILE_CAN_SHORTEN);
+		if (fop->remap_file_range)
+			ret = fop->remap_file_range(file_in, pos_in,
+						    file_out, pos_out, len,
+						    REMAP_FILE_CAN_SHORTEN);
 		/* Fallback to splice for same sb copy for backward compat */
 		if (ret <= 0)
 			splice = true;
@@ -1645,7 +1654,8 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 		break;
 	}
 
-	file_end_write(file_out);
+	if (fscmp != FS_COPY_TO_OTHER_FS)
+		file_end_write(file_out);
 
 	if (!splice)
 		goto done;
@@ -1676,13 +1686,16 @@ done:
 			fsnotify_access(file_in);
 			add_rchar(current, ret);
 		}
-		fsnotify_modify(file_out);
-		add_wchar(current, ret);
+		if (fscmp != FS_COPY_TO_OTHER_FS) {
+			fsnotify_modify(file_out);
+			add_wchar(current, ret);
+		}
 	}
 
 	if (fscmp != FS_COPY_FROM_OTHER_FS)
 		inc_syscr(current);
-	inc_syscw(current);
+	if (fscmp != FS_COPY_TO_OTHER_FS)
+		inc_syscw(current);
 
 	return ret;
 }
