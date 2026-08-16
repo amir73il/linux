@@ -424,7 +424,7 @@ static int ovl_lower_dir(const char *name, const struct path *path,
 	 * The inodes index feature and NFS export need to encode and decode
 	 * file handles, so they require that all layers support them.
 	 */
-	fh_type = ovl_can_decode_fh(path->dentry->d_sb);
+	fh_type = ovl_can_decode_fh(ofs, path->dentry->d_sb);
 	if ((ofs->config.nfs_export ||
 	     (ofs->config.index && ofs->config.upperdir)) && !fh_type) {
 		ofs->config.index = false;
@@ -781,7 +781,7 @@ static int ovl_make_workdir(struct super_block *sb, struct ovl_fs *ofs,
 	}
 
 	/* Check if upper/work fs supports file handles */
-	fh_type = ovl_can_decode_fh(ofs->workdir->d_sb);
+	fh_type = ovl_can_decode_fh(ofs, ofs->workdir->d_sb);
 	if (ofs->config.index && !fh_type) {
 		ofs->config.index = false;
 		pr_warn("upper fs does not support file handles, falling back to index=off.\n");
@@ -1508,13 +1508,15 @@ static int ovl_fill_super_creds(struct fs_context *fc, struct super_block *sb)
 	}
 
 	/*
-	 * Support encoding decodable file handles with nfs_export=on
-	 * and encoding non-decodable file handles with nfs_export=off
-	 * if all layers support file handles.
+	 * Encoding file handles requires that all layers support file handles.
+	 * Decoding file handles also requires nfs_export=on with index dir
+	 * or an upper-only overlayfs.
 	 */
-	if (ofs->config.nfs_export)
+	if (ofs->nofh)
+		sb->s_export_op = NULL;
+	else if (ofs->config.nfs_export)
 		sb->s_export_op = &ovl_export_operations;
-	else if (!ofs->nofh)
+	else
 		sb->s_export_op = &ovl_export_fid_operations;
 
 	/* Never override disk quota limits or use reserved space */

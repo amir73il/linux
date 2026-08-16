@@ -33,8 +33,8 @@ module_param_named(index, ovl_index_def, bool, 0644);
 MODULE_PARM_DESC(index,
 		 "Default to on or off for the inodes index feature");
 
-static bool ovl_nfs_export_def = IS_ENABLED(CONFIG_OVERLAY_FS_NFS_EXPORT);
-module_param_named(nfs_export, ovl_nfs_export_def, bool, 0644);
+static bool ovl_nfs_export_lower_def = IS_ENABLED(CONFIG_OVERLAY_FS_NFS_EXPORT);
+module_param_named(nfs_export, ovl_nfs_export_lower_def, bool, 0644);
 MODULE_PARM_DESC(nfs_export,
 		 "Default to on or off for the NFS export feature");
 
@@ -122,6 +122,12 @@ static int ovl_redirect_mode_def(void)
 	return ovl_redirect_dir_def	  ? OVL_REDIRECT_ON :
 	       ovl_redirect_always_follow ? OVL_REDIRECT_FOLLOW :
 					    OVL_REDIRECT_NOFOLLOW;
+}
+
+static bool ovl_nfs_export_def(bool has_lower)
+{
+	/* Enable nfs_export for upper-only by default */
+	return has_lower ? ovl_nfs_export_lower_def : true;
 }
 
 static const struct constant_table ovl_parameter_verity[] = {
@@ -819,7 +825,7 @@ int ovl_init_fs_context(struct fs_context *fc)
 	ofs->config.redirect_mode	= ovl_redirect_mode_def();
 	ofs->config.index		= ovl_index_def;
 	ofs->config.uuid		= ovl_uuid_def();
-	ofs->config.nfs_export		= ovl_nfs_export_def;
+	ofs->config.nfs_export		= ovl_nfs_export_def(true);
 	ofs->config.xino		= ovl_xino_def();
 	ofs->config.metacopy		= ovl_metacopy_def;
 	ofs->config.fsync_mode		= ovl_fsync_mode_def();
@@ -884,7 +890,7 @@ int ovl_fs_params_verify(const struct ovl_fs_context *ctx,
 			pr_err("option \"workdir\" is not supported for upper-only mount\n");
 			return -EINVAL;
 		}
-		if (set.index || set.nfs_export || set.metacopy || set.redirect) {
+		if (set.index || set.metacopy || set.redirect) {
 			pr_err("unsupported option for upper-only mount\n");
 			return -EINVAL;
 		}
@@ -895,6 +901,9 @@ int ovl_fs_params_verify(const struct ovl_fs_context *ctx,
 			pr_err("unsupported option for upper-only mount\n");
 			return -EINVAL;
 		}
+		/* Set the correct nfs_export default for upper-only */
+		if (!set.nfs_export)
+			config->nfs_export = ovl_nfs_export_def(false);
 		return 0;
 	}
 
@@ -1106,7 +1115,7 @@ int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 		seq_printf(m, ",index=%s", str_on_off(ofs->config.index));
 	if (ofs->config.uuid != ovl_uuid_def())
 		seq_printf(m, ",uuid=%s", ovl_uuid_mode(&ofs->config));
-	if (ofs->config.nfs_export != ovl_nfs_export_def)
+	if (ofs->config.nfs_export != ovl_nfs_export_def(ovl_numlowerlayer(ofs)))
 		seq_printf(m, ",nfs_export=%s",
 			   str_on_off(ofs->config.nfs_export));
 	if (ofs->config.xino != ovl_xino_def() && !ovl_same_fs(ofs))

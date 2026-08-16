@@ -465,7 +465,7 @@ static inline const struct cred *ovl_creds(struct super_block *sb)
 	return OVL_FS(sb)->creator_cred;
 }
 
-int ovl_can_decode_fh(struct super_block *sb);
+int ovl_can_decode_fh(struct ovl_fs *ofs, struct super_block *sb);
 struct dentry *ovl_indexdir(struct super_block *sb);
 bool ovl_index_all(struct super_block *sb);
 bool ovl_verify_lower(struct super_block *sb);

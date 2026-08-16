@@ -77,10 +77,17 @@ const struct cred *ovl_override_creds(struct super_block *sb)
  * Return 1 (FILEID_INO32_GEN) if fs uses the default 32bit inode encoding.
  * Return -1 if fs uses a non default encoding with unknown inode size.
  */
-int ovl_can_decode_fh(struct super_block *sb)
+int ovl_can_decode_fh(struct ovl_fs *ofs, struct super_block *sb)
 {
-	if (!capable(CAP_DAC_READ_SEARCH))
-		return 0;
+	if (!capable(CAP_DAC_READ_SEARCH)) {
+		/*
+		 * For upper-only overlayfs, relax the capability check to
+		 * allow a userns mount to decode directory file handles only.
+		 */
+		if (ovl_numlowerlayer(ofs) ||
+		    !ns_capable(sb->s_user_ns, CAP_SYS_ADMIN))
+			return 0;
+	}
 
 	if (!exportfs_can_decode_fh(sb->s_export_op))
 		return 0;

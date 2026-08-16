@@ -175,10 +175,15 @@ struct dentry *ovl_decode_real_fh(struct ovl_fs *ofs, struct ovl_fh *fh,
 				  struct vfsmount *mnt, bool connected)
 {
 	struct dentry *real;
+	bool dir_only = false;
 	int bytes;
 
-	if (!capable(CAP_DAC_READ_SEARCH))
-		return NULL;
+	if (!capable(CAP_DAC_READ_SEARCH)) {
+		if (ovl_numlowerlayer(ofs) ||
+		    !ns_capable(mnt->mnt_sb->s_user_ns, CAP_SYS_ADMIN))
+			return NULL;
+		dir_only = true;
+	}
 
 	if (!ovl_uuid_match(ofs, mnt->mnt_sb, &fh->fb.uuid))
 		return NULL;
@@ -201,6 +206,11 @@ struct dentry *ovl_decode_real_fh(struct ovl_fs *ofs, struct ovl_fh *fh,
 	}
 
 	if (ovl_dentry_weird(real)) {
+		dput(real);
+		return NULL;
+	}
+
+	if (dir_only && !d_is_dir(real)) {
 		dput(real);
 		return NULL;
 	}
