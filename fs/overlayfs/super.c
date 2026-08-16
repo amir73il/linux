@@ -1185,7 +1185,7 @@ static struct ovl_entry *ovl_get_lowerstack(struct super_block *sb,
 		return ERR_PTR(-EINVAL);
 	}
 
-	if (ctx->nr == ctx->nr_data) {
+	if (ctx->nr && ctx->nr == ctx->nr_data) {
 		pr_err("at least one non-data lowerdir is required\n");
 		return ERR_PTR(-EINVAL);
 	}
@@ -1385,9 +1385,9 @@ static int ovl_fill_super_creds(struct fs_context *fc, struct super_block *sb)
 		return err;
 
 	err = -EINVAL;
-	if (ctx->nr == 0) {
+	if (ctx->nr == 0 && !ofs->config.upperdir) {
 		if (!(fc->sb_flags & SB_SILENT))
-			pr_err("missing 'lowerdir'\n");
+			pr_err("missing 'lowerdir' or 'upperdir'\n");
 		return err;
 	}
 
@@ -1430,7 +1430,7 @@ static int ovl_fill_super_creds(struct fs_context *fc, struct super_block *sb)
 		struct super_block *upper_sb;
 
 		err = -EINVAL;
-		if (!ofs->config.workdir) {
+		if (ctx->nr && !ofs->config.workdir) {
 			pr_err("missing 'workdir'\n");
 			return err;
 		}
@@ -1449,12 +1449,17 @@ static int ovl_fill_super_creds(struct fs_context *fc, struct super_block *sb)
 			}
 		}
 
-		err = ovl_get_workdir(sb, ofs, &ctx->upper, &ctx->work);
-		if (err)
-			return err;
+		if (ofs->config.workdir) {
+			err = ovl_get_workdir(sb, ofs, &ctx->upper, &ctx->work);
+			if (err)
+				return err;
 
-		if (!ofs->workdir)
-			sb->s_flags |= SB_RDONLY;
+			if (!ofs->workdir)
+				sb->s_flags |= SB_RDONLY;
+		} else {
+			/* Upper-only: check if upper fs supports file handles */
+			ofs->nofh = !ovl_can_decode_fh(ofs, upper_sb);
+		}
 
 		sb->s_stack_depth = upper_sb->s_stack_depth;
 		sb->s_time_gran = upper_sb->s_time_gran;
@@ -1488,7 +1493,7 @@ static int ovl_fill_super_creds(struct fs_context *fc, struct super_block *sb)
 		goto out_free_oe;
 
 	/* Show index=off in /proc/mounts for forced r/o mount */
-	if (!ofs->workdir) {
+	if (ovl_numlowerlayer(ofs) && !ofs->workdir) {
 		ofs->config.index = false;
 		if (ovl_upper_mnt(ofs) && ofs->config.nfs_export) {
 			pr_warn("NFS export requires an index dir, falling back to nfs_export=off.\n");
@@ -1496,7 +1501,8 @@ static int ovl_fill_super_creds(struct fs_context *fc, struct super_block *sb)
 		}
 	}
 
-	if (ofs->config.metacopy && ofs->config.nfs_export) {
+	if (ovl_numlowerlayer(ofs) &&
+	    ofs->config.metacopy && ofs->config.nfs_export) {
 		pr_warn("NFS export is not supported with metadata only copy up, falling back to nfs_export=off.\n");
 		ofs->config.nfs_export = false;
 	}

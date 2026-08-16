@@ -941,7 +941,8 @@ int ovl_fill_super(struct super_block *sb, struct fs_context *fc);
 /* Will this overlay be forced to mount/remount ro? */
 static inline bool ovl_force_readonly(struct ovl_fs *ofs)
 {
-	return (!ovl_upper_mnt(ofs) || !ofs->workdir);
+	return !ovl_upper_mnt(ofs) ||
+	       (ovl_numlowerlayer(ofs) && !ofs->workdir);
 }
 
 /* xattr.c */

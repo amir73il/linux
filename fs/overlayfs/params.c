@@ -878,6 +878,26 @@ int ovl_fs_params_verify(const struct ovl_fs_context *ctx,
 {
 	struct ovl_opt_set set = ctx->set;
 
+	/* Upper-only mount must not have workdir or irrelevant options */
+	if (config->upperdir && !ctx->nr) {
+		if (config->workdir) {
+			pr_err("option \"workdir\" is not supported for upper-only mount\n");
+			return -EINVAL;
+		}
+		if (set.index || set.nfs_export || set.metacopy || set.redirect) {
+			pr_err("unsupported option for upper-only mount\n");
+			return -EINVAL;
+		}
+		if (config->verity_mode ||
+		    config->xino != ovl_xino_def() ||
+		    config->uuid != ovl_uuid_def() ||
+		    config->fsync_mode != ovl_fsync_mode_def()) {
+			pr_err("unsupported option for upper-only mount\n");
+			return -EINVAL;
+		}
+		return 0;
+	}
+
 	/* Workdir/index are useless in non-upper mount */
 	if (!config->upperdir) {
 		if (config->workdir) {
@@ -1073,10 +1093,10 @@ int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 		else
 			seq_show_option(m, "datadir+", lowerdirs[nr]);
 	}
-	if (ofs->config.upperdir) {
+	if (ofs->config.upperdir)
 		seq_show_option(m, "upperdir", ofs->config.upperdir);
+	if (ofs->config.workdir)
 		seq_show_option(m, "workdir", ofs->config.workdir);
-	}
 	if (ofs->config.default_permissions)
 		seq_puts(m, ",default_permissions");
 	if (ofs->config.redirect_mode != ovl_redirect_mode_def())
