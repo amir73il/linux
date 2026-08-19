@@ -1538,7 +1538,7 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 
 	recalc = fanotify_mark_add_to_mask(fsn_mark, mask, fan_flags);
 	if (recalc)
-		fsnotify_recalc_mask(fsn_mark->connector);
+		fsnotify_recalc_mask_and_update_children(fsn_mark->connector);
 
 out:
 	fsnotify_group_unlock(group);

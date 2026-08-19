@@ -307,7 +307,7 @@ static bool fsnotify_conn_watches_children(
 	return fsnotify_inode_watches_children(fsnotify_conn_inode(conn));
 }
 
-static void fsnotify_conn_set_children_dentry_flags(
+void fsnotify_conn_set_children_dentry_flags(
 					struct fsnotify_mark_connector *conn)
 {
 	if (conn->type != FSNOTIFY_OBJ_TYPE_INODE)
@@ -321,25 +321,41 @@ static void fsnotify_conn_set_children_dentry_flags(
  * connector and connector->obj cannot disappear under us.  Callers achieve
  * this by holding a mark->lock or mark->group->mark_mutex for a mark on this
  * list.
+ *
+ * Returns true if the connector started watching children as a result of
+ * the mask recalculation.  Callers that may be adding watch bits should
+ * use fsnotify_recalc_mask_and_update_children() or call
+ * fsnotify_conn_set_children_dentry_flags() when safe to do so.
  */
-void fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
+bool fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 {
 	bool update_children;
 
 	if (!conn)
-		return;
+		return false;
 
 	spin_lock(&conn->lock);
 	update_children = !fsnotify_conn_watches_children(conn);
 	fsnotify_recalc_mask_set_iref(conn);
 	update_children &= fsnotify_conn_watches_children(conn);
 	spin_unlock(&conn->lock);
-	/*
-	 * Set children's PARENT_WATCHED flags only if parent started watching.
-	 * When parent stops watching, we clear false positive PARENT_WATCHED
-	 * flags lazily in __fsnotify_parent().
-	 */
-	if (update_children)
+
+	return update_children;
+}
+
+/*
+ * Recalculate mask and update children dentry PARENT_WATCHED flags if the
+ * connector started watching children.  When parent stops watching, we
+ * clear false positive PARENT_WATCHED flags lazily in __fsnotify_parent().
+ *
+ * The caller must make sure connector and connector->obj cannot disappear
+ * under us.  This is achieved by holding mark->group->mark_mutex for a
+ * mark on this list.  mark->lock must not be held by the caller.
+ */
+void fsnotify_recalc_mask_and_update_children(
+					struct fsnotify_mark_connector *conn)
+{
+	if (fsnotify_recalc_mask(conn))
 		fsnotify_conn_set_children_dentry_flags(conn);
 }
 
@@ -367,8 +383,8 @@ void fsnotify_modify_mark_mask(struct fsnotify_mark *mark, u32 set, u32 clear)
 		recalc = true;
 	spin_unlock(&mark->lock);
 
-	if (recalc)
-		fsnotify_recalc_mask(mark->connector);
+	if (recalc && fsnotify_recalc_mask(mark->connector) && set)
+		fsnotify_conn_set_children_dentry_flags(mark->connector);
 }
 EXPORT_SYMBOL_GPL(fsnotify_modify_mark_mask);
 
@@ -998,7 +1014,7 @@ int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 	if (ret)
 		goto err;
 
-	fsnotify_recalc_mask(mark->connector);
+	fsnotify_recalc_mask_and_update_children(mark->connector);
 
 	return ret;
 err:

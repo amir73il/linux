@@ -380,6 +380,7 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned int arg)
 	dnotify_recalc_inode_mask(fsn_mark);
 out:
 	spin_unlock(&fsn_mark->lock);
+	fsnotify_conn_set_children_dentry_flags(fsn_mark->connector);
 
 	if (destroy)
 		fsnotify_detach_mark(fsn_mark);
