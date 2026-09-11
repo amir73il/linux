@@ -285,6 +285,8 @@ enum {
 	 * or the fuse server has an exclusive "lease" on distributed fs
 	 */
 	FUSE_I_EXCLUSIVE,
+	/* Has long lived backing file for inode ops passthrough */
+	FUSE_I_PASSTHROUGH,
 };
 
 struct fuse_conn;
@@ -1293,8 +1295,9 @@ int fuse_fileattr_set(struct mnt_idmap *idmap,
 
 /* iomode.c */
 int fuse_file_cached_io_open(struct inode *inode, struct fuse_file *ff);
-int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_backing *fb);
-void fuse_inode_uncached_io_end(struct fuse_inode *fi);
+int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_file *ff,
+				 struct fuse_backing *fb);
+void fuse_inode_uncached_io_end(struct inode *inode);
 
 int fuse_file_io_open(struct file *file, struct inode *inode);
 void fuse_file_io_release(struct fuse_file *ff, struct inode *inode);
@@ -1341,6 +1344,15 @@ static inline struct fuse_backing *fuse_inode_backing_set(struct fuse_inode *fi,
 #else
 	return NULL;
 #endif
+}
+
+static inline struct fuse_backing *fuse_inode_passthrough(struct fuse_inode *fi)
+{
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	if (test_bit(FUSE_I_PASSTHROUGH, &fi->state))
+		return fuse_inode_backing(fi);
+#endif
+	return NULL;
 }
 
 struct fuse_backing *fuse_passthrough_open(struct file *file, uint64_t backing_id, bool is_64bit);

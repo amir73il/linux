@@ -82,7 +82,8 @@ static void fuse_file_cached_io_release(struct fuse_file *ff,
 }
 
 /* Start strictly uncached io mode where cache access is not allowed */
-int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_backing *fb)
+int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_file *ff,
+				 struct fuse_backing *fb)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_conn *fc = get_fuse_conn(inode);
@@ -106,12 +107,19 @@ int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_backing *fb)
 		err = -ETXTBSY;
 		goto unlock;
 	}
-	fi->iocachectr--;
+	/* every open file holds a single refcount of backing file... */
+	if (ff)
+		fi->iocachectr--;
 
-	/* fuse inode holds a single refcount of backing file */
 	if (fb && !oldfb) {
 		oldfb = fuse_inode_backing_set(fi, fb);
 		WARN_ON_ONCE(oldfb != NULL);
+		/* ...and an optional extra refcount for inode ops */
+		if (!ff) {
+			WARN_ON_ONCE(test_bit(FUSE_I_PASSTHROUGH, &fi->state));
+			set_bit(FUSE_I_PASSTHROUGH, &fi->state);
+			fi->iocachectr--;
+		}
 	} else {
 		fuse_backing_put(fb);
 	}
@@ -127,7 +135,7 @@ static int fuse_file_uncached_io_open(struct inode *inode,
 {
 	int err;
 
-	err = fuse_inode_uncached_io_start(inode, fb);
+	err = fuse_inode_uncached_io_start(inode, ff, fb);
 	if (err)
 		return fuse_err_EIO("failed to start uncached I/O", err);
 
@@ -136,8 +144,9 @@ static int fuse_file_uncached_io_open(struct inode *inode,
 	return 0;
 }
 
-void fuse_inode_uncached_io_end(struct fuse_inode *fi)
+void fuse_inode_uncached_io_end(struct inode *inode)
 {
+	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_backing *oldfb = NULL;
 
 	spin_lock(&fi->lock);
@@ -145,6 +154,7 @@ void fuse_inode_uncached_io_end(struct fuse_inode *fi)
 	fi->iocachectr++;
 	if (!fi->iocachectr) {
 		wake_up(&fi->direct_io_waitq);
+		clear_bit(FUSE_I_PASSTHROUGH, &fi->state);
 		oldfb = fuse_inode_backing_set(fi, NULL);
 	}
 	spin_unlock(&fi->lock);
@@ -158,7 +168,7 @@ static void fuse_file_uncached_io_release(struct fuse_file *ff,
 {
 	WARN_ON(ff->iomode != IOM_UNCACHED);
 	ff->iomode = IOM_NONE;
-	fuse_inode_uncached_io_end(fi);
+	fuse_inode_uncached_io_end(&fi->inode);
 }
 
 /*
