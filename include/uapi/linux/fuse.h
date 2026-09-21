@@ -260,6 +260,9 @@
  *  - add FUSE_BACKING_IS_DEV (fuse_backing_map.flags)
  *  - add FUSE_BACKING_ID_64 (mutiple structs)
  *  - add FUSE_MAP_CYCLIC, FUSE_MAP_BACKING_CREATE (fuse_map_out.flags)
+ *
+ *  7.48
+ *  - add FUSE_PASSTHROUGH_INO
  */
 
 #ifndef _LINUX_FUSE_H
@@ -295,7 +298,7 @@
 #define FUSE_KERNEL_VERSION 7
 
 /** Minor version number of this interface */
-#define FUSE_KERNEL_MINOR_VERSION 47
+#define FUSE_KERNEL_MINOR_VERSION 48
 
 /** The node ID of the root inode */
 #define FUSE_ROOT_ID 1
@@ -533,6 +536,7 @@ struct fuse_file_lock {
 #define FUSE_REQUEST_TIMEOUT	(1ULL << 42)
 #define FUSE_HAS_IO_URING_BUFPOOL (1ULL << 43)
 #define FUSE_HAS_SYNCFS		(1ULL << 44)
+#define FUSE_PASSTHROUGH_INO	(1ULL << 45)
 
 /**
  * CUSE INIT request/reply flags

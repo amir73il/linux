@@ -235,6 +235,9 @@ int fuse_ext_map_populate(struct fuse_conn *fc, struct fuse_notify_map_out *arg,
 	int err;
 	loff_t chunk_size = 0;
 
+	if (fc->passthrough_ino)
+		return -EINVAL;
+
 	if (arg->flags & FUSE_MAP_BACKING_CREATE) {
 		fb = kzalloc_obj(*fb);
 		if (!fb)

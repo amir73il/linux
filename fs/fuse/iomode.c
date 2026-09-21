@@ -82,8 +82,10 @@ static void fuse_file_cached_io_release(struct fuse_file *ff,
 }
 
 /* Start strictly uncached io mode where cache access is not allowed */
-int fuse_inode_uncached_io_start(struct fuse_inode *fi, struct fuse_backing *fb)
+int fuse_inode_uncached_io_start(struct inode *inode, struct fuse_backing *fb)
 {
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_backing *oldfb;
 	int err = 0;
 
@@ -92,6 +94,12 @@ int fuse_inode_uncached_io_start(struct fuse_inode *fi, struct fuse_backing *fb)
 	oldfb = fuse_inode_backing(fi);
 	if (fb && oldfb && oldfb != fb) {
 		err = -EBUSY;
+		goto unlock;
+	}
+	/* FUSE_PASSTHROUGH_INO: backing_id is the fuse nodeid */
+	if (fb && fc->passthrough_ino && fb->backing_id != get_node_id(inode)) {
+		WARN_ON_ONCE(1);
+		err = -EIO;
 		goto unlock;
 	}
 	if (fi->iocachectr > 0) {
@@ -117,10 +125,9 @@ static int fuse_file_uncached_io_open(struct inode *inode,
 				      struct fuse_file *ff,
 				      struct fuse_backing *fb)
 {
-	struct fuse_inode *fi = get_fuse_inode(inode);
 	int err;
 
-	err = fuse_inode_uncached_io_start(fi, fb);
+	err = fuse_inode_uncached_io_start(inode, fb);
 	if (err)
 		return fuse_err_EIO("failed to start uncached I/O", err);
 
@@ -183,10 +190,18 @@ static int fuse_file_passthrough_open(struct inode *inode, struct file *file)
 	if (ff->open_flags & ~FOPEN_PASSTHROUGH_MASK)
 		return fuse_EIO("conflicting open flags");
 
+	if (fc->passthrough_ino && !is_64bit)
+		return fuse_EIO("PASSTHROUGH_INO requires 64bit backing id");
+
 	if (!is_64bit)
 		backing_id = ff->args->open_outarg.backing_id;
 	else
 		backing_id = ff->args->open_outarg.backing_id_64;
+
+	if (fc->passthrough_ino && backing_id != get_node_id(inode)) {
+		WARN_ON_ONCE(1);
+		return fuse_EIO("backing_id must equal nodeid");
+	}
 
 	fb = fuse_passthrough_open(file, backing_id, is_64bit);
 	if (IS_ERR(fb))

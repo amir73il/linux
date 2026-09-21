@@ -178,12 +178,19 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	if (!is_64bit && map->backing_id != 0)
 		goto out;
 
+	if (fc->passthrough_ino && (!is_64bit || map->backing_id == 0))
+		goto out;
+
 	file = fget_raw(map->fd);
 	res = -EBADF;
 	if (!file)
 		goto out;
 
 	res = fuse_backing_open_file(fc, fb, file, map->flags & FUSE_BACKING_IS_DEV);
+	if (!res && fc->passthrough_ino &&
+	    (fb->type != FUSE_BACKING_PATH ||
+	     map->backing_id != file_inode(file)->i_ino))
+		res = -EINVAL;
 	fput(file);
 	if (res)
 		goto out;

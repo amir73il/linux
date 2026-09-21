@@ -435,7 +435,12 @@ static void fuse_init_inode(struct inode *inode, struct fuse_attr *attr,
 	if (!fc->posix_acl)
 		inode->i_acl = inode->i_default_acl = ACL_DONT_CACHE;
 
-	if ((attr->flags & FUSE_ATTR_DAX) && !fc->vdax) {
+	/* Extent-map DAX is incompatible with 1:1 PASSTHROUGH_INO */
+#ifdef CONFIG_FUSE_DAX
+	if ((attr->flags & FUSE_ATTR_DAX) && !fc->passthrough_ino && !fc->vdax) {
+#else
+	if ((attr->flags & FUSE_ATTR_DAX) && !fc->passthrough_ino) {
+#endif
 		inode->i_flags |= S_DAX;
 		inode->i_data.a_ops = &fuse_dax_aops;
 	}
@@ -1424,6 +1429,8 @@ static void process_init_reply(struct fuse_args *args, int error)
 				fc->passthrough = 1;
 				fc->max_stack_depth = arg->max_stack_depth;
 				fm->sb->s_stack_depth = arg->max_stack_depth;
+				if (flags & FUSE_PASSTHROUGH_INO)
+					fc->passthrough_ino = 1;
 			}
 			if (flags & FUSE_NO_EXPORT_SUPPORT)
 				fm->sb->s_export_op = &fuse_export_fid_operations;
@@ -1509,7 +1516,7 @@ static struct fuse_init_args *fuse_new_init(struct fuse_mount *fm)
 	if (fm->fc->auto_submounts)
 		flags |= FUSE_SUBMOUNTS;
 	if (IS_ENABLED(CONFIG_FUSE_PASSTHROUGH))
-		flags |= FUSE_PASSTHROUGH;
+		flags |= FUSE_PASSTHROUGH | FUSE_PASSTHROUGH_INO;
 	/* Only offered to sufficiently privileged servers; see
 	 * fuse_syncfs_enable().
 	 */
