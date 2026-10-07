@@ -558,3 +558,17 @@ static inline u32 fanotify_get_response_errno(int res)
 {
 	return (res >> FAN_ERRNO_SHIFT) & FAN_ERRNO_MASK;
 }
+
+/* Bits of @mask that this that this group can report to userspace */
+static inline u32 fanotify_group_outgoing_events(struct fsnotify_group *group,
+						 u32 mask)
+{
+	switch (group->type) {
+	case FSNOTIFY_GROUP_TYPE_FILESYSTEM:
+		return mask & FANOTIFY_OUTGOING_FILESYSTEM_EVENTS;
+	case FSNOTIFY_GROUP_TYPE_NAMESPACE:
+		return mask & FANOTIFY_OUTGOING_NAMESPACE_EVENTS;
+	default:
+		return 0;
+	}
+}

@@ -146,13 +146,13 @@ static bool fsnotify_event_needs_parent(struct inode *inode, __u32 mnt_mask,
 }
 
 /* Are there any inode/mount/sb objects that watch for these events? */
-static inline __u32 fsnotify_object_watched(struct inode *inode, __u32 mnt_mask,
-					    __u32 mask)
+static inline u32 fsnotify_filesystem_object_watched(struct inode *inode,
+						     u32 mnt_mask, u32 mask)
 {
 	__u32 marks_mask = READ_ONCE(inode->i_fsnotify_mask) | mnt_mask |
 			   READ_ONCE(inode->i_sb->s_fsnotify_mask);
 
-	return mask & marks_mask & ALL_FSNOTIFY_EVENTS;
+	return mask & marks_mask & FSNOTIFY_EVENTS_ON_FILESYSTEM;
 }
 
 /* Report pre-content event with optional range info */
@@ -199,7 +199,7 @@ int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 
 	/* Optimize the likely case of nobody watching this path */
 	if (likely(!parent_watched &&
-		   !fsnotify_object_watched(inode, mnt_mask, mask)))
+		   !fsnotify_filesystem_object_watched(inode, mnt_mask, mask)))
 		return 0;
 
 	parent = NULL;
@@ -222,7 +222,7 @@ int __fsnotify_parent(struct dentry *dentry, __u32 mask, const void *data,
 	 * events can provide an undesirable side-channel for information
 	 * exfiltration.
 	 */
-	parent_interested = mask & p_mask & ALL_FSNOTIFY_EVENTS &&
+	parent_interested = mask & p_mask & FSNOTIFY_EVENTS_ON_FILESYSTEM &&
 			    !(data_type == FSNOTIFY_EVENT_PATH &&
 			      d_is_special(dentry) &&
 			      (mask & (FS_ACCESS | FS_MODIFY)));
@@ -269,7 +269,7 @@ static int fsnotify_handle_inode_event(struct fsnotify_group *group,
 		return 0;
 
 	/* Check interest of this mark in case event was sent with two marks */
-	if (!(mask & inode_mark->mask & ALL_FSNOTIFY_EVENTS))
+	if (!(mask & inode_mark->mask & FSNOTIFY_EVENTS_ON_FILESYSTEM))
 		return 0;
 
 	return ops->handle_inode_event(inode_mark, mask, inode, dir, name, cookie);
@@ -643,7 +643,7 @@ int fsnotify_open_perm_and_set_mode(struct file *file)
 	 * watching for permission events on *this* file.
 	 */
 	mnt_mask = READ_ONCE(real_mount(file->f_path.mnt)->mnt_fsnotify_mask);
-	p_mask = fsnotify_object_watched(d_inode(dentry), mnt_mask,
+	p_mask = fsnotify_filesystem_object_watched(d_inode(dentry), mnt_mask,
 					 ALL_FSNOTIFY_PERM_EVENTS);
 	if (dentry->d_flags & DCACHE_FSNOTIFY_PARENT_WATCHED) {
 		parent = dget_parent(dentry);
