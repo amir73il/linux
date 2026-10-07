@@ -745,14 +745,14 @@ static struct fanotify_event *fanotify_alloc_error_event(
 	return &fee->fae;
 }
 
-static struct fanotify_event *fanotify_alloc_event(
+static struct fanotify_event *fanotify_alloc_filesystem_watcher_event(
 				struct fsnotify_group *group,
 				u32 mask, const void *data, int data_type,
 				struct inode *dir, const struct qstr *file_name,
-				__kernel_fsid_t *fsid, u32 match_mask)
+				__kernel_fsid_t *fsid, u32 match_mask,
+				unsigned int *hash, gfp_t gfp)
 {
 	struct fanotify_event *event = NULL;
-	gfp_t gfp = GFP_KERNEL_ACCOUNT;
 	unsigned int fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	struct inode *id = fanotify_fid_inode(mask, data, data_type, dir,
 					      fid_mode);
@@ -760,14 +760,10 @@ static struct fanotify_event *fanotify_alloc_event(
 	const struct path *path = fsnotify_data_path(data, data_type);
 	struct fs_error_report *fs_error =
 		fsnotify_data_error_report(data, data_type);
-	u64 mnt_id = fsnotify_data_mnt_id(data, data_type);
-	struct mem_cgroup *old_memcg;
 	struct dentry *moved = NULL;
 	struct inode *child = NULL;
 	bool name_event = false;
-	unsigned int hash = 0;
 	bool ondir = mask & FAN_ONDIR;
-	struct pid *pid;
 
 	if ((fid_mode & FAN_REPORT_DIR_FID) && dirid) {
 		/*
@@ -832,6 +828,54 @@ static struct fanotify_event *fanotify_alloc_event(
 		}
 	}
 
+	if (IS_ENABLED(CONFIG_FANOTIFY_ACCESS_PERMISSIONS) &&
+	    mask & FANOTIFY_PERM_EVENTS) {
+		event = fanotify_alloc_perm_event(data, data_type, gfp);
+	} else if (fs_error) {
+		event = fanotify_alloc_error_event(group, fsid, fs_error,
+						   hash);
+	} else if (name_event && (file_name || moved || child)) {
+		event = fanotify_alloc_name_event(dirid, fsid, file_name, child,
+						  moved, hash, gfp);
+	} else if (fid_mode) {
+		event = fanotify_alloc_fid_event(id, fsid, hash, gfp);
+	} else if (path) {
+		event = fanotify_alloc_path_event(path, hash, gfp);
+	} else {
+		WARN_ON_ONCE(1);
+	}
+
+	return event;
+}
+
+static struct fanotify_event *fanotify_alloc_namespace_watcher_event(
+				struct fsnotify_group *group, u64 mask,
+				const void *data, int data_type, gfp_t gfp)
+{
+	u64 mnt_id = fsnotify_data_mnt_id(data, data_type);
+	struct fanotify_event *event = NULL;
+
+	if (mnt_id)
+		event = fanotify_alloc_mnt_event(mnt_id, gfp);
+	else
+		WARN_ON_ONCE(1);
+
+	return event;
+}
+
+static struct fanotify_event *fanotify_alloc_event(
+				struct fsnotify_group *group, u64 mask,
+				const void *data, int data_type,
+				struct inode *dir, const struct qstr *name,
+				__kernel_fsid_t *fsid, u32 match_mask)
+{
+	struct fanotify_event *event = NULL;
+	gfp_t gfp = GFP_KERNEL_ACCOUNT;
+	struct mem_cgroup *old_memcg;
+	unsigned int hash = 0;
+	bool ondir = mask & FAN_ONDIR;
+	struct pid *pid;
+
 	/*
 	 * For queues with unlimited length lost events are not expected and
 	 * can possibly have security implications. Avoid losing events when
@@ -855,25 +899,13 @@ static struct fanotify_event *fanotify_alloc_event(
 	    pidfs_register_pid_gfp(pid, gfp))
 		goto out;
 
-	if (IS_ENABLED(CONFIG_FANOTIFY_ACCESS_PERMISSIONS) &&
-	    mask & FANOTIFY_PERM_EVENTS) {
-		event = fanotify_alloc_perm_event(data, data_type, gfp);
-	} else if (fs_error) {
-		event = fanotify_alloc_error_event(group, fsid, fs_error,
-						   &hash);
-	} else if (name_event && (file_name || moved || child)) {
-		event = fanotify_alloc_name_event(dirid, fsid, file_name, child,
-						  moved, &hash, gfp);
-	} else if (fid_mode) {
-		event = fanotify_alloc_fid_event(id, fsid, &hash, gfp);
-	} else if (path) {
-		event = fanotify_alloc_path_event(path, &hash, gfp);
-	} else if (mnt_id) {
-		event = fanotify_alloc_mnt_event(mnt_id, gfp);
-	} else {
-		WARN_ON_ONCE(1);
-	}
-
+	if (fsnotify_is_namespace_watcher(group))
+		event = fanotify_alloc_namespace_watcher_event(group, mask,
+							data, data_type, gfp);
+	else
+		event = fanotify_alloc_filesystem_watcher_event(group, mask,
+						data, data_type, dir, name,
+						fsid, match_mask, &hash, gfp);
 	if (!event)
 		goto out;
 
@@ -975,8 +1007,8 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	if (!mask)
 		return 0;
 
-	pr_debug("%s: group=%p mask=%x report_mask=%x\n", __func__,
-		 group, mask, match_mask);
+	pr_debug("%s: group=%p type=%d mask=%x report_mask=%x\n", __func__,
+		 group, group->type, mask, match_mask);
 
 	if (is_perm_event) {
 		/*
