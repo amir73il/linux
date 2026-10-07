@@ -1462,8 +1462,36 @@ static int fanotify_group_init_error_pool(struct fsnotify_group *group)
 					 sizeof(struct fanotify_error_event));
 }
 
+/*
+ * The low 32 event bits of a fanotify mask and the watcher type encoded
+ * in its high byte.
+ */
+struct fanotify_mask {
+	u32 mask;
+	u8 type;
+};
+
+/* Match @fan_mask to any event in @event_set of the same watcher type */
+static bool fanotify_mask_match(struct fanotify_mask fan_mask,
+				 __u64 event_set)
+{
+	return fan_mask.type == FAN_EVENT_TYPE(event_set) &&
+	       (fan_mask.mask & event_set);
+}
+
+static int fanotify_mask_from_user(__u64 mask, struct fanotify_mask *fan_mask)
+{
+	if (mask & ~(FAN_EVENT_TYPE_MASK | ALL_FANOTIFY_EVENT_BITS))
+		return -EINVAL;
+
+	fan_mask->mask = mask;
+	fan_mask->type = FAN_EVENT_TYPE(mask);
+	return 0;
+}
+
 static int fanotify_may_update_existing_mark(struct fsnotify_mark *fsn_mark,
-					     __u32 mask, unsigned int fan_flags)
+					     struct fanotify_mask fan_mask,
+					     unsigned int fan_flags)
 {
 	/*
 	 * Non evictable mark cannot be downgraded to evictable mark.
@@ -1491,8 +1519,9 @@ static int fanotify_may_update_existing_mark(struct fsnotify_mark *fsn_mark,
 		return -EEXIST;
 
 	/* For now pre-content events are not generated for directories */
-	mask |= fsn_mark->mask;
-	if (mask & FANOTIFY_PRE_CONTENT_EVENTS && mask & FAN_ONDIR)
+	fan_mask.mask |= fsn_mark->mask;
+	if ((fan_mask.mask & FAN_ONDIR) &&
+	    fanotify_mask_match(fan_mask, FANOTIFY_PRE_CONTENT_EVENTS))
 		return -EEXIST;
 
 	return 0;
@@ -1500,7 +1529,8 @@ static int fanotify_may_update_existing_mark(struct fsnotify_mark *fsn_mark,
 
 static int fanotify_add_mark(struct fsnotify_group *group,
 			     void *obj, unsigned int obj_type,
-			     __u32 mask, unsigned int fan_flags,
+			     struct fanotify_mask fan_mask,
+			     unsigned int fan_flags,
 			     struct fan_fsid *fsid)
 {
 	struct fsnotify_mark *fsn_mark;
@@ -1521,7 +1551,7 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 	/*
 	 * Check if requested mark flags conflict with an existing mark flags.
 	 */
-	ret = fanotify_may_update_existing_mark(fsn_mark, mask, fan_flags);
+	ret = fanotify_may_update_existing_mark(fsn_mark, fan_mask, fan_flags);
 	if (ret)
 		goto out;
 
@@ -1530,13 +1560,13 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 	 * needed (i.e. FAN_FS_ERROR was requested).
 	 */
 	if (!(fan_flags & FANOTIFY_MARK_IGNORE_BITS) &&
-	    (mask & FAN_FS_ERROR)) {
+	    fanotify_mask_match(fan_mask, FAN_FS_ERROR)) {
 		ret = fanotify_group_init_error_pool(group);
 		if (ret)
 			goto out;
 	}
 
-	recalc = fanotify_mark_add_to_mask(fsn_mark, mask, fan_flags);
+	recalc = fanotify_mark_add_to_mask(fsn_mark, fan_mask.mask, fan_flags);
 	if (recalc)
 		fsnotify_recalc_mask(fsn_mark->connector);
 
@@ -1545,7 +1575,7 @@ out:
 
 	fsnotify_put_mark(fsn_mark);
 
-	if (!ret && (mask & FANOTIFY_PERM_EVENTS))
+	if (!ret && fanotify_mask_match(fan_mask, FANOTIFY_PERM_EVENTS))
 		fanotify_perm_watchdog_group_add(group);
 
 	return ret;
@@ -1811,21 +1841,22 @@ static int fanotify_test_fid(struct dentry *dentry, unsigned int flags)
 }
 
 static int fanotify_events_supported(struct fsnotify_group *group,
-				     const struct path *path, __u64 mask,
+				     const struct path *path,
+				     struct fanotify_mask fan_mask,
 				     unsigned int flags)
 {
 	unsigned int mark_type = flags & FANOTIFY_MARK_TYPE_BITS;
 	bool is_dir = d_is_dir(path->dentry);
 	/* Strict validation of events in non-dir inode mask with v5.17+ APIs */
 	bool strict_dir_events = FAN_GROUP_FLAG(group, FAN_REPORT_TARGET_FID) ||
-				 (mask & FAN_RENAME) ||
+				 fanotify_mask_match(fan_mask, FAN_RENAME) ||
 				 (flags & FAN_MARK_IGNORE);
 
 	/*
 	 * Filesystems need to opt-into pre-content evnets (a.k.a HSM)
 	 * and they are only supported on regular files and directories.
 	 */
-	if (mask & FANOTIFY_PRE_CONTENT_EVENTS) {
+	if (fanotify_mask_match(fan_mask, FANOTIFY_PRE_CONTENT_EVENTS)) {
 		if (!(path->mnt->mnt_sb->s_iflags & SB_I_ALLOW_HSM))
 			return -EOPNOTSUPP;
 		if (!is_dir && !d_is_reg(path->dentry))
@@ -1840,7 +1871,7 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 	 * waits for fanotify permission event to be answered. Just disallow
 	 * permission events for such filesystems.
 	 */
-	if (mask & FANOTIFY_PERM_EVENTS &&
+	if (fanotify_mask_match(fan_mask, FANOTIFY_PERM_EVENTS) &&
 	    path->mnt->mnt_sb->s_type->fs_flags & FS_DISALLOW_NOTIFY_PERM)
 		return -EINVAL;
 
@@ -1863,15 +1894,15 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 	 * flags FAN_ONDIR and FAN_EVENT_ON_CHILD in mask of non-dir inode,
 	 * but because we always allowed it, error only when using new APIs.
 	 */
-	if (strict_dir_events && mark_type == FAN_MARK_INODE &&
-	    !is_dir && (mask & FANOTIFY_DIRONLY_EVENT_BITS))
+	if (strict_dir_events && mark_type == FAN_MARK_INODE && !is_dir &&
+	    fanotify_mask_match(fan_mask, FANOTIFY_DIRONLY_EVENT_BITS))
 		return -ENOTDIR;
 
 	return 0;
 }
 
 static bool fanotify_is_valid_mask(struct fsnotify_group *group, int mark_type,
-				   u64 mask)
+				  struct fanotify_mask fan_mask)
 {
 	u64 valid_mask = 0;
 
@@ -1894,14 +1925,21 @@ static bool fanotify_is_valid_mask(struct fsnotify_group *group, int mark_type,
 		if (mark_type == FAN_MARK_MNTNS &&
 		    FAN_GROUP_FLAG(group, FAN_REPORT_MNT))
 			valid_mask = FANOTIFY_MOUNT_EVENTS;
+		/* Classify the legacy mount events as namespace events */
+		if (fan_mask.mask & (FAN_MNT_ATTACH | FAN_MNT_DETACH))
+			fan_mask.type = FSNOTIFY_GROUP_TYPE_NAMESPACE;
 		break;
 	}
 
-	return !(mask & ~valid_mask);
+	if (fan_mask.type != group->type)
+		return false;
+
+	return !(fan_mask.mask & ~valid_mask);
 }
 
-static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
-			    int dfd, const char  __user *pathname)
+static int do_fanotify_mark(int fanotify_fd, unsigned int flags,
+			    struct fanotify_mask fan_mask, int dfd,
+			    const char  __user *pathname)
 {
 	struct inode *inode = NULL;
 	struct fsnotify_group *group;
@@ -1918,12 +1956,9 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	u32 umask = 0;
 	int ret;
 
-	pr_debug("%s: fanotify_fd=%d flags=%x dfd=%d pathname=%p mask=%llx\n",
-		 __func__, fanotify_fd, flags, dfd, pathname, mask);
-
-	/* we only use the lower 32 bits as of right now. */
-	if (upper_32_bits(mask))
-		return -EINVAL;
+	pr_debug("%s: fanotify_fd=%d flags=%x dfd=%d pathname=%p mask=%x type=%u\n",
+		 __func__, fanotify_fd, flags, dfd, pathname,
+		 fan_mask.mask, fan_mask.type);
 
 	if (flags & ~FANOTIFY_MARK_FLAGS)
 		return -EINVAL;
@@ -1952,7 +1987,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	switch (mark_cmd) {
 	case FAN_MARK_ADD:
 	case FAN_MARK_REMOVE:
-		if (!mask)
+		if (!fan_mask.mask)
 			return -EINVAL;
 		break;
 	case FAN_MARK_FLUSH:
@@ -1972,7 +2007,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 * FAN_MARK_IGNORED_MASK.
 	 */
 	if (ignore == FAN_MARK_IGNORED_MASK) {
-		mask &= ~FANOTIFY_EVENT_FLAGS;
+		fan_mask.mask &= ~FANOTIFY_EVENT_FLAGS;
 		umask = FANOTIFY_EVENT_FLAGS;
 	}
 
@@ -1986,7 +2021,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	group = fd_file(f)->private_data;
 
 	if (group->type != mark_group_type ||
-	    !fanotify_is_valid_mask(group, mark_type, mask))
+	    !fanotify_is_valid_mask(group, mark_type, fan_mask))
 		return -EINVAL;
 
 	/*
@@ -2001,14 +2036,14 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 * Permission events are not allowed for FAN_CLASS_NOTIF.
 	 * Pre-content permission events are not allowed for FAN_CLASS_CONTENT.
 	 */
-	if (mask & FANOTIFY_PERM_EVENTS &&
+	if (fanotify_mask_match(fan_mask, FANOTIFY_PERM_EVENTS) &&
 	    group->priority == FSNOTIFY_PRIO_NORMAL)
 		return -EINVAL;
-	else if (mask & FANOTIFY_PRE_CONTENT_EVENTS &&
+	else if (fanotify_mask_match(fan_mask, FANOTIFY_PRE_CONTENT_EVENTS) &&
 		 group->priority == FSNOTIFY_PRIO_CONTENT)
 		return -EINVAL;
 
-	if (mask & FAN_FS_ERROR &&
+	if (fanotify_mask_match(fan_mask, FAN_FS_ERROR) &&
 	    mark_type != FAN_MARK_FILESYSTEM)
 		return -EINVAL;
 
@@ -2029,7 +2064,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 */
 	fid_mode = FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS);
 	if (fsnotify_is_filesystem_watcher(group) &&
-	    mask & ~(FANOTIFY_FD_EVENTS|FANOTIFY_EVENT_FLAGS) &&
+	    fan_mask.mask & ~(FANOTIFY_FD_EVENTS|FANOTIFY_EVENT_FLAGS) &&
 	    (!fid_mode || mark_type == FAN_MARK_MOUNT))
 		return -EINVAL;
 
@@ -2038,11 +2073,13 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	 * new parent+name.  Reporting only old and new parent id is less
 	 * useful and was not implemented.
 	 */
-	if (mask & FAN_RENAME && !(fid_mode & FAN_REPORT_NAME))
+	if (fanotify_mask_match(fan_mask, FAN_RENAME) &&
+	    !(fid_mode & FAN_REPORT_NAME))
 		return -EINVAL;
 
 	/* Pre-content events are not currently generated for directories. */
-	if (mask & FANOTIFY_PRE_CONTENT_EVENTS && mask & FAN_ONDIR)
+	if ((fan_mask.mask & FAN_ONDIR) &&
+	    fanotify_mask_match(fan_mask, FANOTIFY_PRE_CONTENT_EVENTS))
 		return -EINVAL;
 
 	if (mark_cmd == FAN_MARK_FLUSH) {
@@ -2051,12 +2088,12 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	}
 
 	ret = fanotify_find_path(dfd, pathname, &path, flags,
-			(mask & ALL_FSNOTIFY_EVENTS), obj_type);
+			(fan_mask.mask & ALL_FSNOTIFY_EVENTS), obj_type);
 	if (ret)
 		return ret;
 
 	if (mark_cmd == FAN_MARK_ADD) {
-		ret = fanotify_events_supported(group, &path, mask, flags);
+		ret = fanotify_events_supported(group, &path, fan_mask, flags);
 		if (ret)
 			goto path_put_and_out;
 	}
@@ -2066,7 +2103,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	if (ret)
 		goto path_put_and_out;
 
-	ret = security_path_notify(&path, mask, obj_type);
+	ret = security_path_notify(&path, fan_mask.mask, obj_type);
 	if (ret)
 		goto path_put_and_out;
 
@@ -2134,7 +2171,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 
 	/* Mask out FAN_EVENT_ON_CHILD flag for sb/mount/non-dir marks */
 	if (!inode || !S_ISDIR(inode->i_mode)) {
-		mask &= ~FAN_EVENT_ON_CHILD;
+		fan_mask.mask &= ~FAN_EVENT_ON_CHILD;
 		umask = FAN_EVENT_ON_CHILD;
 		/*
 		 * If group needs to report parent fid, register for getting
@@ -2142,18 +2179,18 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		 */
 		if ((fid_mode & FAN_REPORT_DIR_FID) &&
 		    (flags & FAN_MARK_ADD) && !ignore)
-			mask |= FAN_EVENT_ON_CHILD;
+			fan_mask.mask |= FAN_EVENT_ON_CHILD;
 	}
 
 	/* create/update an inode mark */
 	switch (mark_cmd) {
 	case FAN_MARK_ADD:
-		ret = fanotify_add_mark(group, obj, obj_type, mask, flags,
+		ret = fanotify_add_mark(group, obj, obj_type, fan_mask, flags,
 					fsid);
 		break;
 	case FAN_MARK_REMOVE:
-		ret = fanotify_remove_mark(group, obj, obj_type, mask, flags,
-					   umask);
+		ret = fanotify_remove_mark(group, obj, obj_type, fan_mask.mask,
+					   flags, umask);
 		break;
 	default:
 		ret = -EINVAL;
@@ -2169,7 +2206,14 @@ SYSCALL_DEFINE5(fanotify_mark, int, fanotify_fd, unsigned int, flags,
 			      __u64, mask, int, dfd,
 			      const char  __user *, pathname)
 {
-	return do_fanotify_mark(fanotify_fd, flags, mask, dfd, pathname);
+	struct fanotify_mask fan_mask;
+	int ret;
+
+	ret = fanotify_mask_from_user(mask, &fan_mask);
+	if (ret)
+		return ret;
+
+	return do_fanotify_mark(fanotify_fd, flags, fan_mask, dfd, pathname);
 }
 #endif
 
@@ -2179,8 +2223,14 @@ SYSCALL32_DEFINE6(fanotify_mark,
 				SC_ARG64(mask), int, dfd,
 				const char  __user *, pathname)
 {
-	return do_fanotify_mark(fanotify_fd, flags, SC_VAL64(__u64, mask),
-				dfd, pathname);
+	struct fanotify_mask fan_mask;
+	int ret;
+
+	ret = fanotify_mask_from_user(SC_VAL64(__u64, mask), &fan_mask);
+	if (ret)
+		return ret;
+
+	return do_fanotify_mark(fanotify_fd, flags, fan_mask, dfd, pathname);
 }
 #endif
 
