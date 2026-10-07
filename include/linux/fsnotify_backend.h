@@ -205,6 +205,15 @@ enum fsnotify_group_prio {
 };
 
 /*
+ * Category of kernel objects watched by this group.
+ * Every category has its own mark types and event types.
+ */
+enum fsnotify_group_type {
+	FSNOTIFY_GROUP_TYPE_FILESYSTEM = 0,
+	FSNOTIFY_GROUP_TYPE_NAMESPACE,
+};
+
+/*
  * A group is a "thing" that wants to receive notification about filesystem
  * events.  The mask holds the subset of event types this group cares about.
  * refcnt on a group is up to the implementor and at any moment if it goes 0
@@ -230,6 +239,7 @@ struct fsnotify_group {
 	unsigned int q_len;			/* events on the queue */
 	unsigned int max_events;		/* maximum events allowed on the list */
 	enum fsnotify_group_prio priority;	/* priority for sending events */
+	enum fsnotify_group_type type;		/* type of watched objects */
 	bool shutdown;		/* group is being shut down, don't queue more events */
 
 #define FSNOTIFY_GROUP_FLAG_USER	0x01 /* user allocated group */
@@ -279,6 +289,18 @@ struct fsnotify_group {
 #endif /* CONFIG_FANOTIFY */
 	};
 };
+
+static inline bool fsnotify_is_filesystem_watcher(
+					const struct fsnotify_group *group)
+{
+	return group->type == FSNOTIFY_GROUP_TYPE_FILESYSTEM;
+}
+
+static inline bool fsnotify_is_namespace_watcher(
+					const struct fsnotify_group *group)
+{
+	return group->type == FSNOTIFY_GROUP_TYPE_NAMESPACE;
+}
 
 /*
  * These helpers are used to prevent deadlock when reclaiming inodes with
@@ -727,6 +749,10 @@ static inline void fsnotify_update_flags(struct dentry *dentry)
 /* called from fsnotify listeners, such as fanotify or dnotify */
 
 /* create a new group */
+extern struct fsnotify_group *__fsnotify_alloc_group(
+				const struct fsnotify_ops *ops,
+				enum fsnotify_group_type type,
+				int flags, gfp_t gfp);
 extern struct fsnotify_group *fsnotify_alloc_group(
 				const struct fsnotify_ops *ops,
 				int flags);
