@@ -966,6 +966,9 @@ static void fanotify_insert_event(struct fsnotify_group *group,
 #define ASSERT_FS_EVENT(fan_mask, fsn_mask) \
 	BUILD_BUG_ON((u32)(fan_mask) != (fsn_mask) || \
 		     FAN_EVENT_TYPE(fan_mask) != FSNOTIFY_GROUP_TYPE_FILESYSTEM)
+#define ASSERT_NAMESPACE_EVENT(fan_mask, fsn_mask) \
+	BUILD_BUG_ON((u32)(fan_mask) != (fsn_mask) || \
+		     FAN_EVENT_TYPE(fan_mask) != FSNOTIFY_GROUP_TYPE_NAMESPACE)
 
 static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 				 const void *data, int data_type,
@@ -1004,8 +1007,14 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	ASSERT_FS_EVENT(FAN_FS_ERROR, FS_ERROR);
 	ASSERT_FS_EVENT(FAN_RENAME, FS_RENAME);
 	ASSERT_FS_EVENT(FAN_PRE_ACCESS, FS_PRE_ACCESS);
+	/* Assert backward compat mount events */
+	BUILD_BUG_ON(FAN_MNT_ATTACH != (u32)FAN_NS_MNT_ATTACH);
+	BUILD_BUG_ON(FAN_MNT_DETACH != (u32)FAN_NS_MNT_DETACH);
+	/* Assert "strong typed" events for namespace watcher */
+	ASSERT_NAMESPACE_EVENT(FAN_NS_MNT_ATTACH, FSN_MNT_ATTACH);
+	ASSERT_NAMESPACE_EVENT(FAN_NS_MNT_DETACH, FSN_MNT_DETACH);
 
-	BUILD_BUG_ON(HWEIGHT64(ALL_FANOTIFY_EVENT_BITS) != 24);
+	BUILD_BUG_ON(HWEIGHT64(ALL_FANOTIFY_EVENT_BITS) != 25);
 
 	mask = fanotify_group_event_mask(group, iter_info, &match_mask,
 					 mask, data, data_type, dir);

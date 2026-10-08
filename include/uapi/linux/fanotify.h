@@ -56,10 +56,14 @@
 /*
  * Events that user-space can request when watching namespaces
  *
- * NOTE: These values may overload filesystem events, but not event flags
+ * NOTE: Lower 32bit values may overload filesystem events, but not event flags
  */
+/* Backward compat mount events - cannot be mixed with other events */
 #define FAN_MNT_ATTACH		0x0001000000UL	/* Mount was attached */
 #define FAN_MNT_DETACH		0x0002000000UL	/* Mount was detached */
+/* "Strong typed" mount events - may be mixed with other namespace events */
+#define FAN_NS_MNT_ATTACH	0x0101000000UL	/* Mount was attached */
+#define FAN_NS_MNT_DETACH	0x0102000000UL	/* Mount was detached */
 
 /* flags used for fanotify_init() */
 #define FAN_CLOEXEC		0x00000001

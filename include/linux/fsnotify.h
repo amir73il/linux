@@ -501,17 +501,17 @@ static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
 
 static inline void fsnotify_mnt_attach(struct mnt_namespace *ns, struct vfsmount *mnt)
 {
-	fsnotify_mnt(FS_MNT_ATTACH, ns, mnt);
+	fsnotify_mnt(FSN_MNT_ATTACH, ns, mnt);
 }
 
 static inline void fsnotify_mnt_detach(struct mnt_namespace *ns, struct vfsmount *mnt)
 {
-	fsnotify_mnt(FS_MNT_DETACH, ns, mnt);
+	fsnotify_mnt(FSN_MNT_DETACH, ns, mnt);
 }
 
 static inline void fsnotify_mnt_move(struct mnt_namespace *ns, struct vfsmount *mnt)
 {
-	fsnotify_mnt(FS_MNT_MOVE, ns, mnt);
+	fsnotify_mnt(FSN_MNT_MOVE, ns, mnt);
 }
 
 #endif	/* _LINUX_FS_NOTIFY_H */

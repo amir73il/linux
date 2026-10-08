@@ -79,9 +79,9 @@
  *
  * NOTE: These values may overload filesystem events, but not event flags
  */
-#define FS_MNT_ATTACH		0x01000000	/* Mount was attached */
-#define FS_MNT_DETACH		0x02000000	/* Mount was detached */
-#define FS_MNT_MOVE		(FS_MNT_ATTACH | FS_MNT_DETACH)
+#define FSN_MNT_ATTACH		0x01000000	/* Mount was attached */
+#define FSN_MNT_DETACH		0x02000000	/* Mount was detached */
+#define FSN_MNT_MOVE		(FSN_MNT_ATTACH | FSN_MNT_DETACH)
 
 
 /*
@@ -126,7 +126,7 @@
 				       FS_IN_IGNORED | FS_ERROR)
 
 /* Mount tree monitoring events */
-#define FSNOTIFY_MNT_EVENTS (FS_MNT_ATTACH | FS_MNT_DETACH)
+#define FSNOTIFY_MNT_EVENTS (FSN_MNT_ATTACH | FSN_MNT_DETACH)
 
 /* Events that can be reported to backends on namespace watchers */
 #define FSNOTIFY_EVENTS_ON_NAMESPACE (FSNOTIFY_MNT_EVENTS | FS_Q_OVERFLOW)
