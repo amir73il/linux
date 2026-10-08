@@ -5,33 +5,43 @@
 #include <linux/types.h>
 
 /*
+ * Bits 32..39 of the 64-bit event mask encodes the watcher type.
+ * Filesystem events have type 0, so legacy event constants are
+ * filesystem events.
+ */
+#define FAN_EVENT_TYPE_SHIFT	32
+#define FAN_EVENT_TYPE_MASK	(0xffULL << FAN_EVENT_TYPE_SHIFT)
+#define FAN_EVENT_TYPE(mask)	\
+	(((mask) & FAN_EVENT_TYPE_MASK) >> FAN_EVENT_TYPE_SHIFT)
+
+/*
  * Events that user-space can request when watching filesystems
  */
-#define FAN_ACCESS		0x00000001	/* File was accessed */
-#define FAN_MODIFY		0x00000002	/* File was modified */
-#define FAN_ATTRIB		0x00000004	/* Metadata changed */
-#define FAN_CLOSE_WRITE		0x00000008	/* Writable file closed */
-#define FAN_CLOSE_NOWRITE	0x00000010	/* Unwritable file closed */
-#define FAN_OPEN		0x00000020	/* File was opened */
-#define FAN_MOVED_FROM		0x00000040	/* File was moved from X */
-#define FAN_MOVED_TO		0x00000080	/* File was moved to Y */
-#define FAN_CREATE		0x00000100	/* Subfile was created */
-#define FAN_DELETE		0x00000200	/* Subfile was deleted */
-#define FAN_DELETE_SELF		0x00000400	/* Self was deleted */
-#define FAN_MOVE_SELF		0x00000800	/* Self was moved */
-#define FAN_OPEN_EXEC		0x00001000	/* File was opened for exec */
+#define FAN_ACCESS		0x0000000001UL	/* File was accessed */
+#define FAN_MODIFY		0x0000000002UL	/* File was modified */
+#define FAN_ATTRIB		0x0000000004UL	/* Metadata changed */
+#define FAN_CLOSE_WRITE		0x0000000008UL	/* Writable file closed */
+#define FAN_CLOSE_NOWRITE	0x0000000010UL	/* Unwritable file closed */
+#define FAN_OPEN		0x0000000020UL	/* File was opened */
+#define FAN_MOVED_FROM		0x0000000040UL	/* File was moved from X */
+#define FAN_MOVED_TO		0x0000000080UL	/* File was moved to Y */
+#define FAN_CREATE		0x0000000100UL	/* Subfile was created */
+#define FAN_DELETE		0x0000000200UL	/* Subfile was deleted */
+#define FAN_DELETE_SELF		0x0000000400UL	/* Self was deleted */
+#define FAN_MOVE_SELF		0x0000000800UL	/* Self was moved */
+#define FAN_OPEN_EXEC		0x0000001000UL	/* File was opened for exec */
 
-#define FAN_Q_OVERFLOW		0x00004000	/* Event queued overflowed */
-#define FAN_FS_ERROR		0x00008000	/* Filesystem error */
+#define FAN_Q_OVERFLOW		0x0000004000UL	/* Event queued overflowed */
+#define FAN_FS_ERROR		0x0000008000UL	/* Filesystem error */
 
-#define FAN_OPEN_PERM		0x00010000	/* File open in perm check */
-#define FAN_ACCESS_PERM		0x00020000	/* File accessed in perm check */
-#define FAN_OPEN_EXEC_PERM	0x00040000	/* File open/exec in perm check */
-/* #define FAN_DIR_MODIFY	0x00080000 */	/* Deprecated (reserved) */
+#define FAN_OPEN_PERM		0x0000010000UL	/* File open in perm check */
+#define FAN_ACCESS_PERM		0x0000020000UL	/* File accessed in perm check */
+#define FAN_OPEN_EXEC_PERM	0x0000040000UL	/* File open/exec in perm check */
+/* #define FAN_DIR_MODIFY	0x0000080000UL *//* Deprecated (reserved) */
 
-#define FAN_PRE_ACCESS		0x00100000	/* Pre-content access hook */
+#define FAN_PRE_ACCESS		0x0000100000UL	/* Pre-content access hook */
 
-#define FAN_RENAME		0x10000000	/* File was renamed */
+#define FAN_RENAME		0x0010000000UL	/* File was renamed */
 
 /* helper events */
 #define FAN_CLOSE		(FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE) /* close */
@@ -40,16 +50,16 @@
 /*
  * Filter flags for watching filesystems
  */
-#define FAN_EVENT_ON_CHILD	0x08000000	/* Interested in child events */
-#define FAN_ONDIR		0x40000000	/* Event occurred against dir */
+#define FAN_EVENT_ON_CHILD	0x0008000000UL	/* Interested in child events */
+#define FAN_ONDIR		0x0040000000UL	/* Event occurred against dir */
 
 /*
  * Events that user-space can request when watching namespaces
  *
  * NOTE: These values may overload filesystem events, but not event flags
  */
-#define FAN_MNT_ATTACH		0x01000000	/* Mount was attached */
-#define FAN_MNT_DETACH		0x02000000	/* Mount was detached */
+#define FAN_MNT_ATTACH		0x0001000000UL	/* Mount was attached */
+#define FAN_MNT_DETACH		0x0002000000UL	/* Mount was detached */
 
 /* flags used for fanotify_init() */
 #define FAN_CLOEXEC		0x00000001
