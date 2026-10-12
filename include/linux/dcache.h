@@ -236,7 +236,8 @@ enum dentry_flags {
 	DCACHE_PAR_LOOKUP		= BIT(24),	/* being looked up (with parent locked shared) */
 	DCACHE_DENTRY_CURSOR		= BIT(25),
 	DCACHE_NORCU			= BIT(26),	/* No RCU delay for freeing */
-	DCACHE_PERSISTENT		= BIT(27)
+	DCACHE_PERSISTENT		= BIT(27),
+	DCACHE_UNCOVERED		= BIT(28),	/* lost its mounts on its way out */
 };
 
 #define DCACHE_MANAGED_DENTRY \

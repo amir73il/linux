@@ -2092,25 +2092,42 @@ all_done: // pure jump
  * don't reveal the underyling dentry during refwalk. In rcuwalk we
  * catch this via d_seq and another lookup for the name. Give the same
  * guarantee in refwalk.
+ *
+ * Only a dentry that still had mounts when its name went away matters.
+ * __detach_mounts() marks it before the mounts are detached, so a walk
+ * that doesn't find them anymore sees the mark. Any other dentry is fine
+ * to step onto. The walk found the name before it was removed.
+ *
+ * The walk fails with -ESTALE and is repeated with LOOKUP_REVAL. That is
+ * the last attempt, so there it fails with -ENOENT.
  */
-static bool unlink_may_reveal(struct nameidata *nd, int flags,
-			      struct path *path, struct dentry *dentry)
+static int unlink_may_reveal(struct nameidata *nd, int flags,
+			     struct path *path, struct dentry *dentry)
 {
+	/* rcuwalk catches this via d_seq */
+	if (nd->flags & LOOKUP_RCU)
+		return 0;
 	/* ".." and LOOKUP_DOWN may land on an unhashed directory */
 	if (flags & WALK_NOFOLLOW)
-		return false;
-	if (nd->flags & LOOKUP_REVAL)
-		return false;
-	/* We crossed onto a mount and the name led us here while it still existed */
-	if (path->mnt != nd->path.mnt)
-		return false;
-	/* only a name on its way out is flagged */
-	if (likely(!cant_mount(dentry)))
-		return false;
+		return 0;
+	/*
+	 * We crossed onto the root of a mount and the name led us there
+	 * while it still existed. The reference on @dentry went with the
+	 * first crossing and a race with several mount --move can lead
+	 * back to the mount we started on, so compare the dentries.
+	 */
+	if (path->dentry != dentry)
+		return 0;
+	/* only a name that went away while covered is flagged */
+	if (likely(!(READ_ONCE(dentry->d_flags) & DCACHE_UNCOVERED)))
+		return 0;
+	/* d_invalidate() in ->unlink() detaches before dont_mount() runs */
 	if (!d_unlinked(dentry))
-		return false;
+		return 0;
 	dput(no_free_ptr(path->dentry));
-	return true;
+	if (path->mnt != nd->path.mnt)
+		mntput(path->mnt);
+	return nd->flags & LOOKUP_REVAL ? -ENOENT : -ESTALE;
 }
 
 /*
@@ -2131,6 +2148,9 @@ static noinline const char *step_into_slowpath(struct nameidata *nd, int flags,
 	err = handle_mounts(nd, dentry, &path);
 	if (unlikely(err < 0))
 		return ERR_PTR(err);
+	err = unlink_may_reveal(nd, flags, &path, dentry);
+	if (unlikely(err))
+		return ERR_PTR(err);
 	inode = path.dentry->d_inode;
 	if (likely(!d_is_symlink(path.dentry)) ||
 	   ((flags & WALK_TRAILING) && !(nd->flags & LOOKUP_FOLLOW)) ||
@@ -2142,8 +2162,6 @@ static noinline const char *step_into_slowpath(struct nameidata *nd, int flags,
 			if (unlikely(!inode))
 				return ERR_PTR(-ENOENT);
 		} else {
-			if (unlikely(unlink_may_reveal(nd, flags, &path, dentry)))
-				return ERR_PTR(-ESTALE);
 			dput(nd->path.dentry);
 			if (nd->path.mnt != path.mnt)
 				mntput(nd->path.mnt);
