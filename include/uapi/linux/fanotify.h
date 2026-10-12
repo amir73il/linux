@@ -14,6 +14,11 @@
 #define FAN_EVENT_TYPE(mask)	\
 	(((mask) & FAN_EVENT_TYPE_MASK) >> FAN_EVENT_TYPE_SHIFT)
 
+/* Match event mask to any event in @event_set of the same watcher type */
+#define FAN_EVENT_MASK_MATCH(mask, event_set)			\
+	(FAN_EVENT_TYPE(mask) == FAN_EVENT_TYPE(event_set) &&	\
+	 ((mask) & (event_set) & ~FAN_EVENT_TYPE_MASK))
+
 /*
  * Events that user-space can request when watching filesystems
  */
@@ -295,5 +300,9 @@ struct fanotify_response_info_audit_rule {
 #define FAN_EVENT_OK(meta, len)	((long)(len) >= (long)FAN_EVENT_METADATA_LEN && \
 				(long)(meta)->event_len >= (long)FAN_EVENT_METADATA_LEN && \
 				(long)(meta)->event_len <= (long)(len))
+
+/* Was one of the events in @event_set reported in the event? */
+#define FAN_EVENT_MATCH(meta, event_set)			\
+	FAN_EVENT_MASK_MATCH((meta)->mask, event_set)
 
 #endif /* _UAPI_LINUX_FANOTIFY_H */
