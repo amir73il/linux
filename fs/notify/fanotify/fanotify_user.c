@@ -852,6 +852,10 @@ static ssize_t copy_event_to_user(struct fsnotify_group *group,
 	metadata.vers = FANOTIFY_METADATA_VERSION;
 	metadata.reserved = 0;
 	metadata.mask = fanotify_group_outgoing_events(group, event->mask);
+	/* Report watcher type of events that are not common to all types */
+	if (FAN_GROUP_FLAG(group, FANOTIFY_REPORT_TYPE) &&
+	    metadata.mask & ~FANOTIFY_COMMON_EVENT_BITS)
+		metadata.mask |= (u64)group->type << FAN_EVENT_TYPE_SHIFT;
 	metadata.pid = pid_vnr(event->pid);
 	/*
 	 * For an unprivileged listener, event->pid can be used to identify the
@@ -1669,6 +1673,9 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 			return -EINVAL;
 		if (flags & (FANOTIFY_FID_BITS | FAN_REPORT_FD_ERROR))
 			return -EINVAL;
+		/* The old and new mount event modes are mutually exclusive */
+		if ((flags & FAN_REPORT_MNT) && (flags & FAN_REPORT_MNTID))
+			return -EINVAL;
 	}
 
 	if (event_f_flags & ~FANOTIFY_INIT_ALL_EVENT_F_BITS)
@@ -1919,6 +1926,10 @@ static bool fanotify_is_valid_mask(struct fsnotify_group *group, int mark_type,
 	BUILD_BUG_ON(FANOTIFY_EVENTS_ON_NAMESPACE &
 		     FANOTIFY_COMMON_EVENT_BITS);
 
+	/* Only allow high bits in mask when reporting them in event->mask */
+	if (!FAN_GROUP_FLAG(group, FANOTIFY_REPORT_TYPE) && fan_mask->type)
+		return false;
+
 	switch (group->type) {
 	case FSNOTIFY_GROUP_TYPE_FILESYSTEM:
 		valid_mask = FANOTIFY_EVENTS_ON_FILESYSTEM |
@@ -1929,10 +1940,11 @@ static bool fanotify_is_valid_mask(struct fsnotify_group *group, int mark_type,
 	case FSNOTIFY_GROUP_TYPE_NAMESPACE:
 		/* Only report mount events on mntns mark */
 		if (mark_type == FAN_MARK_MNTNS &&
-		    FAN_GROUP_FLAG(group, FAN_REPORT_MNT))
+		    FAN_GROUP_FLAG(group, FANOTIFY_MNT_MODES))
 			valid_mask = FANOTIFY_MOUNT_EVENTS;
 		/* Classify the legacy mount events as namespace events */
-		if (fan_mask->mask & (FAN_MNT_ATTACH | FAN_MNT_DETACH))
+		if (fan_mask->mask & (FAN_MNT_ATTACH | FAN_MNT_DETACH) &&
+		    FAN_GROUP_FLAG(group, FAN_REPORT_MNT))
 			fan_mask->type = FSNOTIFY_GROUP_TYPE_NAMESPACE;
 		break;
 	}
@@ -1972,10 +1984,6 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 __mask,
 	ret = fanotify_mask_from_user(__mask, &fan_mask);
 	if (ret)
 		return ret;
-
-	/* we only use the lower 32 bits as of right now. */
-	if (fan_mask.type)
-		return -EINVAL;
 
 	if (flags & ~FANOTIFY_MARK_FLAGS)
 		return -EINVAL;
@@ -2261,7 +2269,7 @@ static int __init fanotify_user_setup(void)
 				     FANOTIFY_DEFAULT_MAX_USER_MARKS);
 
 	BUILD_BUG_ON(FANOTIFY_INIT_FLAGS & FANOTIFY_INTERNAL_GROUP_FLAGS);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 14);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 15);
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 11);
 
 	fanotify_mark_cache = KMEM_CACHE(fanotify_mark,

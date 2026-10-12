@@ -90,7 +90,8 @@
 #define FAN_REPORT_NAME		0x00000800	/* Report events with name */
 #define FAN_REPORT_TARGET_FID	0x00001000	/* Report dirent target id  */
 #define FAN_REPORT_FD_ERROR	0x00002000	/* event->fd can report error */
-#define FAN_REPORT_MNT		0x00004000	/* Report mount events */
+#define FAN_REPORT_MNT		0x00004000	/* Report FAN_MNT_ events */
+#define FAN_REPORT_MNTID	0x00008000	/* Report FAN_NS_MNT_ events */
 
 /* Convenience macro - FAN_REPORT_NAME requires FAN_REPORT_DIR_FID */
 #define FAN_REPORT_DFID_NAME	(FAN_REPORT_DIR_FID | FAN_REPORT_NAME)

@@ -25,12 +25,17 @@
 
 #define FANOTIFY_FID_BITS	(FAN_REPORT_DFID_NAME_TARGET)
 
+#define FANOTIFY_MNT_MODES	(FAN_REPORT_MNT | FAN_REPORT_MNTID)
+
+/* fanotify_init() flags that report watcher type in event mask */
+#define FANOTIFY_REPORT_TYPE	(FAN_REPORT_MNTID)
+
 /* fanotify_init() flags related to information reported with events */
 #define FANOTIFY_INFO_MODES	(FANOTIFY_FID_BITS | FAN_REPORT_PIDFD | \
-				 FAN_REPORT_MNT)
+				 FANOTIFY_MNT_MODES)
 
 /* fanotify_init() flags that create a namespace watcher */
-#define FANOTIFY_NAMESPACE_INIT_FLAGS	(FAN_REPORT_MNT)
+#define FANOTIFY_NAMESPACE_INIT_FLAGS	(FANOTIFY_MNT_MODES)
 
 /*
  * fanotify_init() flags that require CAP_SYS_ADMIN.
