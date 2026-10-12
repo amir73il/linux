@@ -42,11 +42,35 @@ FIXTURE(fanotify) {
 	int orig_root;
 	int ns_fd;
 	uint64_t root_id;
+	uint64_t events_mask;
+};
+
+FIXTURE_VARIANT(fanotify) {
+	uint64_t events_mask;
+};
+
+FIXTURE_VARIANT_ADD(fanotify, mnt) {
+	.events_mask = FAN_MNT_ATTACH | FAN_MNT_DETACH,
+};
+
+FIXTURE_VARIANT_ADD(fanotify, mntid) {
+	.events_mask = FAN_NS_MNT_ATTACH | FAN_NS_MNT_DETACH,
 };
 
 FIXTURE_SETUP(fanotify)
 {
 	int i, ret;
+
+	if (variant->events_mask & FAN_EVENT_TYPE_MASK) {
+		int fd;
+
+		fd = fanotify_init(FAN_REPORT_MNTID | FAN_NONBLOCK, 0);
+		if (fd < 0) {
+			ASSERT_EQ(errno, EINVAL);
+			SKIP(return, "FAN_REPORT_MNTID not supported");
+		}
+		close(fd);
+	}
 
 	ASSERT_EQ(unshare(CLONE_NEWNS), 0);
 
@@ -74,22 +98,33 @@ FIXTURE_SETUP(fanotify)
 	self->root_id = get_unique_mnt_id("/");
 	ASSERT_NE(self->root_id, 0);
 
+	uint64_t ns_event_type = FAN_NS_MNT_ATTACH & FAN_EVENT_TYPE_MASK;
+
+	self->events_mask = variant->events_mask;
+
 	for (i = 0; i < NUM_FAN_FDS; i++) {
-		self->fan_fd[i] = fanotify_init(FAN_REPORT_MNT | FAN_NONBLOCK,
-						0);
+		self->fan_fd[i] = fanotify_init(FAN_NONBLOCK |
+						(self->events_mask &
+						 FAN_EVENT_TYPE_MASK ?
+						 FAN_REPORT_MNTID :
+						 FAN_REPORT_MNT), 0);
 		ASSERT_GE(self->fan_fd[i], 0);
 		ret = fanotify_mark(self->fan_fd[i], FAN_MARK_ADD |
-				    FAN_MARK_MNTNS,
-				    FAN_MNT_ATTACH | FAN_MNT_DETACH,
+				    FAN_MARK_MNTNS, self->events_mask,
 				    self->ns_fd, NULL);
 		ASSERT_EQ(ret, 0);
 		// On fd[0] we do an extra ADD that changes nothing.
 		// On fd[1]/fd[2] we REMOVE/FLUSH which removes the mark.
 		ret = fanotify_mark(self->fan_fd[i], mark_cmds[i] |
-				    FAN_MARK_MNTNS,
-				    FAN_MNT_ATTACH | FAN_MNT_DETACH,
+				    FAN_MARK_MNTNS, self->events_mask,
 				    self->ns_fd, NULL);
 		ASSERT_EQ(ret, 0);
+		/* The other watcher type is not allowed on this group */
+		ret = fanotify_mark(self->fan_fd[i], FAN_MARK_ADD |
+				    FAN_MARK_MNTNS,
+				    self->events_mask ^ ns_event_type,
+				    self->ns_fd, NULL);
+		ASSERT_NE(ret, 0);
 	}
 
 	self->rem = 0;
@@ -149,7 +184,9 @@ static uint64_t expect_notify(struct __test_metadata *const _metadata,
 	self->rem -= thislen;
 	self->next += thislen;
 
-	*mask = meta->mask;
+	ASSERT_EQ(meta->mask & FAN_EVENT_TYPE_MASK,
+		  self->events_mask & FAN_EVENT_TYPE_MASK);
+	*mask = meta->mask & ~FAN_EVENT_TYPE_MASK;
 	thislen -= sizeof(*meta);
 
 	mnt = ((void *) meta) + meta->event_len - thislen;
