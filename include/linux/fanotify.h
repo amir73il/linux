@@ -122,7 +122,7 @@
 					 FANOTIFY_ERROR_EVENTS)
 
 /* Mount tree monitoring events */
-#define FANOTIFY_MOUNT_EVENTS	(FAN_MNT_ATTACH | FAN_MNT_DETACH)
+#define FANOTIFY_MOUNT_EVENTS	(FAN_NS_MNT_ATTACH | FAN_NS_MNT_DETACH)
 
 /* Events that user can request to be notified on namespace watchers */
 #define FANOTIFY_EVENTS_ON_NAMESPACE	(FANOTIFY_MOUNT_EVENTS)
