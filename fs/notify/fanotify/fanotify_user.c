@@ -1873,7 +1873,7 @@ static int fanotify_events_supported(struct fsnotify_group *group,
 static bool fanotify_is_valid_mask(struct fsnotify_group *group, int mark_type,
 				   u64 mask)
 {
-	u32 valid_mask = 0;
+	u64 valid_mask = 0;
 
 	/*
 	 * Event bits for different group type may be overloaded but event
