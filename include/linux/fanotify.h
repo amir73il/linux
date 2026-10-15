@@ -28,14 +28,15 @@
 #define FANOTIFY_MNT_MODES	(FAN_REPORT_MNT | FAN_REPORT_MNTID)
 
 /* fanotify_init() flags that report watcher type in event mask */
-#define FANOTIFY_REPORT_TYPE	(FAN_REPORT_MNTID)
+#define FANOTIFY_REPORT_TYPE	(FAN_REPORT_MNTID | FAN_REPORT_NSID)
 
 /* fanotify_init() flags related to information reported with events */
 #define FANOTIFY_INFO_MODES	(FANOTIFY_FID_BITS | FAN_REPORT_PIDFD | \
-				 FANOTIFY_MNT_MODES)
+				 FANOTIFY_MNT_MODES | FAN_REPORT_NSID)
 
 /* fanotify_init() flags that create a namespace watcher */
-#define FANOTIFY_NAMESPACE_INIT_FLAGS	(FANOTIFY_MNT_MODES)
+#define FANOTIFY_NAMESPACE_INIT_FLAGS	(FANOTIFY_MNT_MODES | \
+					 FAN_REPORT_NSID)
 
 /*
  * fanotify_init() flags that require CAP_SYS_ADMIN.
@@ -69,7 +70,8 @@
 #define FANOTIFY_INTERNAL_GROUP_FLAGS	(FANOTIFY_UNPRIV)
 
 #define FANOTIFY_MARK_TYPE_BITS	(FAN_MARK_INODE | FAN_MARK_MOUNT | \
-				 FAN_MARK_FILESYSTEM | FAN_MARK_MNTNS)
+				 FAN_MARK_FILESYSTEM | FAN_MARK_MNTNS | \
+				 FAN_MARK_USERNS)
 
 #define FANOTIFY_MARK_CMD_BITS	(FAN_MARK_ADD | FAN_MARK_REMOVE | \
 				 FAN_MARK_FLUSH)
@@ -129,8 +131,12 @@
 /* Mount tree monitoring events */
 #define FANOTIFY_MOUNT_EVENTS	(FAN_NS_MNT_ATTACH | FAN_NS_MNT_DETACH)
 
+/* Namespace tree monitoring events */
+#define FANOTIFY_NS_EVENTS	(FAN_NS_CREATE | FAN_NS_DELETE)
+
 /* Events that user can request to be notified on namespace watchers */
-#define FANOTIFY_EVENTS_ON_NAMESPACE	(FANOTIFY_MOUNT_EVENTS)
+#define FANOTIFY_EVENTS_ON_NAMESPACE	(FANOTIFY_MOUNT_EVENTS | \
+					 FANOTIFY_NS_EVENTS)
 
 /* Extra flags that may be reported with event or control handling of events */
 #define FANOTIFY_EVENT_FLAGS	(FAN_EVENT_ON_CHILD | FAN_ONDIR)

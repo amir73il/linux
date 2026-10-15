@@ -20,6 +20,7 @@
 #include <linux/statfs.h>
 #include <linux/exportfs.h>
 #include <linux/pidfd.h>
+#include <linux/proc_fs.h>
 
 #include <asm/ioctls.h>
 
@@ -214,6 +215,7 @@ struct kmem_cache *fanotify_fid_event_cachep __ro_after_init;
 struct kmem_cache *fanotify_path_event_cachep __ro_after_init;
 struct kmem_cache *fanotify_perm_event_cachep __ro_after_init;
 struct kmem_cache *fanotify_mnt_event_cachep __ro_after_init;
+struct kmem_cache *fanotify_ns_event_cachep __ro_after_init;
 
 #define FANOTIFY_EVENT_ALIGN 4
 #define FANOTIFY_FID_INFO_HDR_LEN \
@@ -226,6 +228,8 @@ struct kmem_cache *fanotify_mnt_event_cachep __ro_after_init;
 	(sizeof(struct fanotify_event_info_range))
 #define FANOTIFY_MNT_INFO_LEN \
 	(sizeof(struct fanotify_event_info_mnt))
+#define FANOTIFY_NS_INFO_LEN \
+	(sizeof(struct fanotify_event_info_ns))
 
 static int fanotify_fid_info_len(int fh_len, int name_len)
 {
@@ -283,6 +287,8 @@ static size_t fanotify_event_len(unsigned int info_mode,
 	}
 	if (fanotify_is_mnt_event(event))
 		event_len += FANOTIFY_MNT_INFO_LEN;
+	if (fanotify_is_ns_event(event))
+		event_len += FANOTIFY_NS_INFO_LEN;
 
 	if (info_mode & FAN_REPORT_PIDFD)
 		event_len += FANOTIFY_PIDFD_INFO_LEN;
@@ -522,6 +528,26 @@ static size_t copy_mnt_info_to_user(struct fanotify_event *event,
 		return -EFAULT;
 
 	info.mnt_id = FANOTIFY_ME(event)->mnt_id;
+
+	if (copy_to_user(buf, &info, sizeof(info)))
+		return -EFAULT;
+
+	return info.hdr.len;
+}
+
+static size_t copy_ns_info_to_user(struct fanotify_event *event,
+				   char __user *buf, int count)
+{
+	struct fanotify_event_info_ns info = { };
+
+	info.hdr.info_type = FAN_EVENT_INFO_TYPE_NS;
+	info.hdr.len = sizeof(info);
+
+	if (WARN_ON(count < info.hdr.len))
+		return -EFAULT;
+
+	info.self_nsid  = FANOTIFY_NSE(event)->self_nsid;
+	info.owner_nsid = FANOTIFY_NSE(event)->owner_nsid;
 
 	if (copy_to_user(buf, &info, sizeof(info)))
 		return -EFAULT;
@@ -823,6 +849,15 @@ static int copy_info_records_to_user(struct fanotify_event *event,
 
 	if (fanotify_is_mnt_event(event)) {
 		ret = copy_mnt_info_to_user(event, buf, count);
+		if (ret < 0)
+			return ret;
+		buf += ret;
+		count -= ret;
+		total_bytes += ret;
+	}
+
+	if (fanotify_is_ns_event(event)) {
+		ret = copy_ns_info_to_user(event, buf, count);
 		if (ret < 0)
 			return ret;
 		buf += ret;
@@ -1931,10 +1966,16 @@ static bool fanotify_is_valid_mask(struct fsnotify_group *group, int mark_type,
 			valid_mask &= ~FANOTIFY_PERM_EVENTS;
 		break;
 	case FSNOTIFY_GROUP_TYPE_NAMESPACE:
-		/* Only report mount events on mntns mark */
+		/*
+		 * Only report mount events on mntns mark.
+		 * Only report namespace events on userns mark.
+		 */
 		if (mark_type == FAN_MARK_MNTNS &&
 		    FAN_GROUP_FLAG(group, FANOTIFY_MNT_MODES))
 			valid_mask = FANOTIFY_MOUNT_EVENTS;
+		else if (mark_type == FAN_MARK_USERNS &&
+			 FAN_GROUP_FLAG(group, FAN_REPORT_NSID))
+			valid_mask = FANOTIFY_NS_EVENTS;
 		/* Classify the legacy mount events as namespace events */
 		if (fan_mask.mask & (FAN_MNT_ATTACH | FAN_MNT_DETACH) &&
 		    FAN_GROUP_FLAG(group, FAN_REPORT_MNT))
@@ -1992,6 +2033,10 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 __mask,
 		break;
 	case FAN_MARK_MNTNS:
 		obj_type = FSNOTIFY_OBJ_TYPE_MNTNS;
+		mark_group_type = FSNOTIFY_GROUP_TYPE_NAMESPACE;
+		break;
+	case FAN_MARK_USERNS:
+		obj_type = FSNOTIFY_OBJ_TYPE_USERNS;
 		mark_group_type = FSNOTIFY_GROUP_TYPE_NAMESPACE;
 		break;
 	default:
@@ -2155,6 +2200,12 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 __mask,
 			goto path_put_and_out;
 		user_ns = mntns->user_ns;
 		obj = mntns;
+	} else if (obj_type == FSNOTIFY_OBJ_TYPE_USERNS) {
+		ret = -EINVAL;
+		user_ns = userns_from_dentry(path.dentry);
+		if (!user_ns)
+			goto path_put_and_out;
+		obj = user_ns;
 	}
 
 	ret = -EPERM;
@@ -2258,8 +2309,8 @@ static int __init fanotify_user_setup(void)
 				     FANOTIFY_DEFAULT_MAX_USER_MARKS);
 
 	BUILD_BUG_ON(FANOTIFY_INIT_FLAGS & FANOTIFY_INTERNAL_GROUP_FLAGS);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 15);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 11);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 16);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 12);
 
 	fanotify_mark_cache = KMEM_CACHE(fanotify_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);
@@ -2272,6 +2323,7 @@ static int __init fanotify_user_setup(void)
 			KMEM_CACHE(fanotify_perm_event, SLAB_PANIC);
 	}
 	fanotify_mnt_event_cachep = KMEM_CACHE(fanotify_mnt_event, SLAB_PANIC);
+	fanotify_ns_event_cachep = KMEM_CACHE(fanotify_ns_event, SLAB_PANIC);
 
 	fanotify_max_queued_events = FANOTIFY_DEFAULT_MAX_EVENTS;
 	init_user_ns.ucount_max[UCOUNT_FANOTIFY_GROUPS] =

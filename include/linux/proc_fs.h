@@ -261,4 +261,6 @@ static inline void proc_make_permanent(struct proc_dir_entry *pde)
 #endif
 }
 
+struct user_namespace *userns_from_dentry(struct dentry *dentry);
+
 #endif /* _LINUX_PROC_FS_H */
