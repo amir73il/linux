@@ -166,6 +166,8 @@ static bool fanotify_should_merge(struct fanotify_event *old,
 						  FANOTIFY_EE(new));
 	case FANOTIFY_EVENT_TYPE_MNT:
 		return false;
+	case FANOTIFY_EVENT_TYPE_NS:
+		return false;
 	default:
 		WARN_ON_ONCE(1);
 	}
@@ -314,7 +316,8 @@ static u32 fanotify_group_event_mask(struct fsnotify_group *group,
 		 __func__, iter_info->report_mask, event_mask, data, data_type);
 
 	if (fsnotify_is_namespace_watcher(group)) {
-		if (data_type != FSNOTIFY_EVENT_MNT)
+		if (data_type != FSNOTIFY_EVENT_MNT &&
+		    data_type != FSNOTIFY_EVENT_NS)
 			return 0;
 	} else if (WARN_ON_ONCE(!fsnotify_is_filesystem_watcher(group))) {
 		return 0;
@@ -579,6 +582,23 @@ static struct fanotify_event *fanotify_alloc_mnt_event(u64 mnt_id, gfp_t gfp)
 
 	pevent->fae.type = FANOTIFY_EVENT_TYPE_MNT;
 	pevent->mnt_id = mnt_id;
+
+	return &pevent->fae;
+}
+
+static struct fanotify_event *fanotify_alloc_userns_event(
+					const struct fsnotify_ns *ns_data,
+					gfp_t gfp)
+{
+	struct fanotify_ns_event *pevent;
+
+	pevent = kmem_cache_alloc(fanotify_ns_event_cachep, gfp);
+	if (!pevent)
+		return NULL;
+
+	pevent->fae.type = FANOTIFY_EVENT_TYPE_NS;
+	pevent->self_nsid = ns_data->self_nsid;
+	pevent->owner_nsid = ns_data->owner_nsid;
 
 	return &pevent->fae;
 }
@@ -852,11 +872,14 @@ static struct fanotify_event *fanotify_alloc_namespace_watcher_event(
 				struct fsnotify_group *group, u64 mask,
 				const void *data, int data_type, gfp_t gfp)
 {
+	const struct fsnotify_ns *ns_data = fsnotify_data_ns(data, data_type);
 	u64 mnt_id = fsnotify_data_mnt_id(data, data_type);
 	struct fanotify_event *event = NULL;
 
 	if (mnt_id)
 		event = fanotify_alloc_mnt_event(mnt_id, gfp);
+	else if (ns_data)
+		event = fanotify_alloc_userns_event(ns_data, gfp);
 	else
 		WARN_ON_ONCE(1);
 
@@ -1013,6 +1036,8 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	/* Assert "strong typed" events for namespace watcher */
 	ASSERT_NAMESPACE_EVENT(FAN_NS_MNT_ATTACH, FSN_MNT_ATTACH);
 	ASSERT_NAMESPACE_EVENT(FAN_NS_MNT_DETACH, FSN_MNT_DETACH);
+	ASSERT_NAMESPACE_EVENT(FAN_NS_CREATE, FSN_NS_CREATE);
+	ASSERT_NAMESPACE_EVENT(FAN_NS_DELETE, FSN_NS_DELETE);
 
 	BUILD_BUG_ON(HWEIGHT64(ALL_FANOTIFY_EVENT_BITS) != 25);
 
@@ -1121,6 +1146,11 @@ static void fanotify_free_mnt_event(struct fanotify_event *event)
 	kmem_cache_free(fanotify_mnt_event_cachep, FANOTIFY_ME(event));
 }
 
+static void fanotify_free_ns_event(struct fanotify_event *event)
+{
+	kmem_cache_free(fanotify_ns_event_cachep, FANOTIFY_NSE(event));
+}
+
 static void fanotify_free_event(struct fsnotify_group *group,
 				struct fsnotify_event *fsn_event)
 {
@@ -1149,6 +1179,9 @@ static void fanotify_free_event(struct fsnotify_group *group,
 		break;
 	case FANOTIFY_EVENT_TYPE_MNT:
 		fanotify_free_mnt_event(event);
+		break;
+	case FANOTIFY_EVENT_TYPE_NS:
+		fanotify_free_ns_event(event);
 		break;
 	default:
 		WARN_ON_ONCE(1);

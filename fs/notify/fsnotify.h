@@ -6,6 +6,7 @@
 #include <linux/fsnotify.h>
 #include <linux/srcu.h>
 #include <linux/types.h>
+#include <linux/user_namespace.h>
 
 #include "../mount.h"
 
@@ -34,6 +35,12 @@ static inline struct super_block *fsnotify_conn_sb(
 }
 
 static inline struct mnt_namespace *fsnotify_conn_mntns(
+				struct fsnotify_mark_connector *conn)
+{
+	return conn->obj;
+}
+
+static inline struct user_namespace *fsnotify_conn_userns(
 				struct fsnotify_mark_connector *conn)
 {
 	return conn->obj;
@@ -101,6 +108,11 @@ static inline void fsnotify_clear_marks_by_sb(struct super_block *sb)
 static inline void fsnotify_clear_marks_by_mntns(struct mnt_namespace *mntns)
 {
 	fsnotify_destroy_marks(&mntns->n_fsnotify_marks);
+}
+
+static inline void fsnotify_clear_marks_by_userns(struct user_namespace *userns)
+{
+	fsnotify_destroy_marks(&userns->n_fsnotify_marks);
 }
 
 /*
