@@ -137,6 +137,11 @@ static void fanotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
 			seq_printf(m, "fanotify mnt_ns:%u ", mnt_ns->ns.inum);
 		seq_printf(m, "mflags:%x mask:%x ignored_mask:%x\n",
 			   mflags, mark->mask, mark->ignore_mask);
+	} else if (mark->connector->type == FSNOTIFY_OBJ_TYPE_USERNS) {
+		struct user_namespace *userns = fsnotify_conn_userns(mark->connector);
+
+		seq_printf(m, "fanotify user_ns_id:%llu mflags:%x mask:%x ignored_mask:%x\n",
+			   userns->ns.ns_id, mflags, mark->mask, mark->ignore_mask);
 	}
 }
 

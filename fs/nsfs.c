@@ -388,6 +388,26 @@ bool proc_ns_file(const struct file *file)
 }
 
 /**
+ * userns_from_dentry() - Return the user_namespace referenced by an nsfs dentry.
+ * @dentry: dentry of an open nsfs file
+ *
+ * Returns the user_namespace if @dentry is an nsfs file for a user namespace,
+ * NULL otherwise.  The caller is responsible for ensuring the returned pointer
+ * remains valid (e.g. by holding a reference to the dentry).
+ */
+struct user_namespace *userns_from_dentry(struct dentry *dentry)
+{
+	struct ns_common *ns;
+
+	if (dentry->d_op != &ns_dentry_operations)
+		return NULL;
+	ns = get_proc_ns(d_inode(dentry));
+	if (ns->ns_type != CLONE_NEWUSER)
+		return NULL;
+	return to_user_ns(ns);
+}
+
+/**
  * ns_match() - Returns true if current namespace matches dev/ino provided.
  * @ns: current namespace
  * @dev: dev_t from nsfs that will be matched against current nsfs
