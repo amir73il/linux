@@ -370,7 +370,7 @@ static enum ovl_write_mode ovl_write_mode(struct inode *inode,
 static int ovl_write_inode(struct inode *inode, struct writeback_control *wbc)
 {
 	struct inode *upper = ovl_inode_upper(inode);
-	int ret = 0;
+	int ret = 0, err;
 
 	if (!upper)
 		return 0;
@@ -388,8 +388,22 @@ static int ovl_write_inode(struct inode *inode, struct writeback_control *wbc)
 	else
 		ovl_flush_lazytime(inode->i_sb, upper);
 
-	if (ovl_upper_unfinished(upper))
+	if (ovl_upper_unfinished(upper)) {
 		ovl_mark_inode_dirty(inode);
+		return ret;
+	}
+
+	/*
+	 * The overlay inode becomes clean, and syncfs() will not look at
+	 * @upper.  If somebody else has written its pages and that has failed,
+	 * find out now.  filemap_write_and_wait() clears the same flags, so the
+	 * error is reported once.  fsync() goes by wb_err of the mapping, which
+	 * is left alone.  An error that the write above has returned is already
+	 * recorded.
+	 */
+	err = filemap_check_errors(upper->i_mapping);
+	if (err && !ret)
+		errseq_set(&inode->i_sb->s_wb_err, err);
 
 	return ret;
 }
