@@ -130,8 +130,13 @@ static void fanotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
 	} else if (mark->connector->type == FSNOTIFY_OBJ_TYPE_MNTNS) {
 		struct mnt_namespace *mnt_ns = fsnotify_conn_mntns(mark->connector);
 
-		seq_printf(m, "fanotify mnt_ns:%u mflags:%x mask:%x ignored_mask:%x\n",
-			   mnt_ns->ns.inum, mflags, mark->mask, mark->ignore_mask);
+		if (FAN_GROUP_FLAG(mark->group, FAN_REPORT_MNTID))
+			seq_printf(m, "fanotify mnt_ns_id:%llu ",
+				   mnt_ns->ns.ns_id);
+		else
+			seq_printf(m, "fanotify mnt_ns:%u ", mnt_ns->ns.inum);
+		seq_printf(m, "mflags:%x mask:%x ignored_mask:%x\n",
+			   mflags, mark->mask, mark->ignore_mask);
 	}
 }
 
