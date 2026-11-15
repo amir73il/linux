@@ -3605,6 +3605,9 @@ static int selinux_path_notify(const struct path *path, u64 mask,
 	case FSNOTIFY_OBJ_TYPE_MNTNS:
 		perm = FILE__WATCH_MOUNTNS;
 		break;
+	case FSNOTIFY_OBJ_TYPE_USERNS:
+		perm = FILE__WATCH_USERNS;
+		break;
 	default:
 		return -EINVAL;
 	}
