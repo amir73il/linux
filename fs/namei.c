@@ -1958,6 +1958,16 @@ static struct dentry *lookup_slow_killable(const struct qstr *name,
 	return res;
 }
 
+static struct dentry *lookup_slow_notify(struct nameidata *nd)
+{
+	int ret = fsnotify_lookup_perm(nd->path.dentry, &nd->last, &nd->path);
+
+	if (unlikely(ret < 0))
+		return ERR_PTR(ret);
+
+	return lookup_slow(&nd->last, nd->path.dentry, nd->flags);
+}
+
 static inline int may_lookup(const struct mnt_idmap *idmap,
 			     struct nameidata *restrict nd)
 {
@@ -2285,7 +2295,7 @@ static __always_inline const char *walk_component(struct nameidata *nd, int flag
 	if (IS_ERR(dentry))
 		return ERR_CAST(dentry);
 	if (unlikely(!dentry)) {
-		dentry = lookup_slow(&nd->last, nd->path.dentry, nd->flags);
+		dentry = lookup_slow_notify(nd);
 		if (IS_ERR(dentry))
 			return ERR_CAST(dentry);
 	}
