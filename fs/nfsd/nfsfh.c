@@ -372,6 +372,29 @@ out:
 }
 
 /**
+ * fh_want_write - Get write access to an export
+ * @fhp: File handle of file to be written
+ *
+ * Caller must invoke fh_drop_write() when its write operation
+ * is complete.
+ *
+ * Returns 0 if the file handle's export can be written to. Otherwise
+ * the export is not prepared for updates, and the returned negative
+ * errno value reflects the reason for the failure.
+ */
+int fh_want_write(struct svc_fh *fhp)
+{
+	int ret;
+
+	if (fhp->fh_got_write)
+		return 0;
+	ret = mnt_want_write(fhp->fh_export->ex_path.mnt);
+	if (!ret)
+		fhp->fh_got_write = true;
+	return ret;
+}
+
+/**
  * __fh_verify - filehandle lookup and access checking
  * @rqstp: RPC transaction context, or NULL
  * @net: net namespace in which to perform the export lookup
