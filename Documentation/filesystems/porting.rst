@@ -1422,3 +1422,12 @@ helpers take a ``const struct mnt_idmap *``. mnt_idmap() and file_mnt_idmap()
 return one. The idmapping is immutable so nothing should have modified it
 anyway. References are taken and dropped via mnt_idmap_get() and
 mnt_idmap_put() as before, both accept a const pointer.
+
+---
+
+**mandatory**
+
+lookup_one_positive_unlocked() takes a new ``bool drop_negative`` argument.
+Pass true to not leave a negative dentry in dcache when the name is not
+found, which overlayfs does for lookups in its layers.  Pass false to keep
+the old behavior.

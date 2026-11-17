@@ -76,7 +76,8 @@ struct dentry *lookup_one_unlocked(const struct mnt_idmap *idmap,
 				   struct qstr *name, struct dentry *base);
 struct dentry *lookup_one_positive_unlocked(const struct mnt_idmap *idmap,
 					    struct qstr *name,
-					    struct dentry *base);
+					    struct dentry *base,
+					    bool drop_negative);
 struct dentry *lookup_one_positive_killable(const struct mnt_idmap *idmap,
 					    struct qstr *name,
 					    struct dentry *base);
