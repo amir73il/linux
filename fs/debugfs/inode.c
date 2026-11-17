@@ -30,6 +30,9 @@
 
 #include "internal.h"
 
+/* BUILD HACK: SB_I_PSEUDO from the pseudo series, for local testing only */
+#define SB_I_PSEUDO    0x00010000
+
 #define DEBUGFS_DEFAULT_MODE	0700
 
 static struct vfsmount *debugfs_mount;
@@ -275,6 +278,7 @@ static int debugfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		return err;
 
 	sb->s_op = &debugfs_super_operations;
+	sb->s_iflags |= SB_I_PSEUDO;	/* BUILD HACK */
 	set_default_d_op(sb, &debugfs_dops);
 	sb->s_d_flags |= DCACHE_DONTCACHE;
 

@@ -21,6 +21,9 @@
 
 #include "kernfs-internal.h"
 
+/* BUILD HACK: SB_I_PSEUDO from the pseudo series, for local testing only */
+#define SB_I_PSEUDO    0x00010000
+
 struct kmem_cache *kernfs_node_cache __ro_after_init;
 struct kmem_cache *kernfs_iattrs_cache __ro_after_init;
 struct kernfs_global_locks *kernfs_locks __ro_after_init;
@@ -300,6 +303,7 @@ static int kernfs_fill_super(struct super_block *sb, struct kernfs_fs_context *k
 	info->sb = sb;
 	/* Userspace would break if executables or devices appear on sysfs */
 	sb->s_iflags |= SB_I_NOEXEC | SB_I_NODEV;
+	sb->s_iflags |= SB_I_PSEUDO;	/* BUILD HACK */
 	sb->s_blocksize = PAGE_SIZE;
 	sb->s_blocksize_bits = PAGE_SHIFT;
 	sb->s_magic = kfc->magic;

@@ -19,6 +19,9 @@ struct ovl_opt_set {
 
 #define OVL_MAX_STACK 500
 
+/* BUILD HACK: SB_I_PSEUDO from the pseudo series, for local testing only */
+#define SB_I_PSEUDO    0x00010000
+
 struct ovl_fs_context_layer {
 	char *name;
 	struct path path;

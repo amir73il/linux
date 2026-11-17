@@ -26,6 +26,9 @@
 
 #include "internal.h"
 
+/* BUILD HACK: SB_I_PSEUDO from the pseudo series, for local testing only */
+#define SB_I_PSEUDO    0x00010000
+
 struct proc_fs_context {
 	struct pid_namespace	*pid_ns;
 	unsigned int		mask;
@@ -284,6 +287,7 @@ static int proc_fill_super(struct super_block *s, struct fs_context *fc)
 	 * top of it
 	 */
 	s->s_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;
+	s->s_iflags |= SB_I_PSEUDO;	/* BUILD HACK */
 
 	/* procfs dentries and inodes don't require IO to create */
 	s->s_shrink->seeks = 0;
