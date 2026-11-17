@@ -1005,6 +1005,11 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	if (!mask)
 		return 0;
 
+	/* Cannot handle pre-content lookup events without a path */
+	if (mask & FANOTIFY_PRE_DIR_CONTENT_EVENTS &&
+	    !fsnotify_data_path(data, data_type))
+		return -ENOENT;
+
 	pr_debug("%s: group=%p mask=%x report_mask=%x\n", __func__,
 		 group, mask, match_mask);
 

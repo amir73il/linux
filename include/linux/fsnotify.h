@@ -208,8 +208,17 @@ static inline int fsnotify_file_perm(struct file *file, int perm_mask)
 
 /*
  * fsnotify_lookup_perm - permission hook before name lookup
+ * @dentry: the directory in which @name is looked up
+ * @name: the name to look up
+ * @path: the path of the directory, or NULL for internal users
  *
- * Returns >0 if event was handled and allowed by userspace.
+ * If @path is NULL, the event is not sent to userspace, the hook only checks
+ * if the event would have been sent to userspace.
+ *
+ * Returns -EOPNOTSUPP if there are no pre-dir-content watchers on the sb,
+ * >0 if the event was handled and allowed by userspace, 0 if allowed and
+ * <0 if denied.  If @path is NULL, returns -ENOENT if the event would have
+ * been sent to userspace.
  */
 static inline int fsnotify_lookup_perm(struct dentry *dentry,
 				       const struct qstr *name,
@@ -234,8 +243,14 @@ static inline int fsnotify_lookup_perm(struct dentry *dentry,
 	 * filesystem may be modified in the context of permission events
 	 * (e.g. by HSM filling a dir on access), so sb freeze protection
 	 * must not be held.
+	 * If path is NULL, we do not send the event to userspace, we only
+	 * check if it would have been sent to userspace.
 	 */
-	lockdep_assert_once(sb_write_not_started(dir->i_sb));
+	lockdep_assert_once(!path || sb_write_not_started(dir->i_sb));
+
+	if (!path)
+		return fsnotify(FS_PRE_DIR_ACCESS, dir, FSNOTIFY_EVENT_INODE,
+				dir, name, NULL, 0);
 
 	return fsnotify(FS_PRE_DIR_ACCESS, path, FSNOTIFY_EVENT_PATH,
 			dir, name, NULL, 0);
