@@ -244,6 +244,7 @@ static inline void fanotify_info_copy_name2(struct fanotify_info *info,
 enum fanotify_event_type {
 	FANOTIFY_EVENT_TYPE_FID, /* fixed length */
 	FANOTIFY_EVENT_TYPE_FID_NAME, /* variable length */
+	FANOTIFY_EVENT_TYPE_FID_NAME_PERM, /* variable length perm event */
 	FANOTIFY_EVENT_TYPE_PATH,
 	FANOTIFY_EVENT_TYPE_PATH_PERM,
 	FANOTIFY_EVENT_TYPE_OVERFLOW, /* struct fanotify_event */
@@ -330,7 +331,8 @@ static inline __kernel_fsid_t *fanotify_event_fsid(struct fanotify_event *event)
 {
 	if (event->type == FANOTIFY_EVENT_TYPE_FID)
 		return &FANOTIFY_FE(event)->fsid;
-	else if (event->type == FANOTIFY_EVENT_TYPE_FID_NAME)
+	else if (event->type == FANOTIFY_EVENT_TYPE_FID_NAME ||
+		 event->type == FANOTIFY_EVENT_TYPE_FID_NAME_PERM)
 		return &FANOTIFY_NE(event)->fsid;
 	else if (event->type == FANOTIFY_EVENT_TYPE_FS_ERROR)
 		return &FANOTIFY_EE(event)->fsid;
@@ -343,7 +345,8 @@ static inline struct fanotify_fh *fanotify_event_object_fh(
 {
 	if (event->type == FANOTIFY_EVENT_TYPE_FID)
 		return &FANOTIFY_FE(event)->object_fh;
-	else if (event->type == FANOTIFY_EVENT_TYPE_FID_NAME)
+	else if (event->type == FANOTIFY_EVENT_TYPE_FID_NAME ||
+		 event->type == FANOTIFY_EVENT_TYPE_FID_NAME_PERM)
 		return fanotify_info_file_fh(&FANOTIFY_NE(event)->info);
 	else if (event->type == FANOTIFY_EVENT_TYPE_FS_ERROR)
 		return &FANOTIFY_EE(event)->object_fh;
@@ -354,7 +357,8 @@ static inline struct fanotify_fh *fanotify_event_object_fh(
 static inline struct fanotify_info *fanotify_event_info(
 						struct fanotify_event *event)
 {
-	if (event->type == FANOTIFY_EVENT_TYPE_FID_NAME)
+	if (event->type == FANOTIFY_EVENT_TYPE_FID_NAME ||
+	    event->type == FANOTIFY_EVENT_TYPE_FID_NAME_PERM)
 		return &FANOTIFY_NE(event)->info;
 	else
 		return NULL;
@@ -441,7 +445,6 @@ FANOTIFY_ME(struct fanotify_event *event)
  * user response.
  */
 struct fanotify_perm_event {
-	struct fanotify_event fae;
 	struct path path;
 	loff_t pos;			/* FANOTIFY_NO_RANGE if unavailable */
 	u64 count;
@@ -454,6 +457,11 @@ struct fanotify_perm_event {
 		struct fanotify_response_info_header hdr;
 		struct fanotify_response_info_audit_rule audit_rule;
 	};
+	/*
+	 * Overlaps with fanotify_name_event::fae when type is
+	 * FANOTIFY_EVENT_TYPE_FID_NAME_PERM - Keep at the end!
+	 */
+	struct fanotify_event fae;
 };
 
 static inline struct fanotify_perm_event *
@@ -495,7 +503,8 @@ static inline const struct path *fanotify_event_path(struct fanotify_event *even
 {
 	if (event->type == FANOTIFY_EVENT_TYPE_PATH)
 		return &FANOTIFY_PE(event)->path;
-	else if (event->type == FANOTIFY_EVENT_TYPE_PATH_PERM)
+	else if (event->type == FANOTIFY_EVENT_TYPE_PATH_PERM ||
+		 event->type == FANOTIFY_EVENT_TYPE_FID_NAME_PERM)
 		return &FANOTIFY_PERM(event)->path;
 	else
 		return NULL;

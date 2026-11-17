@@ -580,20 +580,13 @@ static struct fanotify_event *fanotify_alloc_mnt_event(u64 mnt_id, gfp_t gfp)
 	return &pevent->fae;
 }
 
-static struct fanotify_event *fanotify_alloc_perm_event(const void *data,
-							int data_type,
-							gfp_t gfp)
+static void fanotify_init_perm_event(struct fanotify_perm_event *pevent,
+				     const void *data, int data_type)
 {
 	const struct path *path = fsnotify_data_path(data, data_type);
 	const struct file_range *range =
 			    fsnotify_data_file_range(data, data_type);
-	struct fanotify_perm_event *pevent;
 
-	pevent = kmem_cache_alloc(fanotify_perm_event_cachep, gfp);
-	if (!pevent)
-		return NULL;
-
-	pevent->fae.type = FANOTIFY_EVENT_TYPE_PATH_PERM;
 	pevent->response = 0;
 	pevent->hdr.type = FAN_RESPONSE_INFO_NONE;
 	pevent->hdr.pad = 0;
@@ -604,6 +597,20 @@ static struct fanotify_event *fanotify_alloc_perm_event(const void *data,
 	pevent->pos = range ? range->pos : FANOTIFY_NO_RANGE;
 	pevent->count = range ? range->count : 0;
 	path_get(path);
+}
+
+static struct fanotify_event *fanotify_alloc_perm_event(const void *data,
+							int data_type,
+							gfp_t gfp)
+{
+	struct fanotify_perm_event *pevent;
+
+	pevent = kmem_cache_alloc(fanotify_perm_event_cachep, gfp);
+	if (!pevent)
+		return NULL;
+
+	pevent->fae.type = FANOTIFY_EVENT_TYPE_PATH_PERM;
+	fanotify_init_perm_event(pevent, data, data_type);
 
 	return &pevent->fae;
 }
@@ -634,11 +641,12 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *dir,
 							struct inode *child,
 							struct dentry *moved,
 							unsigned int *hash,
-							gfp_t gfp)
+							gfp_t gfp, bool perm)
 {
 	struct fanotify_name_event *fne;
 	struct fanotify_info *info;
 	struct fanotify_fh *dfh, *ffh;
+	struct fanotify_perm_event *pevent;
 	struct inode *dir2 = moved ? d_inode(moved->d_parent) : NULL;
 	const struct qstr *name2 = moved ? &moved->d_name : NULL;
 	unsigned int dir_fh_len = fanotify_encode_fh_len(dir);
@@ -659,11 +667,34 @@ static struct fanotify_event *fanotify_alloc_name_event(struct inode *dir,
 		size += FANOTIFY_FH_HDR_LEN + dir2_fh_len;
 	if (child_fh_len)
 		size += FANOTIFY_FH_HDR_LEN + child_fh_len;
+	if (perm) {
+		/*
+		 * fae must be the last member of fanotify_perm_event, so the
+		 * name event can follow it, but there may be tail padding
+		 * after fae (e.g. on 32-bit with 64-bit aligned u64).
+		 */
+		BUILD_BUG_ON(sizeof(*pevent) -
+			     offsetofend(struct fanotify_perm_event, fae) >=
+			     __alignof__(*pevent));
+		BUILD_BUG_ON(!IS_ALIGNED(offsetof(struct fanotify_perm_event, fae),
+					 __alignof__(*fne)));
+		size += offsetof(struct fanotify_perm_event, fae);
+	}
 	fne = kvmalloc(size, gfp);
 	if (!fne)
 		return NULL;
 
-	fne->fae.type = FANOTIFY_EVENT_TYPE_FID_NAME;
+	/*
+	 * fanotify_name_event follows fanotify_perm_event and they share the
+	 * fae member.
+	 */
+	if (perm) {
+		pevent = (void *)fne;
+		fne = FANOTIFY_NE(&pevent->fae);
+		fne->fae.type = FANOTIFY_EVENT_TYPE_FID_NAME_PERM;
+	} else {
+		fne->fae.type = FANOTIFY_EVENT_TYPE_FID_NAME;
+	}
 	fne->fsid = *fsid;
 	*hash ^= fanotify_hash_fsid(fsid);
 	info = &fne->info;
@@ -758,6 +789,7 @@ static struct fanotify_event *fanotify_alloc_event(
 	struct inode *dirid = fanotify_dfid_inode(mask, data, data_type, dir);
 	const struct path *path = fsnotify_data_path(data, data_type);
 	u64 mnt_id = fsnotify_data_mnt_id(data, data_type);
+	bool perm = fanotify_is_perm_event(mask);
 	struct mem_cgroup *old_memcg;
 	struct dentry *moved = NULL;
 	struct inode *child = NULL;
@@ -852,14 +884,18 @@ static struct fanotify_event *fanotify_alloc_event(
 	    pidfs_register_pid_gfp(pid, gfp))
 		goto out;
 
-	if (fanotify_is_perm_event(mask)) {
+	if (name_event && (file_name || moved || child || perm)) {
+		event = fanotify_alloc_name_event(dirid, fsid, file_name, child,
+						  moved, &hash, gfp, perm);
+		if (event && perm) {
+			fanotify_init_perm_event(FANOTIFY_PERM(event),
+						 data, data_type);
+		}
+	} else if (perm) {
 		event = fanotify_alloc_perm_event(data, data_type, gfp);
 	} else if (fanotify_is_error_event(mask)) {
 		event = fanotify_alloc_error_event(group, fsid, data,
 						   data_type, &hash);
-	} else if (name_event && (file_name || moved || child)) {
-		event = fanotify_alloc_name_event(dirid, fsid, file_name, child,
-						  moved, &hash, gfp);
 	} else if (fid_mode) {
 		event = fanotify_alloc_fid_event(id, fsid, &hash, gfp);
 	} else if (path) {
@@ -1042,6 +1078,13 @@ static void fanotify_free_perm_event(struct fanotify_event *event)
 	kmem_cache_free(fanotify_perm_event_cachep, FANOTIFY_PERM(event));
 }
 
+static void fanotify_free_name_perm_event(struct fanotify_event *event)
+{
+	path_put(fanotify_event_path(event));
+	/* Variable length perm event */
+	kvfree(FANOTIFY_PERM(event));
+}
+
 static void fanotify_free_fid_event(struct fanotify_event *event)
 {
 	struct fanotify_fid_event *ffe = FANOTIFY_FE(event);
@@ -1088,6 +1131,9 @@ static void fanotify_free_event(struct fsnotify_group *group,
 		break;
 	case FANOTIFY_EVENT_TYPE_FID_NAME:
 		fanotify_free_name_event(event);
+		break;
+	case FANOTIFY_EVENT_TYPE_FID_NAME_PERM:
+		fanotify_free_name_perm_event(event);
 		break;
 	case FANOTIFY_EVENT_TYPE_OVERFLOW:
 		kfree(event);
