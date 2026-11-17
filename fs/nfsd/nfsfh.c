@@ -10,6 +10,7 @@
 
 #include <linux/exportfs.h>
 #include <linux/nfs3.h>
+#include <linux/fsnotify.h>
 
 #include <linux/sunrpc/svcauth_gss.h>
 #include <crypto/utils.h>
@@ -371,6 +372,38 @@ out:
 	return error;
 }
 
+/*
+ * Returns 0 or a negative errno, so it can be called from fh_want_write().
+ */
+static int
+nfsd_pre_dir_content(struct svc_fh *fhp)
+{
+	int ret;
+
+	/* Pre-content event must be called with freeze protection */
+	if (fhp->fh_got_content || fhp->fh_got_write ||
+	    !d_can_lookup(fhp->fh_dentry))
+		return 0;
+
+	/*
+	 * Call pre-dir-content hook without child name to request populate of
+	 * the entire dir content.
+	 * If there is a pre-dir-content event listener, this call is expected
+	 * to set the DCACHE_HSM_ONCE flag and suppress the pre-dir-content
+	 * hooks from following lookup_one() calls after mnt_want_write().
+	 */
+	ret = fsnotify_lookup_perm(fhp->fh_dentry, NULL,
+				   &(struct path){
+					.dentry = fhp->fh_dentry,
+					.mnt = fhp->fh_export->ex_path.mnt,
+					});
+	if (unlikely(ret < 0))
+		return -EPERM;
+
+	fhp->fh_got_content = true;
+	return 0;
+}
+
 /**
  * fh_want_write - Get write access to an export
  * @fhp: File handle of file to be written
@@ -388,6 +421,11 @@ int fh_want_write(struct svc_fh *fhp)
 
 	if (fhp->fh_got_write)
 		return 0;
+
+	ret = nfsd_pre_dir_content(fhp);
+	if (ret)
+		return ret;
+
 	ret = mnt_want_write(fhp->fh_export->ex_path.mnt);
 	if (!ret)
 		fhp->fh_got_write = true;
@@ -503,6 +541,13 @@ __fh_verify(struct svc_rqst *rqstp,
 check_permissions:
 	/* Finally, check access permissions. */
 	error = nfsd_permission(cred, exp, dentry, access);
+
+	if (!error && (access & NFSD_MAY_EXEC)) {
+		int ret = nfsd_pre_dir_content(fhp);
+
+		if (ret)
+			error = nfserrno(ret);
+	}
 out:
 	trace_nfsd_fh_verify_err(rqstp, fhp, type, access, error);
 	if (error == nfserr_stale)
