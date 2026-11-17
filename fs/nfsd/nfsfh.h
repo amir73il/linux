@@ -84,7 +84,7 @@ typedef struct svc_fh {
 	struct dentry *		fh_dentry;	/* validated dentry */
 	struct svc_export *	fh_export;	/* export pointer */
 
-	bool			fh_want_write;	/* remount protection taken */
+	bool			fh_got_write;	/* remount protection taken */
 	bool			fh_no_wcc;	/* no wcc data needed */
 	bool			fh_no_atomic_attr;
 						/*
@@ -296,28 +296,7 @@ static inline bool fh_fsid_match(const struct knfsd_fh *fh1,
 	return true;
 }
 
-/**
- * fh_want_write - Get write access to an export
- * @fhp: File handle of file to be written
- *
- * Caller must invoke fh_drop_write() when its write operation
- * is complete.
- *
- * Returns 0 if the file handle's export can be written to. Otherwise
- * the export is not prepared for updates, and the returned negative
- * errno value reflects the reason for the failure.
- */
-static inline int fh_want_write(struct svc_fh *fhp)
-{
-	int ret;
-
-	if (fhp->fh_want_write)
-		return 0;
-	ret = mnt_want_write(fhp->fh_export->ex_path.mnt);
-	if (!ret)
-		fhp->fh_want_write = true;
-	return ret;
-}
+int fh_want_write(struct svc_fh *fhp);
 
 /**
  * fh_drop_write - Release write access on an export
@@ -325,8 +304,8 @@ static inline int fh_want_write(struct svc_fh *fhp)
  */
 static inline void fh_drop_write(struct svc_fh *fhp)
 {
-	if (fhp->fh_want_write) {
-		fhp->fh_want_write = false;
+	if (fhp->fh_got_write) {
+		fhp->fh_got_write = false;
 		mnt_drop_write(fhp->fh_export->ex_path.mnt);
 	}
 }
