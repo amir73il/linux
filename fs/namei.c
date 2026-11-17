@@ -1787,17 +1787,57 @@ static void lookup_drop_negative(struct dentry *dentry)
 }
 
 /*
+ * Pre-content permission check of a negative result of a fresh ->lookup()
+ * that was made with the parent inode locked, where we cannot block waiting
+ * for userspace to respond to a pre-content lookup event.
+ *
+ * The hook is called without a path, so no event is sent to userspace.  It
+ * only checks if the directory is watched for pre-dir-content events and was
+ * not populated yet (DCACHE_HSM_ONCE is not set).  If so, the negative result
+ * cannot be trusted, so drop the negative dentry and fail the lookup with the
+ * error returned by the hook (-ENOENT), so that the next lookup from a safe
+ * context will send the event and let HSM populate the directory.
+ * Positive results are always trusted.
+ *
+ * Callers that already called the hook from a safe context before taking the
+ * parent lock (e.g. path walk) pass LOOKUP_NONOTIFY to skip this check.
+ */
+static struct dentry *lookup_perm_negative(struct dentry *dir,
+					   const struct qstr *name,
+					   struct dentry *dentry,
+					   unsigned int flags)
+{
+	int error;
+
+	if ((flags & LOOKUP_NONOTIFY) ||
+	    !d_flags_negative(smp_load_acquire(&dentry->d_flags)))
+		return dentry;
+
+	error = fsnotify_lookup_perm(dir, name, NULL);
+	if (likely(error >= 0 || error == -EOPNOTSUPP))
+		return dentry;
+
+	lookup_drop_negative(dentry);
+	dput(dentry);
+	return ERR_PTR(error);
+}
+
+/*
  * Call the pre-content lookup hook before a create/remove/rename of @last in
  * @parent, from a context that does not hold the parent lock nor freeze
  * protection, so the HSM can populate @last (or the whole directory) first.
+ * If the event was not denied, add LOOKUP_NONOTIFY to @notify_flags, because
+ * the result of the locked lookup that follows can be trusted.
  */
-static int lookup_last_notify(struct path *parent, const struct qstr *last)
+static int lookup_last_notify(struct path *parent, const struct qstr *last,
+			      unsigned int *notify_flags)
 {
 	int error = fsnotify_lookup_perm(parent->dentry, last, parent);
 
 	if (unlikely(error < 0 && error != -EOPNOTSUPP))
 		return error;
 
+	*notify_flags |= LOOKUP_NONOTIFY;
 	return 0;
 }
 
@@ -1855,6 +1895,8 @@ static struct dentry *lookup_one_qstr_excl(const struct qstr *name,
 	if (unlikely(old)) {
 		dput(dentry);
 		dentry = old;
+	} else {
+		dentry = lookup_perm_negative(base, name, dentry, flags);
 	}
 found:
 	if (IS_ERR(dentry))
@@ -1940,6 +1982,7 @@ static struct dentry *__lookup_slow(const struct qstr *name,
 {
 	struct dentry *dentry, *old;
 	struct inode *inode = dir->d_inode;
+	int error;
 
 	/* Don't go there if it's already dead */
 	if (unlikely(IS_DEADDIR(inode)))
@@ -1949,7 +1992,7 @@ again:
 	if (IS_ERR(dentry))
 		return dentry;
 	if (unlikely(!d_in_lookup(dentry))) {
-		int error = d_revalidate(inode, name, dentry, flags);
+		error = d_revalidate(inode, name, dentry, flags);
 		if (unlikely(error <= 0)) {
 			if (!error) {
 				d_invalidate(dentry);
@@ -1965,6 +2008,8 @@ again:
 		if (unlikely(old)) {
 			dput(dentry);
 			dentry = old;
+		} else {
+			dentry = lookup_perm_negative(dir, name, dentry, flags);
 		}
 	}
 	return dentry;
@@ -2009,7 +2054,9 @@ static struct dentry *lookup_slow_notify(struct nameidata *nd)
 			return ERR_PTR(ret);
 	}
 
-	return lookup_slow(&nd->last, nd->path.dentry, nd->flags);
+	/* Avoid the hook for negative results of internal vfs callers */
+	return lookup_slow(&nd->last, nd->path.dentry,
+			   nd->flags | LOOKUP_NONOTIFY);
 }
 
 static inline int may_lookup(const struct mnt_idmap *idmap,
@@ -5141,6 +5188,7 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 	bool want_dir = lookup_flags & LOOKUP_DIRECTORY;
 	unsigned int reval_flag = lookup_flags & LOOKUP_REVAL;
 	unsigned int create_flags = LOOKUP_CREATE | LOOKUP_EXCL;
+	unsigned int notify_flags = 0;
 	enum last_type type;
 	int error;
 
@@ -5156,7 +5204,7 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 		goto out;
 
 	/* Let HSM populate the parent before taking freeze protection */
-	error = lookup_last_notify(path, &last);
+	error = lookup_last_notify(path, &last, &notify_flags);
 	if (unlikely(error)) {
 		dentry = ERR_PTR(error);
 		goto out;
@@ -5170,7 +5218,8 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 	 */
 	if (last.name[last.len] && !want_dir)
 		create_flags &= ~LOOKUP_CREATE;
-	dentry = start_dirop(path->dentry, &last, reval_flag | create_flags);
+	dentry = start_dirop(path->dentry, &last,
+			     reval_flag | create_flags | notify_flags);
 	if (IS_ERR(dentry))
 		goto out_drop_write;
 
@@ -5621,6 +5670,7 @@ int filename_rmdir(int dfd, struct filename *name)
 	struct qstr last;
 	enum last_type type;
 	unsigned int lookup_flags = 0;
+	unsigned int notify_flags = 0;
 	struct delegated_inode delegated_inode = { };
 retry:
 	error = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);
@@ -5641,7 +5691,7 @@ retry:
 		goto exit2;
 	}
 
-	error = lookup_last_notify(&path, &last);
+	error = lookup_last_notify(&path, &last, &notify_flags);
 	if (error)
 		goto exit2;
 
@@ -5649,7 +5699,7 @@ retry:
 	if (error)
 		goto exit2;
 
-	dentry = start_dirop(path.dentry, &last, lookup_flags);
+	dentry = start_dirop(path.dentry, &last, lookup_flags | notify_flags);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto exit3;
@@ -5771,6 +5821,7 @@ int filename_unlinkat(int dfd, struct filename *name)
 	struct inode *inode;
 	struct delegated_inode delegated_inode = { };
 	unsigned int lookup_flags = 0;
+	unsigned int notify_flags = 0;
 retry:
 	error = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);
 	if (error)
@@ -5780,7 +5831,7 @@ retry:
 	if (type != LAST_NORM)
 		goto exit_path_put;
 
-	error = lookup_last_notify(&path, &last);
+	error = lookup_last_notify(&path, &last, &notify_flags);
 	if (error)
 		goto exit_path_put;
 
@@ -5788,7 +5839,7 @@ retry:
 	if (error)
 		goto exit_path_put;
 retry_deleg:
-	dentry = start_dirop(path.dentry, &last, lookup_flags);
+	dentry = start_dirop(path.dentry, &last, lookup_flags | notify_flags);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto exit_drop_write;
@@ -6344,6 +6395,7 @@ int filename_renameat2(int olddfd, struct filename *from,
 	enum last_type old_type, new_type;
 	struct delegated_inode delegated_inode = { };
 	unsigned int lookup_flags = 0;
+	unsigned int notify_flags = 0;
 	bool should_retry = false;
 	int error;
 
@@ -6378,10 +6430,10 @@ retry:
 	if (new_type != LAST_NORM)
 		goto exit2;
 
-	error = lookup_last_notify(&old_path, &old_last);
+	error = lookup_last_notify(&old_path, &old_last, &notify_flags);
 	if (error)
 		goto exit2;
-	error = lookup_last_notify(&new_path, &new_last);
+	error = lookup_last_notify(&new_path, &new_last, &notify_flags);
 	if (error)
 		goto exit2;
 
@@ -6396,7 +6448,8 @@ retry_deleg:
 	rd.delegated_inode = &delegated_inode;
 	rd.flags	   = flags;
 
-	error = __start_renaming(&rd, lookup_flags, &old_last, &new_last);
+	error = __start_renaming(&rd, lookup_flags | notify_flags,
+				 &old_last, &new_last);
 	if (error)
 		goto exit_lock_rename;
 
