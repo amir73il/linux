@@ -40,5 +40,31 @@ ssize_t backing_file_splice_write(struct pipe_inode_info *pipe,
 				  struct backing_file_ctx *ctx);
 int backing_file_mmap(struct file *file, struct vm_area_struct *vma,
 		      struct backing_file_ctx *ctx);
+struct file *backing_file_real(struct file *user_file);
+
+/**
+ * file_real - Return the real file hosting the data
+ * @file: the file to query
+ *
+ * If @file is on a stacking filesystem (e.g. overlayfs) whose data is
+ * accessed through a backing file, return that backing file.
+ * Otherwise return @file itself.
+ *
+ * The returned file is owned by @file and is valid for as long as the
+ * caller holds a reference to @file.
+ *
+ * The real file is only meant to be used for inspecting and writing
+ * back the page cache of the data (e.g. sync_file_range(2), cachestat(2)).
+ * It must not be used for operations that require the credentials or the
+ * permission checks of the stacking filesystem; those need a dedicated
+ * file operation (e.g. ->fadvise()).
+ */
+static inline struct file *file_real(struct file *file)
+{
+	if (!IS_ENABLED(CONFIG_FS_STACK) || likely(!file->f_op->f_real))
+		return file;
+
+	return backing_file_real(file);
+}
 
 #endif /* _LINUX_BACKING_FILE_H */

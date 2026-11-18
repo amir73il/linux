@@ -31,6 +31,7 @@
 #include <linux/hash.h>
 #include <linux/writeback.h>
 #include <linux/backing-dev.h>
+#include <linux/backing-file.h>
 #include <linux/folio_batch.h>
 #include <linux/security.h>
 #include <linux/cpuset.h>
@@ -4782,6 +4783,7 @@ SYSCALL_DEFINE4(cachestat, unsigned int, fd,
 		struct cachestat __user *, cstat, unsigned int, flags)
 {
 	CLASS(fd, f)(fd);
+	struct file *real_file;
 	struct address_space *mapping;
 	struct cachestat_range csr;
 	struct cachestat cs;
@@ -4804,11 +4806,16 @@ SYSCALL_DEFINE4(cachestat, unsigned int, fd,
 	if (flags != 0)
 		return -EINVAL;
 
+	/* The page cache of a stacked file is in its real file */
+	real_file = file_real(fd_file(f));
+	if (IS_ERR(real_file))
+		return PTR_ERR(real_file);
+
 	first_index = csr.off >> PAGE_SHIFT;
 	last_index =
 		csr.len == 0 ? ULONG_MAX : (csr.off + csr.len - 1) >> PAGE_SHIFT;
 	memset(&cs, 0, sizeof(struct cachestat));
-	mapping = fd_file(f)->f_mapping;
+	mapping = real_file->f_mapping;
 	filemap_cachestat(mapping, first_index, last_index, &cs);
 
 	if (copy_to_user(cstat, &cs, sizeof(struct cachestat)))

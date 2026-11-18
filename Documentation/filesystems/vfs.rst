@@ -1038,6 +1038,7 @@ This describes how the VFS can manipulate an open file.  As of kernel
 					   struct file *file_out, loff_t pos_out,
 					   loff_t len, unsigned int remap_flags);
 		int (*fadvise)(struct file *, loff_t, loff_t, int);
+		struct file *(*f_real)(const struct file *);
 		int (*uring_cmd)(struct io_uring_cmd *ioucmd, unsigned int issue_flags);
 		int (*uring_cmd_iopoll)(struct io_uring_cmd *, struct io_comp_batch *,
 					unsigned int poll_flags);
@@ -1161,6 +1162,22 @@ otherwise noted.
 
 ``fadvise``
 	possibly called by the fadvise64() system call.
+
+``f_real``
+	stacking filesystems (e.g. overlayfs) whose file data is accessed
+	through a backing file implement this method to return that backing
+	file.  It is called through file_real() by system calls that operate
+	on the page cache of the data, such as sync_file_range(2) and
+	cachestat(2).
+
+	The returned file must be a backing file (FMODE_BACKING) or the file
+	itself.  It is owned by the file and must remain valid for as long
+	as the caller holds a reference to the file.
+
+	The returned file is only used to inspect and write back the page
+	cache of the data.  Operations that need the credentials or the
+	permission checks of the stacking filesystem need a dedicated file
+	operation (e.g. ``fadvise``).
 
 ``mmap_prepare``
 	Called by the mmap(2) system call. Allows a VFS to set up a

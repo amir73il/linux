@@ -102,6 +102,19 @@ struct file *backing_tmpfile_open(const struct file *user_file, int flags,
 }
 EXPORT_SYMBOL(backing_tmpfile_open);
 
+/* Get the innermost backing file of @user_file */
+struct file *backing_file_real(struct file *user_file)
+{
+	struct file *real_file = user_file->f_op->f_real(user_file);
+
+	if (!IS_ERR(real_file) && real_file != user_file &&
+	    WARN_ON_ONCE(!(real_file->f_mode & FMODE_BACKING)))
+		return ERR_PTR(-EIO);
+
+	return real_file;
+}
+EXPORT_SYMBOL_GPL(backing_file_real);
+
 struct backing_aio {
 	struct kiocb iocb;
 	refcount_t ref;

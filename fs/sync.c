@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/backing-file.h>
 #include <linux/slab.h>
 #include <linux/export.h>
 #include <linux/namei.h>
@@ -268,6 +269,13 @@ int sync_file_range(struct file *file, loff_t offset, loff_t nbytes,
 	ret = -ESPIPE;
 	if (!S_ISREG(i_mode) && !S_ISBLK(i_mode) && !S_ISDIR(i_mode))
 		goto out;
+
+	/* The page cache of a stacked file is in its real file */
+	file = file_real(file);
+	if (IS_ERR(file)) {
+		ret = PTR_ERR(file);
+		goto out;
+	}
 
 	mapping = file->f_mapping;
 	ret = 0;

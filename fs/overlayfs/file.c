@@ -195,6 +195,22 @@ static struct file *ovl_real_file(const struct file *file)
 	return ovl_real_file_path(file, &realpath);
 }
 
+/*
+ * The real file that holds the page cache of the data: the upper file after
+ * copy up, otherwise the lower data file.  After copy up of a file that was
+ * opened from lower, this opens the upper file, just like a write would.
+ */
+static struct file *ovl_f_real(const struct file *file)
+{
+	struct file *real_file = ovl_real_file(file);
+
+	if (IS_ERR(real_file))
+		return real_file;
+
+	/* Handle recursion into stacked lower fs */
+	return file_real(real_file);
+}
+
 static int ovl_open(struct inode *inode, struct file *file)
 {
 	struct dentry *dentry = file_dentry(file);
@@ -656,6 +672,7 @@ const struct file_operations ovl_file_operations = {
 	.mmap		= ovl_mmap,
 	.fallocate	= ovl_fallocate,
 	.fadvise	= ovl_fadvise,
+	.f_real		= ovl_f_real,
 	.flush		= ovl_flush,
 	.splice_read    = ovl_splice_read,
 	.splice_write   = ovl_splice_write,
