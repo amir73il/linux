@@ -761,7 +761,8 @@ static int ovl_make_workdir(struct super_block *sb, struct ovl_fs *ofs,
 
 	/* fsync=auto that is not resolved to fsync=relaxed means fsync=on */
 	if (ofs->config.fsync_mode == OVL_FSYNC_AUTO && rename_whiteout &&
-	    mnt->mnt_sb->s_bdi != &noop_backing_dev_info)
+	    mnt->mnt_sb->s_bdi != &noop_backing_dev_info &&
+	    !(mnt->mnt_sb->s_iflags & SB_I_NO_DATA_INTEGRITY))
 		ofs->config.fsync_mode = OVL_FSYNC_RELAXED;
 
 	/*
@@ -1517,6 +1518,16 @@ static int ovl_fill_super_creds(struct fs_context *fc, struct super_block *sb)
 		    ofs->config.fsync_mode != OVL_FSYNC_OFF) {
 			pr_warn("upper fs does not support writeback, falling back to fsync=off.\n");
 			ofs->config.fsync_mode = OVL_FSYNC_OFF;
+		}
+
+		/*
+		 * A sync does not wait for such an upper fs, whose server may
+		 * not answer.  A relaxed overlay waits for each upper inode.
+		 */
+		if ((upper_sb->s_iflags & SB_I_NO_DATA_INTEGRITY) &&
+		    ofs->config.fsync_mode == OVL_FSYNC_RELAXED) {
+			pr_warn("upper fs does not guarantee data integrity, falling back to fsync=on.\n");
+			ofs->config.fsync_mode = OVL_FSYNC_ON;
 		}
 
 		if (!ovl_should_sync(ofs)) {

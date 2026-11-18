@@ -877,6 +877,10 @@ The default is "fsync=on" instead of "fsync=auto" with the module option
 "fsync_auto=N" or with the kernel config option
 CONFIG_OVERLAY_FS_FSYNC_AUTO=n.
 
+An upper filesystem that cannot guarantee data persistence on sync (fuse)
+does not get "fsync=relaxed".  "fsync=auto" means "fsync=on" there, and
+"fsync=relaxed" falls back to it.
+
 If the upper filesystem has no writeback (e.g. tmpfs), a non-default mode
 falls back to "fsync=off".
 
