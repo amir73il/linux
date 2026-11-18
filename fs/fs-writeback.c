@@ -3104,6 +3104,42 @@ int write_inode_now(struct inode *inode, int sync)
 EXPORT_SYMBOL(write_inode_now);
 
 /**
+ * write_inode_for_sync - write an inode like a sync of its filesystem does
+ * @inode: inode to write to disk
+ *
+ * This does for one inode what sync_inodes_sb() has the flusher do for every
+ * dirty inode of a superblock.  It writes all dirty pages, the timestamps that
+ * lazytime has deferred and the inode.  It waits for somebody else who is
+ * writing the inode, but not for the pages it writes, and it does not ask the
+ * filesystem to commit anything.
+ *
+ * This is for a caller that syncs some of the inodes of a filesystem.  It has
+ * to wait for the pages with filemap_fdatawait_keep_errors(), like
+ * wait_sb_inodes() does, and to call sync_fs_and_bdev() in the end.
+ *
+ * The caller must have a ref on the inode.
+ *
+ * Return: 0 on success, a negative error code otherwise.
+ */
+int write_inode_for_sync(struct inode *inode)
+{
+	struct writeback_control wbc = {
+		.nr_to_write = LONG_MAX,
+		.sync_mode = WB_SYNC_ALL,
+		.range_start = 0,
+		.range_end = LLONG_MAX,
+		.for_sync = 1,
+	};
+
+	if (!mapping_can_writeback(inode->i_mapping))
+		wbc.nr_to_write = 0;
+
+	might_sleep();
+	return writeback_single_inode(inode, &wbc);
+}
+EXPORT_SYMBOL_GPL(write_inode_for_sync);
+
+/**
  * sync_inode_metadata - write an inode to disk
  * @inode: the inode to sync
  * @wait: wait for I/O to complete.

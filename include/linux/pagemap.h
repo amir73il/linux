@@ -35,6 +35,7 @@ int filemap_invalidate_pages(struct address_space *mapping,
 			     loff_t pos, loff_t end, bool nowait);
 
 int write_inode_now(struct inode *, int sync);
+int write_inode_for_sync(struct inode *inode);
 int filemap_fdatawrite(struct address_space *);
 int filemap_flush(struct address_space *);
 int filemap_flush_nr(struct address_space *mapping, long *nr_to_write);
