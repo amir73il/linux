@@ -65,6 +65,8 @@ enum ovl_inode_flag {
 	OVL_CONST_INO,
 	OVL_HAS_DIGEST,
 	OVL_VERIFIED_DIGEST,
+	/* Modified since a sync has started to write it, under i_lock */
+	OVL_TRACKED,
 };
 
 enum ovl_entry_flag {
@@ -900,6 +902,17 @@ struct inode *ovl_get_trap_inode(struct super_block *sb, struct dentry *dir);
 struct inode *ovl_get_inode(struct super_block *sb,
 			    struct ovl_inode_params *oip);
 void ovl_copyattr(struct inode *to);
+
+/* sync.c */
+void ovl_track_init(struct ovl_fs *ofs);
+void ovl_track_exit(struct ovl_fs *ofs);
+int ovl_track_alloc(struct super_block *sb, struct inode *inode);
+void ovl_track_inode(struct inode *inode);
+void ovl_untrack_inode(struct inode *inode);
+void ovl_forget_inode(struct inode *inode);
+void ovl_drop_tracked(struct ovl_fs *ofs);
+long ovl_nr_cached_objects(struct super_block *sb, struct shrink_control *sc);
+long ovl_free_cached_objects(struct super_block *sb, struct shrink_control *sc);
 
 /* vfs fileattr flags read from overlay.protattr xattr to ovl inode */
 #define OVL_PROT_I_FLAGS_MASK  (S_APPEND | S_IMMUTABLE)

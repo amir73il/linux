@@ -217,6 +217,10 @@ static struct inode *ovl_alloc_inode(struct super_block *sb)
 	oi->__upperdentry = NULL;
 	oi->lowerdata_redirect = NULL;
 	oi->oe = NULL;
+	if (ovl_track_alloc(sb, &oi->vfs_inode)) {
+		kmem_cache_free(ovl_inode_cachep, oi);
+		return NULL;
+	}
 	mutex_init(&oi->lock);
 
 	return &oi->vfs_inode;
@@ -236,6 +240,7 @@ static void ovl_destroy_inode(struct inode *inode)
 {
 	struct ovl_inode *oi = OVL_I(inode);
 
+	ovl_forget_inode(inode);
 	dput(oi->__upperdentry);
 	ovl_stack_put(ovl_lowerstack(oi->oe), ovl_numlower(oi->oe));
 	if (S_ISDIR(inode->i_mode))
@@ -248,8 +253,10 @@ static void ovl_put_super(struct super_block *sb)
 {
 	struct ovl_fs *ofs = OVL_FS(sb);
 
-	if (ofs)
+	if (ofs) {
+		ovl_drop_tracked(ofs);
 		ovl_free_fs(ofs);
+	}
 }
 
 /* Sync real dirty inodes in upper filesystem (if it exists) */
@@ -323,6 +330,8 @@ static const struct super_operations ovl_super_operations = {
 	.drop_inode	= inode_just_drop,
 	.put_super	= ovl_put_super,
 	.sync_fs	= ovl_sync_fs,
+	.nr_cached_objects = ovl_nr_cached_objects,
+	.free_cached_objects = ovl_free_cached_objects,
 	.statfs		= ovl_statfs,
 	.show_options	= ovl_show_options,
 };

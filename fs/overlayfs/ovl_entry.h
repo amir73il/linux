@@ -94,6 +94,13 @@ struct ovl_fs {
 	/* r/o snapshot of upperdir sb's only taken on volatile mounts */
 	errseq_t errseq;
 	bool casefold;
+	/* The inodes that syncfs() and unmount have to write, see sync.c */
+	struct xarray tracked;
+	atomic_long_t nr_tracked;
+	/* Reclaim has this drop what is clean: how many, and where it goes on */
+	struct work_struct release_work;
+	atomic_long_t release_nr;
+	unsigned long release_id[2];
 };
 
 /* Number of lower layers, not including data-only layers */
@@ -166,6 +173,8 @@ struct ovl_inode {
 	const char *redirect;
 	u64 version;
 	unsigned long flags;
+	/* wb_err of the upper mapping up to where a sync has reported it */
+	errseq_t wb_err;
 	struct inode vfs_inode;
 	struct dentry *__upperdentry;
 	struct ovl_entry *oe;

@@ -862,6 +862,7 @@ int ovl_init_fs_context(struct fs_context *fc)
 	fc->ops			= &ovl_context_ops;
 
 	mutex_init(&ofs->whiteout_lock);
+	ovl_track_init(ofs);
 	return 0;
 
 out_err:
@@ -900,6 +901,7 @@ void ovl_free_fs(struct ovl_fs *ofs)
 	kfree(ofs->config.workdir);
 	if (ofs->creator_cred)
 		put_cred(ofs->creator_cred);
+	ovl_track_exit(ofs);
 	kfree(ofs);
 }
 
