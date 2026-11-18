@@ -183,8 +183,16 @@ static int ovl_dentry_init(struct dentry *dentry)
 #define ovl_dentry_init NULL
 #endif
 
+/* An O_TMPFILE that has not got a name cannot get one without a dentry */
+static void ovl_d_iput(struct dentry *dentry, struct inode *inode)
+{
+	ovl_untrack_inode(inode);
+	iput(inode);
+}
+
 static const struct dentry_operations ovl_dentry_operations = {
 	.d_real = ovl_d_real,
+	.d_iput = ovl_d_iput,
 	.d_revalidate = ovl_dentry_revalidate,
 	.d_weak_revalidate = ovl_dentry_weak_revalidate,
 	.d_init = ovl_dentry_init,
@@ -193,6 +201,7 @@ static const struct dentry_operations ovl_dentry_operations = {
 #if IS_ENABLED(CONFIG_UNICODE)
 static const struct dentry_operations ovl_dentry_ci_operations = {
 	.d_real = ovl_d_real,
+	.d_iput = ovl_d_iput,
 	.d_revalidate = ovl_dentry_revalidate,
 	.d_weak_revalidate = ovl_dentry_weak_revalidate,
 	.d_hash = generic_ci_d_hash,
@@ -1428,6 +1437,8 @@ static struct dentry *ovl_get_root(struct super_block *sb,
 	ovl_dentry_set_flag(OVL_E_CONNECTED, root);
 	ovl_set_upperdata(d_inode(root));
 	ovl_inode_init(d_inode(root), &oip, ino, fsid);
+	/* The mount may have set xattrs on the upper root */
+	ovl_track_inode(d_inode(root));
 	ovl_dentry_init_flags(root, upperdentry, oe, DCACHE_OP_WEAK_REVALIDATE);
 	/* root keeps a reference of upperdentry */
 	dget(upperdentry);

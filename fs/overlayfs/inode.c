@@ -84,11 +84,17 @@ int ovl_setattr(const struct mnt_idmap *idmap, struct dentry *dentry,
 		if (err)
 			goto out_put_write;
 
+		/* Before a truncate dirties a page, for errors of writeback */
+		if (winode)
+			ovl_track_inode(dentry->d_inode);
+
 		inode_lock(upperdentry->d_inode);
 		with_ovl_creds(dentry->d_sb)
 			err = ovl_do_notify_change(ofs, upperdentry, attr);
 		if (!err)
 			ovl_copyattr(dentry->d_inode);
+		else
+			ovl_track_inode(dentry->d_inode);
 		inode_unlock(upperdentry->d_inode);
 		ovl_drop_write(dentry);
 
@@ -582,11 +588,17 @@ int ovl_update_time(struct inode *inode, enum fs_update_time type,
 		};
 
 		if (upperpath.dentry) {
+			struct inode *upper = d_inode(upperpath.dentry);
+			struct timespec64 old = inode_get_atime(upper), new;
+
 			if (flags & IOCB_NOWAIT)
 				return -EAGAIN;
 			touch_atime(&upperpath);
-			inode_set_atime_to_ts(inode,
-					      inode_get_atime(d_inode(upperpath.dentry)));
+			new = inode_get_atime(upper);
+			inode_set_atime_to_ts(inode, new);
+			/* touch_atime() may have had nothing to do */
+			if (!timespec64_equal(&old, &new))
+				ovl_track_inode(inode);
 		}
 	}
 	return 0;
@@ -906,7 +918,8 @@ void ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 	oi->lowerdata_redirect = oip->lowerdata_redirect;
 
 	realinode = ovl_inode_real(inode);
-	ovl_copyattr(inode);
+	/* Nothing was changed, the inode is only being looked up */
+	__ovl_copyattr(inode);
 	ovl_copyflags(realinode, inode);
 	ovl_map_ino(inode, ino, fsid);
 }
@@ -983,7 +996,7 @@ static int ovl_set_nlink_common(struct dentry *dentry,
 	struct inode *inode = d_inode(dentry);
 	struct inode *realinode = d_inode(realdentry);
 	char buf[13];
-	int len;
+	int len, err;
 
 	len = snprintf(buf, sizeof(buf), format,
 		       (int) (inode->i_nlink - realinode->i_nlink));
@@ -991,8 +1004,10 @@ static int ovl_set_nlink_common(struct dentry *dentry,
 	if (WARN_ON(len >= sizeof(buf)))
 		return -EIO;
 
-	return ovl_setxattr(OVL_FS(inode->i_sb), ovl_dentry_upper(dentry),
-			    OVL_XATTR_NLINK, buf, len);
+	err = ovl_setxattr(OVL_FS(inode->i_sb), ovl_dentry_upper(dentry),
+			   OVL_XATTR_NLINK, buf, len);
+	ovl_track_inode(inode);
+	return err;
 }
 
 int ovl_set_nlink_upper(struct dentry *dentry)

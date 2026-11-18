@@ -958,7 +958,8 @@ static int ovl_fix_origin(struct ovl_fs *ofs, struct dentry *dentry,
 	ovl_drop_write(dentry);
 out:
 	kfree(fh);
-	return err;
+	/* Tell the caller that @upper was modified, it has no inode yet */
+	return err ? err : 1;
 }
 
 static int ovl_maybe_validate_verity(struct dentry *dentry)
@@ -1131,6 +1132,7 @@ static int ovl_lookup_layers(struct ovl_lookup_ctx *ctx, struct ovl_lookup_data 
 	struct dentry *origin = NULL;
 	bool upperopaque = false;
 	bool uppermetacopy = false;
+	bool origin_fixed = false;
 	int metacopy_size = 0;
 	unsigned int i;
 	int err;
@@ -1210,10 +1212,11 @@ static int ovl_lookup_layers(struct ovl_lookup_ctx *ctx, struct ovl_lookup_data 
 		 */
 		if (ctx->upperdentry && !ctx->ctr && !ofs->noxattr && d->is_dir) {
 			err = ovl_fix_origin(ofs, dentry, this, ctx->upperdentry);
-			if (err) {
+			if (err < 0) {
 				dput(this);
 				return err;
 			}
+			origin_fixed = err;
 		}
 
 		/*
@@ -1405,6 +1408,8 @@ static int ovl_lookup_layers(struct ovl_lookup_ctx *ctx, struct ovl_lookup_data 
 		d->lowerdata_redirect = NULL;
 
 		ctx->inode = inode;
+		if (origin_fixed)
+			ovl_track_inode(inode);
 		if (ctx->upperdentry && !uppermetacopy)
 			ovl_set_flag(OVL_UPPERDATA, ctx->inode);
 

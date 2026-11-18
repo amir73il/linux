@@ -280,6 +280,9 @@ static int ovl_set_opaque_xerr(struct dentry *dentry, struct dentry *upper,
 	err = ovl_check_setxattr(ofs, upper, OVL_XATTR_OPAQUE, "y", 1, xerr);
 	if (!err)
 		ovl_dentry_set_opaque(dentry);
+	/* A new directory has no inode yet, ovl_instantiate() tracks it */
+	if (d_inode(dentry))
+		ovl_track_inode(d_inode(dentry));
 
 	return err;
 }
@@ -333,6 +336,9 @@ static int ovl_instantiate(struct dentry *dentry, struct inode *inode,
 		dput(newdentry);
 		inc_nlink(inode);
 	}
+
+	/* The upper inode was just created, or has got a new link */
+	ovl_track_inode(inode);
 
 	if (tmpfile)
 		d_mark_tmpfile(tmpfile, inode);
@@ -461,6 +467,8 @@ static struct dentry *ovl_clear_empty(struct dentry *dentry,
 
 	err = ovl_do_rename_rd(&rd);
 	end_renaming(&rd);
+	/* The caller tracks the parent, unless it fails after this */
+	ovl_track_inode(d_inode(dentry->d_parent));
 	if (err)
 		goto out_cleanup_unlocked;
 
@@ -977,6 +985,7 @@ static int ovl_do_remove(struct dentry *dentry, bool is_dir)
 			clear_nlink(dentry->d_inode);
 		else
 			ovl_drop_nlink(dentry);
+		ovl_untrack_inode(dentry->d_inode);
 	}
 	ovl_nlink_end(dentry);
 
@@ -1133,6 +1142,7 @@ static int ovl_set_redirect(struct dentry *dentry, bool samedir)
 	err = ovl_check_setxattr(ofs, ovl_dentry_upper(dentry),
 				 OVL_XATTR_REDIRECT,
 				 redirect, strlen(redirect), -EXDEV);
+	ovl_track_inode(d_inode(dentry));
 	if (!err) {
 		spin_lock(&dentry->d_lock);
 		ovl_dentry_set_redirect(dentry, redirect);
@@ -1345,6 +1355,7 @@ out_unlock:
 			clear_nlink(d_inode(new));
 		else
 			ovl_drop_nlink(new);
+		ovl_untrack_inode(d_inode(new));
 	}
 
 	ovl_dir_modified(old->d_parent, ovl_type_origin(old) ||

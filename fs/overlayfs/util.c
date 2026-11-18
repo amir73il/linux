@@ -930,6 +930,8 @@ int ovl_set_impure(struct dentry *dentry, struct dentry *upperdentry)
 	err = ovl_check_setxattr(ofs, upperdentry, OVL_XATTR_IMPURE, "y", 1, 0);
 	if (!err)
 		ovl_set_flag(OVL_IMPURE, d_inode(dentry));
+	/* Here, because the operation that needs this may still fail */
+	ovl_track_inode(d_inode(dentry));
 
 	return err;
 }
@@ -1503,7 +1505,7 @@ int ovl_sync_status(struct ovl_fs *ofs)
 }
 
 /*
- * ovl_copyattr() - copy inode attributes from layer to ovl inode
+ * __ovl_copyattr() - copy inode attributes from layer to ovl inode
  *
  * When overlay copies inode information from an upper or lower layer to the
  * relevant overlay inode it will apply the idmapping of the upper or lower
@@ -1513,7 +1515,7 @@ int ovl_sync_status(struct ovl_fs *ofs)
  * map any lower or upper inode owned by id 1001 to id 1000. These mapping
  * helpers are nops when the relevant layer isn't idmapped.
  */
-void ovl_copyattr(struct inode *inode)
+void __ovl_copyattr(struct inode *inode)
 {
 	struct path realpath;
 	struct inode *realinode;
@@ -1536,4 +1538,14 @@ void ovl_copyattr(struct inode *inode)
 	inode_set_ctime_to_ts(inode, inode_get_ctime(realinode));
 	i_size_write(inode, i_size_read(realinode));
 	spin_unlock(&inode->i_lock);
+}
+
+/*
+ * The attributes are copied because the real inode was modified through the
+ * overlay, so this is also where the overlay inode is tracked for a sync.
+ */
+void ovl_copyattr(struct inode *inode)
+{
+	__ovl_copyattr(inode);
+	ovl_track_inode(inode);
 }
