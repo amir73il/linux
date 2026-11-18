@@ -837,7 +837,12 @@ Traditionally, syncfs(2) and unmount of an overlay sync the entire upper
 filesystem, including the dirty data of other overlays that share it.
 Overlayfs can be told to only write back the files that were modified
 through the overlay, and then ask the upper filesystem to commit its
-metadata.
+metadata and write its block device.
+
+In that mode syncfs(2) also returns the error of writeback of such a file
+that has failed earlier, like fsync(2) on the file does.  As after fsync(2),
+a file that is opened on the upper filesystem later does not get that error
+any more.  A read-only remount of the overlay fails with such an error once.
 
 On traditional local filesystems with a single journal (e.g. ext4, xfs),
 fsync on a file also persists the parent directory changes, because they

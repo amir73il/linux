@@ -372,3 +372,220 @@ long ovl_free_cached_objects(struct super_block *sb, struct shrink_control *sc)
 
 	return 0;
 }
+
+/*
+ * Keep a freeze and a read-only remount of the upper filesystem out.  Do not
+ * wait for either.
+ */
+static bool ovl_upper_start_write(struct ovl_fs *ofs)
+{
+	struct vfsmount *mnt = ovl_upper_mnt(ofs);
+
+	if (!sb_start_write_trylock(mnt->mnt_sb))
+		return false;
+	if (mnt_get_write_access(mnt)) {
+		sb_end_write(mnt->mnt_sb);
+		return false;
+	}
+	return true;
+}
+
+/*
+ * Like tag_pages_for_writeback(): what is dirty now is what this sync has to
+ * write.
+ */
+static void ovl_tag_for_writeback(struct ovl_fs *ofs)
+{
+	XA_STATE(xas, &ofs->tracked, 0);
+	unsigned int tagged = 0;
+	struct inode *inode;
+
+	xas_lock(&xas);
+	xas_for_each_marked(&xas, inode, ULONG_MAX, OVL_X_DIRTY) {
+		xas_set_mark(&xas, OVL_X_TOWRITE);
+		if (++tagged % XA_CHECK_SCHED)
+			continue;
+
+		xas_pause(&xas);
+		xas_unlock(&xas);
+		cond_resched();
+		xas_lock(&xas);
+	}
+	xas_unlock(&xas);
+}
+
+/*
+ * Start to write the data of the upper inode.  OVL_X_WRITEBACK is set before
+ * OVL_X_DIRTY is cleared, so that a sync always finds one of them, and
+ * OVL_X_DIRTY is cleared before the write, so that a modification that comes
+ * later sets it again.
+ */
+static void ovl_start_inode(struct super_block *sb, struct inode *inode)
+{
+	struct ovl_fs *ofs = OVL_FS(sb);
+	unsigned long id = ovl_slot(inode);
+	bool start;
+	int err;
+
+	spin_lock(&inode->i_lock);
+	/* It may have been unlinked, or another sync was here first */
+	start = xa_get_mark(&ofs->tracked, id, OVL_X_TOWRITE);
+	if (start) {
+		xa_set_mark(&ofs->tracked, id, OVL_X_WRITEBACK);
+		ovl_clear_dirty(ofs, inode);
+	}
+	spin_unlock(&inode->i_lock);
+
+	if (!start)
+		return;
+
+	/* Tags the pages first, so it does not follow an appender */
+	err = filemap_fdatawrite(ovl_inode_upper(inode)->i_mapping);
+	/* If ->sync_fs() returned it the VFS would not call again to wait */
+	if (err)
+		errseq_set(&sb->s_wb_err, err);
+}
+
+/*
+ * Write the upper inode and wait for its data, whoever has started to write it.
+ *
+ * After that OVL_X_WRITEBACK goes if the upper inode is clean.  If it is not,
+ * another sync may have started it again and relies on the mark, or it is open
+ * for writing and the next sync has to write it again.
+ *
+ * Writeback of the upper inode that has failed since @inode has entered the
+ * set, whoever has done it, shows in the wb_err of the mapping.  Nobody takes
+ * that away, unlike the error flags.  It is recorded in the superblock of the
+ * overlay under the lock that protects the cursor.  So another syncfs() that is
+ * here at the same time finds the one or the other.
+ *
+ * btrfs records an error after it has ended writeback.  If that is too late for
+ * the look here, the error is reported once the inode is modified again.
+ */
+static int ovl_wait_inode(struct super_block *sb, struct inode *inode)
+{
+	struct ovl_fs *ofs = OVL_FS(sb);
+	struct inode *upper = ovl_inode_upper(inode);
+	struct address_space *mapping = upper->i_mapping;
+	unsigned long id = ovl_slot(inode);
+	bool drop = false;
+	int err, err2 = 0;
+
+	err = write_inode_for_sync(upper);
+	if (err)
+		errseq_set(&sb->s_wb_err, err);
+	filemap_fdatawait_keep_errors(mapping);
+
+	spin_lock(&inode->i_lock);
+	if (xa_get_mark(&ofs->tracked, id, OVL_X_WRITEBACK)) {
+		err2 = errseq_check_and_advance(&mapping->wb_err,
+						&OVL_I(inode)->wb_err);
+		if (err2)
+			errseq_set(&sb->s_wb_err, err2);
+
+		if (ovl_upper_clean(inode)) {
+			xa_clear_mark(&ofs->tracked, id, OVL_X_WRITEBACK);
+			drop = !ovl_marked(ofs, id);
+			if (drop)
+				atomic_long_dec(&ofs->nr_tracked);
+		} else {
+			ovl_set_dirty(ofs, inode);
+		}
+	}
+	spin_unlock(&inode->i_lock);
+
+	if (drop)
+		iput(inode);
+	return err ? err : err2;
+}
+
+/*
+ * Start every inode that has OVL_X_TOWRITE, or finish every inode that has
+ * OVL_X_WRITEBACK.
+ *
+ * Do not write to an upper filesystem that is frozen or read-only, or on its
+ * way there.  Keep a freeze and a read-only remount out meanwhile, inode by
+ * inode, because writers wait behind a freeze that waits for us.
+ *
+ * Returns false if one of the two has begun.
+ */
+static bool ovl_walk_marked(struct super_block *sb, xa_mark_t mark, int *error)
+{
+	struct ovl_fs *ofs = OVL_FS(sb);
+	struct inode *inode;
+	unsigned long id = 0;
+	int err;
+
+	for (;;) {
+		if (!ovl_upper_start_write(ofs))
+			return false;
+
+		inode = ovl_next_marked(ofs, &id, mark);
+		if (inode && mark == OVL_X_TOWRITE) {
+			ovl_start_inode(sb, inode);
+		} else if (inode) {
+			err = ovl_wait_inode(sb, inode);
+			if (err && !*error)
+				*error = err;
+		}
+		iput(inode);
+		mnt_drop_write(ovl_upper_mnt(ofs));
+
+		if (!inode)
+			return true;
+		id++;
+		cond_resched();
+	}
+}
+
+/*
+ * This tags once, so tasks that modify files do not keep it going.  The marks
+ * are shared with every other sync that is running, and what those tag ahead of
+ * a walk is written and waited for as well.  But a walk only goes up, so it
+ * comes to an end.
+ */
+static bool ovl_sync_inodes(struct super_block *sb, int wait, int *error)
+{
+	if (!wait)
+		ovl_tag_for_writeback(OVL_FS(sb));
+
+	/*
+	 * With @wait this is for what the call before could not start, because
+	 * of a freeze or a remount that has gone away again.
+	 */
+	if (!ovl_walk_marked(sb, OVL_X_TOWRITE, error))
+		return false;
+
+	return !wait || ovl_walk_marked(sb, OVL_X_WRITEBACK, error);
+}
+
+/*
+ * syncfs(), unmount or a read-only remount of an overlay with fsync=relaxed.
+ * sync_filesystem() calls this without @wait first and then with.  The steps
+ * are those that it takes itself for the upper filesystem, except that only the
+ * tracked inodes are written.
+ */
+int ovl_sync_tracked(struct super_block *sb, int wait)
+{
+	struct super_block *upper_sb = ovl_upper_mnt(OVL_FS(sb))->mnt_sb;
+	int ret, err = 0;
+	bool done;
+
+	done = ovl_sync_inodes(sb, wait, &err);
+
+	down_read(&upper_sb->s_umount);
+	/*
+	 * If the upper filesystem is frozen or read-only, or on its way there,
+	 * sync all of it when asked to wait, like without fsync=relaxed.
+	 *
+	 * Otherwise this has to take care of the upper inodes that have no
+	 * overlay inode, like whiteouts and the work directories.
+	 */
+	if (wait && !done)
+		ret = sync_filesystem(upper_sb);
+	else
+		ret = sync_fs_and_bdev(upper_sb, wait);
+	up_read(&upper_sb->s_umount);
+
+	return err ? err : ret;
+}

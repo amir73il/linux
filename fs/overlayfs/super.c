@@ -283,6 +283,9 @@ static int ovl_sync_fs(struct super_block *sb, int wait)
 	if (!ret)
 		return ret;
 
+	if (!ovl_should_sync_upper_fs(ofs))
+		return ovl_sync_tracked(sb, wait);
+
 	/*
 	 * Not called for sync(2) call or an emergency sync (SB_I_SKIP_SYNC).
 	 * All the super blocks will be iterated, including upper_sb.

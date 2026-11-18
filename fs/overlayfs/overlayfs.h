@@ -914,6 +914,7 @@ void ovl_forget_inode(struct inode *inode);
 void ovl_drop_tracked(struct ovl_fs *ofs);
 long ovl_nr_cached_objects(struct super_block *sb, struct shrink_control *sc);
 long ovl_free_cached_objects(struct super_block *sb, struct shrink_control *sc);
+int ovl_sync_tracked(struct super_block *sb, int wait);
 
 /* vfs fileattr flags read from overlay.protattr xattr to ovl inode */
 #define OVL_PROT_I_FLAGS_MASK  (S_APPEND | S_IMMUTABLE)
