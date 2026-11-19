@@ -238,8 +238,22 @@ static struct inode *fsnotify_update_iref(struct fsnotify_mark_connector *conn,
 	return inode;
 }
 
+static bool fsnotify_conn_watches_children(
+					struct fsnotify_mark_connector *conn)
+{
+	if (conn->type != FSNOTIFY_OBJ_TYPE_INODE)
+		return false;
+
+	return fsnotify_inode_watches_children(fsnotify_conn_inode(conn));
+}
+
 /*
  * Calculate mask of events for a list of marks.
+ *
+ * If the connector started watching children, flag it so that the next call
+ * to fsnotify_conn_set_children_dentry_flags() updates the children dentry
+ * flags.  The caller that observes the transition may not be allowed to walk
+ * the children, so the update may be done by another caller.
  *
  * Return true if any of the attached marks want to hold an inode reference.
  */
@@ -247,12 +261,14 @@ static bool __fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 {
 	u32 new_mask = 0;
 	bool want_iref = false;
+	bool watched_children;
 	struct fsnotify_mark *mark;
 
 	assert_spin_locked(&conn->lock);
 	/* We can get detached connector here when inode is getting unlinked. */
 	if (!fsnotify_valid_obj_type(conn->type))
 		return NULL;
+	watched_children = fsnotify_conn_watches_children(conn);
 	hlist_for_each_entry(mark, &conn->list, obj_list) {
 		if (!(mark->flags & FSNOTIFY_MARK_FLAG_ATTACHED))
 			continue;
@@ -266,6 +282,13 @@ static bool __fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 	 * confusing readers not holding conn->lock with partial updates.
 	 */
 	WRITE_ONCE(*fsnotify_conn_mask_p(conn), new_mask);
+
+	if (fsnotify_conn_watches_children(conn) != watched_children) {
+		if (watched_children)
+			conn->flags &= ~FSNOTIFY_CONN_FLAG_UPDATE_CHILDREN;
+		else
+			conn->flags |= FSNOTIFY_CONN_FLAG_UPDATE_CHILDREN;
+	}
 
 	return want_iref;
 }
@@ -298,22 +321,30 @@ static void *fsnotify_recalc_mask_clear_iref(struct fsnotify_mark_connector *con
 	return fsnotify_update_iref(conn, want_iref);
 }
 
-static bool fsnotify_conn_watches_children(
+/*
+ * Update children dentry PARENT_WATCHED flags if the connector started
+ * watching children since the last update.  When parent stops watching, we
+ * clear false positive PARENT_WATCHED flags lazily in __fsnotify_parent().
+ *
+ * The caller must make sure connector and connector->obj cannot disappear
+ * under us.  This is achieved by holding mark->group->mark_mutex for a
+ * mark on this list.  mark->lock must not be held by the caller.
+ */
+void fsnotify_conn_set_children_dentry_flags(
 					struct fsnotify_mark_connector *conn)
 {
-	if (conn->type != FSNOTIFY_OBJ_TYPE_INODE)
-		return false;
+	bool update_children;
 
-	return fsnotify_inode_watches_children(fsnotify_conn_inode(conn));
-}
-
-static void fsnotify_conn_set_children_dentry_flags(
-					struct fsnotify_mark_connector *conn)
-{
-	if (conn->type != FSNOTIFY_OBJ_TYPE_INODE)
+	if (!conn || conn->type != FSNOTIFY_OBJ_TYPE_INODE)
 		return;
 
-	fsnotify_set_children_dentry_flags(fsnotify_conn_inode(conn));
+	spin_lock(&conn->lock);
+	update_children = conn->flags & FSNOTIFY_CONN_FLAG_UPDATE_CHILDREN;
+	conn->flags &= ~FSNOTIFY_CONN_FLAG_UPDATE_CHILDREN;
+	spin_unlock(&conn->lock);
+
+	if (update_children)
+		fsnotify_set_children_dentry_flags(fsnotify_conn_inode(conn));
 }
 
 /*
@@ -321,26 +352,33 @@ static void fsnotify_conn_set_children_dentry_flags(
  * connector and connector->obj cannot disappear under us.  Callers achieve
  * this by holding a mark->lock or mark->group->mark_mutex for a mark on this
  * list.
+ *
+ * Callers that may sleep should use fsnotify_recalc_mask_and_update_children()
+ * or call fsnotify_conn_set_children_dentry_flags() after dropping mark->lock.
  */
 void fsnotify_recalc_mask(struct fsnotify_mark_connector *conn)
 {
-	bool update_children;
-
 	if (!conn)
 		return;
 
 	spin_lock(&conn->lock);
-	update_children = !fsnotify_conn_watches_children(conn);
 	fsnotify_recalc_mask_set_iref(conn);
-	update_children &= fsnotify_conn_watches_children(conn);
 	spin_unlock(&conn->lock);
-	/*
-	 * Set children's PARENT_WATCHED flags only if parent started watching.
-	 * When parent stops watching, we clear false positive PARENT_WATCHED
-	 * flags lazily in __fsnotify_parent().
-	 */
-	if (update_children)
-		fsnotify_conn_set_children_dentry_flags(conn);
+}
+
+/*
+ * Recalculate mask and update children dentry PARENT_WATCHED flags if the
+ * connector started watching children.
+ *
+ * The caller must make sure connector and connector->obj cannot disappear
+ * under us.  This is achieved by holding mark->group->mark_mutex for a
+ * mark on this list.  mark->lock must not be held by the caller.
+ */
+void fsnotify_recalc_mask_and_update_children(
+					struct fsnotify_mark_connector *conn)
+{
+	fsnotify_recalc_mask(conn);
+	fsnotify_conn_set_children_dentry_flags(conn);
 }
 
 /**
@@ -368,7 +406,7 @@ void fsnotify_modify_mark_mask(struct fsnotify_mark *mark, u32 set, u32 clear)
 	spin_unlock(&mark->lock);
 
 	if (recalc)
-		fsnotify_recalc_mask(mark->connector);
+		fsnotify_recalc_mask_and_update_children(mark->connector);
 }
 EXPORT_SYMBOL_GPL(fsnotify_modify_mark_mask);
 
@@ -1007,7 +1045,7 @@ int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 	if (ret)
 		goto err;
 
-	fsnotify_recalc_mask(mark->connector);
+	fsnotify_recalc_mask_and_update_children(mark->connector);
 
 	return ret;
 err:

@@ -562,7 +562,7 @@ static int inotify_update_existing_watch(struct fsnotify_group *group,
 	fsn_mark->flags |= inotify_arg_to_flags(arg);
 	spin_unlock(&fsn_mark->lock);
 
-	fsnotify_recalc_mask(fsn_mark->connector);
+	fsnotify_recalc_mask_and_update_children(fsn_mark->connector);
 
 	/* return the wd */
 	ret = i_mark->wd;

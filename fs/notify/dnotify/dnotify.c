@@ -181,6 +181,11 @@ void dnotify_flush(struct file *filp, fl_owner_t id)
 	}
 
 	spin_unlock(&fsn_mark->lock);
+	/*
+	 * We only remove mask bits here, but our recalc may be the first to
+	 * observe another group starting to watch children.
+	 */
+	fsnotify_conn_set_children_dentry_flags(fsn_mark->connector);
 
 	/* nothing else could have found us thanks to the dnotify_groups
 	   mark_mutex */
@@ -380,6 +385,7 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned int arg)
 	dnotify_recalc_inode_mask(fsn_mark);
 out:
 	spin_unlock(&fsn_mark->lock);
+	fsnotify_conn_set_children_dentry_flags(fsn_mark->connector);
 
 	if (destroy)
 		fsnotify_detach_mark(fsn_mark);
