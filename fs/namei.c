@@ -1787,6 +1787,21 @@ static void lookup_drop_negative(struct dentry *dentry)
 }
 
 /*
+ * Call the pre-content lookup hook before a create/remove/rename of @last in
+ * @parent, from a context that does not hold the parent lock nor freeze
+ * protection, so the HSM can populate @last (or the whole directory) first.
+ */
+static int lookup_last_notify(struct path *parent, const struct qstr *last)
+{
+	int error = fsnotify_lookup_perm(parent->dentry, last, parent);
+
+	if (unlikely(error < 0 && error != -EOPNOTSUPP))
+		return error;
+
+	return 0;
+}
+
+/*
  * This looks up the name in dcache and possibly revalidates the found dentry.
  * NULL is returned if the dentry does not exist in the cache.
  */
@@ -5140,6 +5155,13 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 	if (unlikely(type != LAST_NORM))
 		goto out;
 
+	/* Let HSM populate the parent before taking freeze protection */
+	error = lookup_last_notify(path, &last);
+	if (unlikely(error)) {
+		dentry = ERR_PTR(error);
+		goto out;
+	}
+
 	/* don't fail immediately if it's r/o, at least try to report other errors */
 	error = mnt_want_write(path->mnt);
 	/*
@@ -5619,6 +5641,10 @@ retry:
 		goto exit2;
 	}
 
+	error = lookup_last_notify(&path, &last);
+	if (error)
+		goto exit2;
+
 	error = mnt_want_write(path.mnt);
 	if (error)
 		goto exit2;
@@ -5752,6 +5778,10 @@ retry:
 
 	error = -EISDIR;
 	if (type != LAST_NORM)
+		goto exit_path_put;
+
+	error = lookup_last_notify(&path, &last);
+	if (error)
 		goto exit_path_put;
 
 	error = mnt_want_write(path.mnt);
@@ -6346,6 +6376,13 @@ retry:
 	if (flags & RENAME_NOREPLACE)
 		error = -EEXIST;
 	if (new_type != LAST_NORM)
+		goto exit2;
+
+	error = lookup_last_notify(&old_path, &old_last);
+	if (error)
+		goto exit2;
+	error = lookup_last_notify(&new_path, &new_last);
+	if (error)
 		goto exit2;
 
 	error = mnt_want_write(old_path.mnt);
