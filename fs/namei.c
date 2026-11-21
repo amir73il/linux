@@ -1982,6 +1982,36 @@ static struct dentry *lookup_slow_killable(const struct qstr *name,
 }
 
 /*
+ * Call the pre-content lookup hook for @last in @parent, from a context that
+ * does not hold the parent lock nor freeze protection, so the HSM can populate
+ * @last (or the whole directory) first.
+ *
+ * Returns < 0 if the lookup was denied, 0 if the lookup was allowed and > 0 if
+ * there are no pre-content watchers on @parent's sb, so the hook can be skipped
+ * until the path walk crosses into another sb.
+ */
+static int __lookup_notify(struct path *parent, const struct qstr *last)
+{
+	int ret = fsnotify_lookup_perm(parent->dentry, last, parent);
+
+	if (likely(ret == -EOPNOTSUPP))
+		return 1;
+
+	/* Allowed, whether or not the event was handled by userspace */
+	return ret < 0 ? ret : 0;
+}
+
+/* Call the pre-content lookup hook before a create/remove/rename of @last */
+static int lookup_last_notify(struct path *parent, const struct qstr *last)
+{
+	int ret = __lookup_notify(parent, last);
+
+	if (unlikely(ret < 0))
+		return ret;
+	return 0;
+}
+
+/*
  * Call the pre-content lookup hook for @nd->last before a lookup that misses
  * the dcache, from a context that does not hold the parent lock nor freeze
  * protection, so the HSM can populate the name (or the whole directory) first.
@@ -1993,14 +2023,14 @@ static int nd_lookup_notify(struct nameidata *nd)
 	if (nd->state & ND_NONOTIFY)
 		return 0;
 
-	ret = fsnotify_lookup_perm(nd->path.dentry, &nd->last, &nd->path);
+	ret = __lookup_notify(&nd->path, &nd->last);
 	/* Avoid hooks on same sb again until nd_set_jumped() */
-	if (likely(ret == -EOPNOTSUPP))
+	if (likely(ret > 0)) {
 		nd->state |= ND_NONOTIFY;
-	else if (unlikely(ret < 0))
-		return ret;
+		return 0;
+	}
 
-	return 0;
+	return ret;
 }
 
 static struct dentry *lookup_slow_notify(struct nameidata *nd)
@@ -4803,6 +4833,7 @@ static const char *open_last_lookups(struct nameidata *nd,
 	int open_flag = op->open_flag;
 	struct dentry *dentry;
 	const char *res;
+	int error;
 
 	nd->flags |= op->intent;
 
@@ -4829,6 +4860,14 @@ static const char *open_last_lookups(struct nameidata *nd,
 				return ERR_PTR(-ECHILD);
 		}
 	}
+
+	/*
+	 * lookup_open() takes freeze protection and the parent lock, so call
+	 * the pre-content lookup hook before it, like lookup_slow_notify().
+	 */
+	error = nd_lookup_notify(nd);
+	if (unlikely(error))
+		return ERR_PTR(error);
 
 	dentry = lookup_open(nd, file, op);
 	if (IS_ERR(dentry))
@@ -5155,6 +5194,13 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 	 */
 	if (unlikely(type != LAST_NORM))
 		goto out;
+
+	/* Let HSM populate the parent before taking freeze protection */
+	error = lookup_last_notify(path, &last);
+	if (unlikely(error)) {
+		dentry = ERR_PTR(error);
+		goto out;
+	}
 
 	/* don't fail immediately if it's r/o, at least try to report other errors */
 	error = mnt_want_write(path->mnt);
@@ -5635,6 +5681,10 @@ retry:
 		goto exit2;
 	}
 
+	error = lookup_last_notify(&path, &last);
+	if (error)
+		goto exit2;
+
 	error = mnt_want_write(path.mnt);
 	if (error)
 		goto exit2;
@@ -5768,6 +5818,10 @@ retry:
 
 	error = -EISDIR;
 	if (type != LAST_NORM)
+		goto exit_path_put;
+
+	error = lookup_last_notify(&path, &last);
+	if (error)
 		goto exit_path_put;
 
 	error = mnt_want_write(path.mnt);
@@ -6362,6 +6416,13 @@ retry:
 	if (flags & RENAME_NOREPLACE)
 		error = -EEXIST;
 	if (new_type != LAST_NORM)
+		goto exit2;
+
+	error = lookup_last_notify(&old_path, &old_last);
+	if (error)
+		goto exit2;
+	error = lookup_last_notify(&new_path, &new_last);
+	if (error)
 		goto exit2;
 
 	error = mnt_want_write(old_path.mnt);
